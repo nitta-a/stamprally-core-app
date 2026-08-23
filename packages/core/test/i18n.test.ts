@@ -7,6 +7,7 @@ import {
   type RallyConfig,
   resolveLocalizedText,
   StampRallyClient,
+  THEME_PRESETS,
   toLocalizedString,
 } from "../src/index.js";
 
@@ -42,6 +43,92 @@ describe("sheet theme", () => {
       gridColumns: 3,
       unclaimedOpacity: 1,
     });
+  });
+
+  it("exports five uniquely identified localized theme presets", () => {
+    expect(THEME_PRESETS).toHaveLength(5);
+    expect(new Set(THEME_PRESETS.map((preset) => preset.id)).size).toBe(5);
+    expect(THEME_PRESETS.map((preset) => preset.id)).toEqual([
+      "default",
+      "modern_dark",
+      "pop_candy",
+      "retro_craft",
+      "cyber",
+    ]);
+    expect(
+      THEME_PRESETS.map(({ id, theme }) => ({
+        id,
+        primaryColor: theme.primaryColor,
+        backgroundColor: theme.backgroundColor,
+        cardBackgroundColor: theme.cardBackgroundColor,
+        textColor: theme.textColor,
+        slotShape: theme.slotShape,
+        gridColumns: theme.gridColumns,
+        unclaimedOpacity: theme.unclaimedOpacity,
+        completedStampColor: theme.completedStampColor,
+      })),
+    ).toEqual([
+      {
+        id: "default",
+        primaryColor: "#2563eb",
+        backgroundColor: "#eff6ff",
+        cardBackgroundColor: "#ffffff",
+        textColor: "#1e293b",
+        slotShape: "circle",
+        gridColumns: 3,
+        unclaimedOpacity: 1,
+        completedStampColor: "#dc2626",
+      },
+      {
+        id: "modern_dark",
+        primaryColor: "#10b981",
+        backgroundColor: "#0f172a",
+        cardBackgroundColor: "#1e293b",
+        textColor: "#f8fafc",
+        slotShape: "rounded",
+        gridColumns: 3,
+        unclaimedOpacity: 1,
+        completedStampColor: "#34d399",
+      },
+      {
+        id: "pop_candy",
+        primaryColor: "#ec4899",
+        backgroundColor: "#fdf2f8",
+        cardBackgroundColor: "#ffffff",
+        textColor: "#831843",
+        slotShape: "circle",
+        gridColumns: 2,
+        unclaimedOpacity: 1,
+        completedStampColor: "#f43f5e",
+      },
+      {
+        id: "retro_craft",
+        primaryColor: "#9a3412",
+        backgroundColor: "#fef3c7",
+        cardBackgroundColor: "#fffbeb",
+        textColor: "#78350f",
+        slotShape: "square",
+        gridColumns: 3,
+        unclaimedOpacity: 1,
+        completedStampColor: "#b91c1c",
+      },
+      {
+        id: "cyber",
+        primaryColor: "#06b6d4",
+        backgroundColor: "#09090b",
+        cardBackgroundColor: "#18181b",
+        textColor: "#fafafa",
+        slotShape: "square",
+        gridColumns: 4,
+        unclaimedOpacity: 1,
+        completedStampColor: "#a855f7",
+      },
+    ]);
+    expect(THEME_PRESETS[0]?.name).toEqual({ ja: "クラシックブルー", en: "Classic Blue" });
+    expect(THEME_PRESETS.every((preset) => preset.name.ja && preset.name.en)).toBe(true);
+    expect(THEME_PRESETS.every((preset) => preset.description.ja && preset.description.en)).toBe(
+      true,
+    );
   });
 
   it("accepts a theme without changing engine behavior", async () => {

@@ -23,5 +23,8 @@ export type {
   StampRallyState,
   StampRecord,
   SupportedLocale,
+  ThemePreset,
+  ThemePresetId,
 } from "./models.js";
 export { DEFAULT_SHEET_THEME } from "./models.js";
+export { THEME_PRESETS } from "./themePresets.js";

@@ -18,6 +18,15 @@ export interface SheetTheme {
   readonly completedStampColor?: string;
 }
 
+export type ThemePresetId = "default" | "modern_dark" | "pop_candy" | "retro_craft" | "cyber";
+
+export interface ThemePreset {
+  readonly id: ThemePresetId;
+  readonly name: LocalizedString;
+  readonly description: LocalizedString;
+  readonly theme: SheetTheme;
+}
+
 export const DEFAULT_SHEET_THEME: SheetTheme = {
   primaryColor: "#9e551e",
   backgroundColor: "#fbf4df",

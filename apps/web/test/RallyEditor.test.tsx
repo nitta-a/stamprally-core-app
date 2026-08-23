@@ -157,6 +157,32 @@ describe("RallyEditor", () => {
     });
   });
 
+  it("applies a theme preset to the live preview and published concrete theme", async () => {
+    render(<RallyEditor locale="ja" onLocaleChange={() => undefined} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "プリセット「サイバーネオン」を適用" }));
+    const preview = required(
+      document.querySelector<HTMLElement>(".admin-preview .stamp-sheet"),
+      "preset preview",
+    );
+    expect(preview.style.getPropertyValue("--stamp-primary")).toBe("#06b6d4");
+    expect(preview.style.getPropertyValue("--stamp-grid-cols")).toBe("4");
+    expect(preview.style.getPropertyValue("--stamp-completed-color")).toBe("#a855f7");
+
+    fireEvent.click(screen.getByRole("button", { name: "デモへ反映" }));
+    await waitFor(() => expect(window.localStorage.getItem(PUBLISHED_CONFIG_KEY)).not.toBeNull());
+    const published = JSON.parse(window.localStorage.getItem(PUBLISHED_CONFIG_KEY) ?? "null") as {
+      theme?: { primaryColor: string; gridColumns: number; completedStampColor: string };
+      themePresetId?: string;
+    };
+    expect(published.theme).toMatchObject({
+      primaryColor: "#06b6d4",
+      gridColumns: 4,
+      completedStampColor: "#a855f7",
+    });
+    expect(published.themePresetId).toBeUndefined();
+  });
+
   it("validates theme ranges, colors, shapes, and image URL schemes", () => {
     const base = {
       id: "theme-validation",
