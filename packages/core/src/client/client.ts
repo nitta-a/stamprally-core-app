@@ -18,7 +18,7 @@ export class StampRallyClient {
   readonly #config: RallyConfig;
   readonly #storage: StampStorage;
   readonly #clock: Clock;
-  #state: StampRallyState | null = null;
+  #currentState: StampRallyState | null = null;
   #initialization: Promise<StampRallyState> | null = null;
   #operationQueue: Promise<unknown> = Promise.resolve();
 
@@ -29,7 +29,7 @@ export class StampRallyClient {
   }
 
   getState(): StampRallyState | null {
-    return this.#state;
+    return this.#currentState;
   }
 
   subscribe(listener: StampRallyListener): () => void {
@@ -40,8 +40,8 @@ export class StampRallyClient {
   }
 
   initialize(): Promise<StampRallyState> {
-    if (this.#state !== null) {
-      return Promise.resolve(this.#state);
+    if (this.#currentState !== null) {
+      return Promise.resolve(this.#currentState);
     }
 
     if (this.#initialization === null) {
@@ -50,7 +50,7 @@ export class StampRallyClient {
         .then((storedState) => {
           const state =
             storedState === null ? this.#createEmptyState(this.#clock()) : cloneState(storedState);
-          this.#state = state;
+          this.#currentState = state;
           this.#emit(state);
           return state;
         })
@@ -77,7 +77,7 @@ export class StampRallyClient {
       }
 
       await this.#storage.save(result.value.nextState);
-      this.#state = result.value.nextState;
+      this.#currentState = result.value.nextState;
       this.#emit(result.value.nextState);
       return result;
     });
@@ -91,7 +91,7 @@ export class StampRallyClient {
       }
       await this.#storage.remove(this.#config.id);
       const nextState = this.#createEmptyState(now);
-      this.#state = nextState;
+      this.#currentState = nextState;
       this.#initialization = Promise.resolve(nextState);
       this.#emit(nextState);
       return nextState;

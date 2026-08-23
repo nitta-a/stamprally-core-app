@@ -1,8 +1,10 @@
 import {
   type ConditionMismatch,
+  calculateProgress,
   LocalStorageAdapter,
   type RallyConfig,
   type StampError,
+  StampRallyClient,
   StorageAdapterError,
   type VerificationContext,
 } from "@stamprally/core";
@@ -109,7 +111,13 @@ export function App() {
     }),
     [mode],
   );
-  const { state, progress, isLoading, error, acquire, reset } = useStampRally(config, storage);
+  const client = useMemo(() => new StampRallyClient(config, storage), [config]);
+  const { state, isLoading, isPending, error, acquire, reset } = useStampRally(client);
+  const progress = calculateProgress(
+    state ?? { rallyId: config.id, records: [], updatedAt: "" },
+    config,
+  );
+  const isBusy = isLoading || isPending;
 
   useEffect(() => {
     if (error !== null) {
@@ -207,7 +215,7 @@ export function App() {
   }
 
   return (
-    <main className="page-shell">
+    <main className="page-shell" aria-busy={isBusy}>
       <section className="demo-panel">
         <header className="hero">
           <div>
@@ -217,7 +225,12 @@ export function App() {
               Instant、QRトークン、GPSを一画面で試し、順序制御と永続化を検証できます。
             </p>
           </div>
-          <button className="secondary-button danger-button" type="button" onClick={clearState}>
+          <button
+            className="secondary-button danger-button"
+            type="button"
+            onClick={clearState}
+            disabled={isBusy}
+          >
             Clear State
           </button>
         </header>
@@ -233,6 +246,7 @@ export function App() {
                   value="sequential"
                   checked={mode === "sequential"}
                   onChange={() => setMode("sequential")}
+                  disabled={isBusy}
                 />
                 <span>Sequential</span>
               </label>
@@ -243,6 +257,7 @@ export function App() {
                   value="free"
                   checked={mode === "free"}
                   onChange={() => setMode("free")}
+                  disabled={isBusy}
                 />
                 <span>Free</span>
               </label>
@@ -276,6 +291,12 @@ export function App() {
           {progress.isCompleted && <p className="complete-message">Rally completed!</p>}
         </section>
 
+        {isPending && (
+          <p className="action-status" role="status">
+            押印処理を反映しています…
+          </p>
+        )}
+
         {isLoading ? (
           <p className="loading-message" role="status">
             保存済みの進捗を読み込んでいます…
@@ -294,8 +315,16 @@ export function App() {
                 </span>
               </div>
               <p className="spot-copy">外部入力を必要としない即時条件を検証します。</p>
-              <button type="button" onClick={() => void tryAcquire("spot-a", { type: "instant" })}>
-                {recordsById.has("spot-a") ? "再取得を試す" : "Spot Aを取得"}
+              <button
+                type="button"
+                onClick={() => void tryAcquire("spot-a", { type: "instant" })}
+                disabled={isBusy}
+              >
+                {isPending
+                  ? "処理中…"
+                  : recordsById.has("spot-a")
+                    ? "再取得を試す"
+                    : "Spot Aを取得"}
               </button>
               <StampTimestamp acquiredAt={recordsById.get("spot-a")?.acquiredAt} />
             </article>
@@ -321,10 +350,13 @@ export function App() {
                   autoComplete="off"
                 />
                 <div className="button-row">
-                  <button type="submit">入力値で取得</button>
+                  <button type="submit" disabled={isBusy}>
+                    {isPending ? "処理中…" : "入力値で取得"}
+                  </button>
                   <button
                     className="secondary-button"
                     type="button"
+                    disabled={isBusy}
                     onClick={() => {
                       setToken(DEMO_TOKEN);
                       void tryAcquire("spot-b", { type: "token", token: DEMO_TOKEN });
@@ -371,12 +403,18 @@ export function App() {
                 </label>
               </div>
               <div className="preset-row">
-                <button className="secondary-button" type="button" onClick={requestCurrentLocation}>
+                <button
+                  className="secondary-button"
+                  type="button"
+                  onClick={requestCurrentLocation}
+                  disabled={isBusy || isLocating}
+                >
                   {isLocating ? "GPS取得中…" : "現在地を使用"}
                 </button>
                 <button
                   className="secondary-button"
                   type="button"
+                  disabled={isBusy}
                   onClick={() => applyPreset(NEARBY_PRESET)}
                 >
                   成功プリセット
@@ -384,13 +422,22 @@ export function App() {
                 <button
                   className="secondary-button"
                   type="button"
+                  disabled={isBusy}
                   onClick={() => applyPreset(OUTSIDE_PRESET)}
                 >
                   圏外プリセット
                 </button>
               </div>
-              <button type="button" onClick={() => void acquireGeoStamp()}>
-                {recordsById.has("spot-c") ? "再取得を試す" : "現在の座標で取得"}
+              <button
+                type="button"
+                onClick={() => void acquireGeoStamp()}
+                disabled={isBusy || isLocating}
+              >
+                {isPending
+                  ? "処理中…"
+                  : recordsById.has("spot-c")
+                    ? "再取得を試す"
+                    : "現在の座標で取得"}
               </button>
               <StampTimestamp acquiredAt={recordsById.get("spot-c")?.acquiredAt} />
             </article>

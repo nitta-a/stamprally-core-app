@@ -415,6 +415,31 @@ describe("storage adapters", () => {
 });
 
 describe("StampRallyClient", () => {
+  it("keeps a stable synchronous snapshot and preserves it after failures", async () => {
+    class FailingSaveStorage extends InMemoryStorage {
+      override async save(): Promise<void> {
+        throw new Error("save failed");
+      }
+    }
+
+    const storage = new FailingSaveStorage();
+    const client = new StampRallyClient(sequentialConfig, storage, () => NOW);
+    expect(client.getState()).toBeNull();
+
+    const initialized = await client.initialize();
+    expect(client.getState()).toBe(initialized);
+    expect(client.getState()).toBe(initialized);
+
+    const mismatch = await client.acquire("first", { type: "token", token: "wrong" }, NOW);
+    expect(mismatch.ok).toBe(false);
+    expect(client.getState()).toBe(initialized);
+
+    await expect(client.acquire("first", { type: "token", token: "A" }, NOW)).rejects.toThrow(
+      "save failed",
+    );
+    expect(client.getState()).toBe(initialized);
+  });
+
   it("restores state, emits changes, and stops after unsubscribe", async () => {
     const storage = new InMemoryStorage();
     await storage.save(createState([{ stampId: "first", acquiredAt: NOW }]));

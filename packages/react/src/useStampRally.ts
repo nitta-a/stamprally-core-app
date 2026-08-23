@@ -1,21 +1,39 @@
-import {
-  calculateProgress,
-  type ProcessStampValue,
-  type RallyConfig,
-  type Result,
-  type StampError,
+import type {
+  ProcessStampValue,
+  Result,
+  StampError,
   StampRallyClient,
-  type StampRallyProgress,
-  type StampRallyState,
-  type StampStorage,
-  type VerificationContext,
+  StampRallyState,
+  VerificationContext,
 } from "@stamprally/core";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useOptimistic,
+  useState,
+  useSyncExternalStore,
+  useTransition,
+} from "react";
 
-export interface UseStampRallyValue {
+interface OptimisticAcquire {
+  readonly stampId: string;
+  readonly acquiredAt: string;
+}
+
+interface ClientStatus {
+  readonly client: StampRallyClient;
+  readonly isInitializing: boolean;
+}
+
+interface ClientError {
+  readonly client: StampRallyClient;
+  readonly value: StampError | Error;
+}
+
+export interface UseStampRallyReturn {
   readonly state: StampRallyState | null;
-  readonly progress: StampRallyProgress;
   readonly isLoading: boolean;
+  readonly isPending: boolean;
   readonly error: StampError | Error | null;
   readonly acquire: (
     stampId: string,
@@ -25,91 +43,130 @@ export interface UseStampRallyValue {
   readonly reset: (now?: string) => Promise<StampRallyState>;
 }
 
+/** @deprecated Use UseStampRallyReturn instead. */
+export type UseStampRallyValue = UseStampRallyReturn;
+
+function getServerSnapshot(): null {
+  return null;
+}
+
 function toError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
 }
 
-export function useStampRally(config: RallyConfig, storage: StampStorage): UseStampRallyValue {
-  const client = useMemo(() => new StampRallyClient(config, storage), [config, storage]);
-  const [state, setState] = useState<StampRallyState | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<StampError | Error | null>(null);
+function applyOptimisticAcquire(
+  currentState: StampRallyState | null,
+  action: OptimisticAcquire,
+): StampRallyState | null {
+  if (
+    currentState === null ||
+    currentState.records.some((record) => record.stampId === action.stampId)
+  ) {
+    return currentState;
+  }
+
+  return {
+    ...currentState,
+    records: [...currentState.records, { stampId: action.stampId, acquiredAt: action.acquiredAt }],
+    updatedAt: action.acquiredAt,
+  };
+}
+
+export function useStampRally(client: StampRallyClient): UseStampRallyReturn {
+  const subscribe = useCallback(
+    (onStoreChange: () => void) => client.subscribe(() => onStoreChange()),
+    [client],
+  );
+  const getSnapshot = useCallback(() => client.getState(), [client]);
+  const rawState = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+  const [clientStatus, setClientStatus] = useState<ClientStatus>(() => ({
+    client,
+    isInitializing: client.getState() === null,
+  }));
+  const [clientError, setClientError] = useState<ClientError | null>(null);
+  const [isPending, startTransition] = useTransition();
+  const [optimisticState, addOptimisticAcquire] = useOptimistic(rawState, applyOptimisticAcquire);
 
   useEffect(() => {
     let active = true;
-    setState(null);
-    setError(null);
-    setIsLoading(true);
-
-    const unsubscribe = client.subscribe((nextState) => {
-      if (active) setState(nextState);
-    });
+    setClientError(null);
+    setClientStatus({ client, isInitializing: client.getState() === null });
 
     void client
       .initialize()
-      .then((nextState) => {
-        if (active) setState(nextState);
-      })
-      .catch((loadError: unknown) => {
-        if (active) setError(toError(loadError));
+      .catch((initializationError: unknown) => {
+        if (active) {
+          setClientError({ client, value: toError(initializationError) });
+        }
       })
       .finally(() => {
-        if (active) setIsLoading(false);
+        if (active) {
+          setClientStatus({ client, isInitializing: false });
+        }
       });
 
     return () => {
       active = false;
-      unsubscribe();
     };
   }, [client]);
 
   const acquire = useCallback(
-    async (
+    (
       stampId: string,
       context: VerificationContext,
       now?: string,
     ): Promise<Result<ProcessStampValue, StampError>> => {
-      setError(null);
-      try {
-        const result =
-          now === undefined
-            ? await client.acquire(stampId, context)
-            : await client.acquire(stampId, context, now);
-        if (!result.ok) setError(result.error);
-        return result;
-      } catch (acquireError) {
-        const normalizedError = toError(acquireError);
-        setError(normalizedError);
-        throw normalizedError;
-      }
+      const acquiredAt = now ?? new Date().toISOString();
+      setClientError(null);
+
+      return new Promise((resolve, reject) => {
+        startTransition(async () => {
+          addOptimisticAcquire({ stampId, acquiredAt });
+          try {
+            const result = await client.acquire(stampId, context, acquiredAt);
+            if (!result.ok) {
+              setClientError({ client, value: result.error });
+            }
+            resolve(result);
+          } catch (acquireError) {
+            const normalizedError = toError(acquireError);
+            setClientError({ client, value: normalizedError });
+            reject(normalizedError);
+          }
+        });
+      });
     },
-    [client],
+    [addOptimisticAcquire, client],
   );
 
   const reset = useCallback(
-    async (now?: string): Promise<StampRallyState> => {
-      setError(null);
-      try {
-        return now === undefined ? await client.reset() : await client.reset(now);
-      } catch (resetError) {
-        const normalizedError = toError(resetError);
-        setError(normalizedError);
-        throw normalizedError;
-      }
+    (now?: string): Promise<StampRallyState> => {
+      setClientError(null);
+
+      return new Promise((resolve, reject) => {
+        startTransition(async () => {
+          try {
+            const nextState = now === undefined ? await client.reset() : await client.reset(now);
+            resolve(nextState);
+          } catch (resetError) {
+            const normalizedError = toError(resetError);
+            setClientError({ client, value: normalizedError });
+            reject(normalizedError);
+          }
+        });
+      });
     },
     [client],
   );
 
-  const progressState: StampRallyState = state ?? {
-    rallyId: config.id,
-    records: [],
-    updatedAt: "",
-  };
+  const isLoading =
+    rawState === null && (clientStatus.client !== client || clientStatus.isInitializing);
+  const error = clientError?.client === client ? clientError.value : null;
 
   return {
-    state,
-    progress: calculateProgress(progressState, config),
+    state: optimisticState,
     isLoading,
+    isPending,
     error,
     acquire,
     reset,
