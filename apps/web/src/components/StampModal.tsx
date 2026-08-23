@@ -7,11 +7,14 @@ import {
   isQrSupported,
   readNfcContext,
   readQrContext,
+  resolveLocalizedText,
   type StampDefinition,
   type StampRecord,
+  type SupportedLocale,
   type VerificationContext,
 } from "@stamprally/core";
-import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { type FormEvent, useEffect, useRef, useState } from "react";
+import { getMessages } from "../locales/index.js";
 import type { StampPresentation } from "./StampSlot.js";
 
 export interface AcquisitionFeedback {
@@ -27,6 +30,7 @@ export interface StampModalProps {
   readonly isAvailable: boolean;
   readonly requiredStampName: string | null;
   readonly isPending: boolean;
+  readonly locale?: SupportedLocale;
   readonly onClose: () => void;
   readonly onAcquire: (
     stampId: string,
@@ -36,32 +40,6 @@ export interface StampModalProps {
 }
 
 type DetectorName = "geolocation" | "nfc" | "qr";
-type TokenTab = "sensor" | "manual";
-
-function describeDetectorError(error: DetectorError): string {
-  switch (error.code) {
-    case "UNSUPPORTED":
-      return error.detector === "nfc"
-        ? "この端末はWeb NFCに対応していません。手入力をご利用ください。"
-        : error.detector === "qr"
-          ? "このブラウザはライブQR読取に対応していません。手入力をご利用ください。"
-          : "このブラウザは位置情報取得に対応していません。";
-    case "PERMISSION_DENIED":
-      return "センサーの利用が拒否されました。ブラウザの権限設定を確認してください。";
-    case "POSITION_UNAVAILABLE":
-      return "現在地を取得できませんでした。プリセット座標も利用できます。";
-    case "TIMEOUT":
-      return "センサーの待機時間を超えました。もう一度お試しください。";
-    case "ABORTED":
-      return "センサーの読み取りをキャンセルしました。";
-    case "NO_TOKEN":
-      return "読み取り可能なテキストトークンがありません。";
-    case "INVALID_DATA":
-      return "センサーから無効なデータが返されました。";
-    case "READ_FAILED":
-      return "センサーの読み取りに失敗しました。";
-  }
-}
 
 function outsideCoordinate(value: number): string {
   return String(Number((value + 0.01).toFixed(6)));
@@ -75,17 +53,18 @@ export function StampModal({
   isAvailable,
   requiredStampName,
   isPending,
+  locale = "ja",
   onClose,
   onAcquire,
   onNotify,
 }: StampModalProps) {
+  const messages = getMessages(locale);
   const dialogRef = useRef<HTMLDialogElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const detectorController = useRef<AbortController | null>(null);
   const [activeDetector, setActiveDetector] = useState<DetectorName | null>(null);
   const [feedback, setFeedback] = useState<AcquisitionFeedback | null>(null);
   const [token, setToken] = useState("");
-  const [tokenTab, setTokenTab] = useState<TokenTab>("sensor");
   const geoCondition = stamp?.condition.type === "geo" ? stamp.condition : null;
   const [latitude, setLatitude] = useState("");
   const [longitude, setLongitude] = useState("");
@@ -102,12 +81,6 @@ export function StampModal({
           longitudeValue,
         )
       : null;
-  const sensorSupported = useMemo(() => {
-    if (presentation?.channel === "qr") return isQrSupported();
-    if (presentation?.channel === "nfc") return isNfcSupported();
-    if (presentation?.channel === "geo") return isGeolocationSupported();
-    return true;
-  }, [presentation?.channel]);
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -122,7 +95,6 @@ export function StampModal({
     setActiveDetector(null);
     setFeedback(null);
     setToken("");
-    setTokenTab("sensor");
     if (geoCondition === null) {
       setLatitude("");
       setLongitude("");
@@ -132,12 +104,22 @@ export function StampModal({
     }
   }, [geoCondition]);
 
-  useEffect(
-    () => () => {
-      detectorController.current?.abort();
-    },
-    [],
-  );
+  useEffect(() => () => detectorController.current?.abort(), []);
+
+  function detectorMessage(error: DetectorError): string {
+    switch (error.code) {
+      case "UNSUPPORTED":
+        return messages.errorUnsupported;
+      case "PERMISSION_DENIED":
+        return messages.errorPermission;
+      case "TIMEOUT":
+        return messages.errorTimeout;
+      case "ABORTED":
+        return messages.errorAborted;
+      default:
+        return messages.errorRead;
+    }
+  }
 
   function publish(result: AcquisitionFeedback): void {
     setFeedback(result);
@@ -152,11 +134,11 @@ export function StampModal({
     if (result.ok) onClose();
   }
 
-  function beginDetector(detector: DetectorName): AbortController | null {
+  function beginDetector(name: DetectorName): AbortController | null {
     if (detectorController.current !== null) return null;
     const controller = new AbortController();
     detectorController.current = controller;
-    setActiveDetector(detector);
+    setActiveDetector(name);
     setFeedback(null);
     return controller;
   }
@@ -167,27 +149,19 @@ export function StampModal({
     setActiveDetector(null);
   }
 
-  function cancelDetector(): void {
-    detectorController.current?.abort();
-  }
-
   async function scanQr(): Promise<void> {
     const controller = beginDetector("qr");
-    const video = videoRef.current;
     if (controller === null) return;
+    const video = videoRef.current;
     if (video === null) {
       finishDetector(controller);
-      publish({ ok: false, message: "QRプレビューを初期化できませんでした。" });
+      publish({ ok: false, message: messages.errorRead });
       return;
     }
     try {
       const result = await readQrContext(video, { signal: controller.signal });
-      if (!result.ok) {
-        publish({ ok: false, message: describeDetectorError(result.error) });
-        return;
-      }
-      setToken(result.value.token);
-      await submit(result.value);
+      if (result.ok) await submit(result.value);
+      else publish({ ok: false, message: detectorMessage(result.error) });
     } finally {
       finishDetector(controller);
     }
@@ -198,30 +172,23 @@ export function StampModal({
     if (controller === null) return;
     try {
       const result = await readNfcContext({ signal: controller.signal });
-      if (!result.ok) {
-        publish({ ok: false, message: describeDetectorError(result.error) });
-        return;
-      }
-      setToken(result.value.token);
-      await submit(result.value);
+      if (result.ok) await submit(result.value);
+      else publish({ ok: false, message: detectorMessage(result.error) });
     } finally {
       finishDetector(controller);
     }
   }
 
-  async function locateAndAcquire(): Promise<void> {
+  async function locate(): Promise<void> {
     const controller = beginDetector("geolocation");
     if (controller === null) return;
     try {
       const result = await getCurrentGeoContext({ enableHighAccuracy: true, timeout: 10_000 });
-      if (controller.signal.aborted) return;
-      if (!result.ok) {
-        publish({ ok: false, message: describeDetectorError(result.error) });
-        return;
-      }
-      setLatitude(result.value.currentLatitude.toFixed(6));
-      setLongitude(result.value.currentLongitude.toFixed(6));
-      await submit(result.value);
+      if (result.ok) {
+        setLatitude(String(result.value.currentLatitude));
+        setLongitude(String(result.value.currentLongitude));
+        await submit(result.value);
+      } else publish({ ok: false, message: detectorMessage(result.error) });
     } finally {
       finishDetector(controller);
     }
@@ -229,281 +196,192 @@ export function StampModal({
 
   async function submitToken(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
-    const normalized = token.trim();
-    if (normalized === "") {
-      publish({ ok: false, message: "トークンを入力してください。" });
+    if (token.trim() === "") {
+      publish({ ok: false, message: messages.tokenRequired });
       return;
     }
-    await submit({ type: "token", token: normalized });
+    await submit({ type: "token", token: token.trim() });
   }
 
   async function submitCoordinates(): Promise<void> {
     if (!Number.isFinite(latitudeValue) || !Number.isFinite(longitudeValue)) {
-      publish({ ok: false, message: "有効な緯度と経度を入力してください。" });
+      publish({ ok: false, message: messages.invalidCoordinates });
       return;
     }
-    await submit({
-      type: "geo",
-      currentLatitude: latitudeValue,
-      currentLongitude: longitudeValue,
-    });
+    await submit({ type: "geo", currentLatitude: latitudeValue, currentLongitude: longitudeValue });
   }
 
-  function requestClose(): void {
-    if (isPending) return;
-    detectorController.current?.abort();
-    onClose();
-  }
-
-  function handleCancel(event: React.SyntheticEvent<HTMLDialogElement>): void {
-    event.preventDefault();
-    requestClose();
-  }
-
-  const tokenCondition = stamp?.condition.type === "token" ? stamp.condition : null;
+  const name = stamp === null ? "" : resolveLocalizedText(stamp.name, locale);
+  const description = stamp === null ? "" : resolveLocalizedText(stamp.description, locale);
+  const hint = stamp === null ? "" : resolveLocalizedText(stamp.hint, locale);
 
   return (
     <dialog
       ref={dialogRef}
       className="stamp-modal"
       aria-labelledby="stamp-modal-title"
-      onCancel={handleCancel}
+      onCancel={(event) => {
+        if (isBusy) event.preventDefault();
+        else onClose();
+      }}
+      onClose={() => {
+        detectorController.current?.abort();
+        if (!isBusy) onClose();
+      }}
     >
-      {stamp !== null && presentation !== null && (
-        <div className="stamp-modal__content">
+      {stamp !== null && (
+        <div className="stamp-modal__panel">
           <header className="stamp-modal__header">
-            <div
-              className={`stamp-modal__icon stamp-modal__icon--${presentation.ink}`}
-              aria-hidden="true"
-            >
-              {presentation.icon}
-            </div>
             <div>
-              <p>{presentation.label}</p>
-              <h2 id="stamp-modal-title">{stamp.name}</h2>
+              <p className="eyebrow">{messages.details}</p>
+              <h2 id="stamp-modal-title">{name}</h2>
+              {description !== "" && <p>{description}</p>}
             </div>
             <button
-              className="stamp-modal__close"
               type="button"
-              onClick={requestClose}
-              disabled={isPending}
-              aria-label="スタンプ詳細を閉じる"
+              className="stamp-modal__close"
+              disabled={isBusy}
+              onClick={onClose}
+              aria-label={messages.close}
             >
               ×
             </button>
           </header>
-
-          {!canAcquire && (
-            <div className="stamp-modal__notice stamp-modal__notice--locked" role="status">
-              🔒 先に「{requiredStampName ?? "次のスタンプ"}」を取得してください。
-            </div>
-          )}
-          {record !== undefined && (
-            <div className="stamp-modal__notice" role="status">
-              取得済みです。再度押印すると重複エラーを確認できます。
-            </div>
+          {hint !== "" && <p className="stamp-modal__hint">💡 {hint}</p>}
+          {record !== undefined && <p>{messages.alreadyAcquired}</p>}
+          {!canAcquire && requiredStampName !== null && (
+            <p className="stamp-modal__locked">{messages.requiredFirst(requiredStampName)}</p>
           )}
 
-          <div className="stamp-modal__body" aria-busy={isBusy}>
-            {presentation.channel === "instant" && (
-              <section className="stamp-modal__action-panel">
-                <p>外部入力を使わず、その場でスタンプを押します。</p>
+          {stamp.condition.type === "instant" && (
+            <section>
+              <p>{messages.instantDescription}</p>
+              <button
+                className="primary-button"
+                type="button"
+                disabled={!canAcquire || isBusy}
+                onClick={() => void submit({ type: "instant" })}
+              >
+                {messages.pressStamp}
+              </button>
+            </section>
+          )}
+
+          {stamp.condition.type === "token" && (
+            <section className="token-actions">
+              <form onSubmit={(event) => void submitToken(event)}>
+                <label>
+                  {messages.tokenInput}
+                  <input
+                    value={token}
+                    onChange={(event) => setToken(event.target.value)}
+                    placeholder={messages.tokenPlaceholder}
+                  />
+                </label>
+                <button className="primary-button" type="submit" disabled={!canAcquire || isBusy}>
+                  {messages.submitToken}
+                </button>
+              </form>
+              {/* biome-ignore lint/a11y/useMediaCaption: Muted QR preview has no audio. */}
+              <video
+                ref={videoRef}
+                className={`qr-preview ${activeDetector === "qr" ? "active" : ""}`}
+                aria-label={messages.scanQr}
+              />
+              <div className="button-row">
+                <button
+                  className="secondary-button"
+                  type="button"
+                  disabled={!canAcquire || isBusy || !isQrSupported()}
+                  onClick={() => void scanQr()}
+                >
+                  {messages.scanQr} · {isQrSupported() ? messages.supported : messages.unsupported}
+                </button>
+                <button
+                  className="secondary-button"
+                  type="button"
+                  disabled={!canAcquire || isBusy || !isNfcSupported()}
+                  onClick={() => void scanNfc()}
+                >
+                  {messages.scanNfc} ·{" "}
+                  {isNfcSupported() ? messages.supported : messages.unsupported}
+                </button>
+              </div>
+            </section>
+          )}
+
+          {geoCondition !== null && (
+            <section>
+              <p>
+                {messages.target}: {geoCondition.latitude}, {geoCondition.longitude} ·{" "}
+                {messages.radius(geoCondition.radiusMeters)}
+              </p>
+              <div className="coordinate-grid">
+                <label>
+                  {messages.latitude}
+                  <input
+                    type="number"
+                    step="0.000001"
+                    value={latitude}
+                    onChange={(event) => setLatitude(event.target.value)}
+                  />
+                </label>
+                <label>
+                  {messages.longitude}
+                  <input
+                    type="number"
+                    step="0.000001"
+                    value={longitude}
+                    onChange={(event) => setLongitude(event.target.value)}
+                  />
+                </label>
+              </div>
+              <p className="stamp-modal__distance">
+                {distance === null
+                  ? messages.invalidCoordinates
+                  : messages.distance(Math.round(distance))}
+              </p>
+              <div className="button-row">
+                <button
+                  className="secondary-button"
+                  type="button"
+                  disabled={!canAcquire || isBusy || !isGeolocationSupported()}
+                  onClick={() => void locate()}
+                >
+                  {messages.useCurrentLocation}
+                </button>
+                <button
+                  className="secondary-button"
+                  type="button"
+                  disabled={isBusy}
+                  onClick={() => {
+                    setLatitude(String(geoCondition.latitude));
+                    setLongitude(String(geoCondition.longitude));
+                  }}
+                >
+                  {messages.successPreset}
+                </button>
                 <button
                   className="primary-button"
                   type="button"
                   disabled={!canAcquire || isBusy}
-                  onClick={() => void submit({ type: "instant" })}
+                  onClick={() => void submitCoordinates()}
                 >
-                  {isPending ? "押印中…" : "スタンプを押す"}
+                  {messages.coordinatesAction}
                 </button>
-              </section>
-            )}
+              </div>
+            </section>
+          )}
 
-            {(presentation.channel === "qr" || presentation.channel === "nfc") && (
-              <section className="stamp-modal__action-panel">
-                <div className="stamp-modal__tabs" role="tablist" aria-label="トークン取得方法">
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={tokenTab === "sensor"}
-                    className={tokenTab === "sensor" ? "active" : ""}
-                    onClick={() => setTokenTab("sensor")}
-                    disabled={isBusy}
-                  >
-                    {presentation.channel === "qr" ? "QRカメラ" : "Web NFC"}
-                  </button>
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={tokenTab === "manual"}
-                    className={tokenTab === "manual" ? "active" : ""}
-                    onClick={() => setTokenTab("manual")}
-                    disabled={isBusy}
-                  >
-                    手入力
-                  </button>
-                </div>
-
-                {tokenTab === "sensor" ? (
-                  <div className="stamp-modal__sensor-panel" role="tabpanel">
-                    <span className={`support-badge ${sensorSupported ? "supported" : ""}`}>
-                      {sensorSupported ? "この端末で利用可能" : "非対応・手入力を利用してください"}
-                    </span>
-                    {presentation.channel === "qr" ? (
-                      <>
-                        {/* biome-ignore lint/a11y/useMediaCaption: The muted QR camera preview has no audio content. */}
-                        <video
-                          ref={videoRef}
-                          className={`qr-preview ${activeDetector === "qr" ? "active" : ""}`}
-                          aria-label="QRカメラプレビュー"
-                        />
-                        <button
-                          className="primary-button"
-                          type="button"
-                          disabled={!canAcquire || isBusy || !sensorSupported}
-                          onClick={() => void scanQr()}
-                        >
-                          {activeDetector === "qr" ? "QR待機中…" : "QRコードをスキャン"}
-                        </button>
-                      </>
-                    ) : (
-                      <button
-                        className="primary-button"
-                        type="button"
-                        disabled={!canAcquire || isBusy || !sensorSupported}
-                        onClick={() => void scanNfc()}
-                      >
-                        {activeDetector === "nfc" ? "NFC待機中…" : "NFCタグをスキャン"}
-                      </button>
-                    )}
-                    {activeDetector !== null && (
-                      <button className="secondary-button" type="button" onClick={cancelDetector}>
-                        読み取りをキャンセル
-                      </button>
-                    )}
-                  </div>
-                ) : (
-                  <form className="stamp-modal__token-form" role="tabpanel" onSubmit={submitToken}>
-                    <label htmlFor="modal-token">Token</label>
-                    <input
-                      id="modal-token"
-                      value={token}
-                      onChange={(event) => setToken(event.target.value)}
-                      autoComplete="off"
-                      placeholder="トークンを入力"
-                    />
-                    <div className="button-row">
-                      <button
-                        className="primary-button"
-                        type="submit"
-                        disabled={!canAcquire || isBusy}
-                      >
-                        入力値で押印
-                      </button>
-                      <button
-                        className="secondary-button"
-                        type="button"
-                        disabled={!canAcquire || isBusy || tokenCondition === null}
-                        onClick={() => {
-                          if (tokenCondition !== null) {
-                            setToken(tokenCondition.token);
-                            void submit({ type: "token", token: tokenCondition.token });
-                          }
-                        }}
-                      >
-                        正解トークンを模擬
-                      </button>
-                    </div>
-                  </form>
-                )}
-              </section>
-            )}
-
-            {presentation.channel === "geo" && geoCondition !== null && (
-              <section className="stamp-modal__action-panel">
-                <dl className="stamp-modal__geo-details">
-                  <div>
-                    <dt>Target</dt>
-                    <dd>
-                      {geoCondition.latitude}, {geoCondition.longitude}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>Radius</dt>
-                    <dd>{geoCondition.radiusMeters}m</dd>
-                  </div>
-                </dl>
-                <button
-                  className="primary-button"
-                  type="button"
-                  disabled={!canAcquire || isBusy || !sensorSupported}
-                  onClick={() => void locateAndAcquire()}
-                >
-                  {activeDetector === "geolocation" ? "現在地を測定中…" : "現在地を測定して押印"}
-                </button>
-                <div className="stamp-modal__coordinate-grid">
-                  <label htmlFor="modal-latitude">
-                    Latitude
-                    <input
-                      id="modal-latitude"
-                      type="number"
-                      step="0.000001"
-                      value={latitude}
-                      onChange={(event) => setLatitude(event.target.value)}
-                    />
-                  </label>
-                  <label htmlFor="modal-longitude">
-                    Longitude
-                    <input
-                      id="modal-longitude"
-                      type="number"
-                      step="0.000001"
-                      value={longitude}
-                      onChange={(event) => setLongitude(event.target.value)}
-                    />
-                  </label>
-                </div>
-                <p className="stamp-modal__distance" aria-live="polite">
-                  {distance === null
-                    ? "有効な座標を入力してください。"
-                    : `目標地点まで約${Math.round(distance)}m`}
-                </p>
-                <div className="button-row">
-                  <button
-                    className="secondary-button"
-                    type="button"
-                    disabled={isBusy}
-                    onClick={() => {
-                      setLatitude(String(geoCondition.latitude));
-                      setLongitude(String(geoCondition.longitude));
-                    }}
-                  >
-                    成功プリセット
-                  </button>
-                  <button
-                    className="secondary-button"
-                    type="button"
-                    disabled={isBusy}
-                    onClick={() => {
-                      setLatitude(outsideCoordinate(geoCondition.latitude));
-                      setLongitude(outsideCoordinate(geoCondition.longitude));
-                    }}
-                  >
-                    圏外プリセット
-                  </button>
-                  <button
-                    className="primary-button"
-                    type="button"
-                    disabled={!canAcquire || isBusy}
-                    onClick={() => void submitCoordinates()}
-                  >
-                    入力座標で押印
-                  </button>
-                </div>
-              </section>
-            )}
-          </div>
-
+          {activeDetector !== null && (
+            <button
+              type="button"
+              className="secondary-button danger-button"
+              onClick={() => detectorController.current?.abort()}
+            >
+              {messages.cancel}
+            </button>
+          )}
           {feedback !== null && (
             <p
               className={`stamp-modal__feedback stamp-modal__feedback--${feedback.ok ? "success" : "error"}`}
@@ -512,6 +390,9 @@ export function StampModal({
               {feedback.message}
             </p>
           )}
+          <span className="stamp-modal__channel" aria-hidden="true">
+            {presentation?.icon}
+          </span>
         </div>
       )}
     </dialog>

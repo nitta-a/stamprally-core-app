@@ -1,4 +1,10 @@
-import type { StampDefinition, StampRecord } from "@stamprally/core";
+import {
+  resolveLocalizedText,
+  type StampDefinition,
+  type StampRecord,
+  type SupportedLocale,
+} from "@stamprally/core";
+import { getMessages } from "../locales/index.js";
 
 export type StampChannel = "instant" | "qr" | "nfc" | "geo";
 export type StampInk = "vermilion" | "indigo";
@@ -18,6 +24,7 @@ export interface StampSlotProps {
   readonly presentation: StampPresentation;
   readonly isAnimating: boolean;
   readonly disabled: boolean;
+  readonly locale?: SupportedLocale;
   readonly onSelect: () => void;
 }
 
@@ -38,10 +45,19 @@ export function StampSlot({
   presentation,
   isAnimating,
   disabled,
+  locale = "ja",
   onSelect,
 }: StampSlotProps) {
+  const messages = getMessages(locale);
   const status = record === undefined ? (isNext ? "available" : "locked") : "stamped";
   const number = `#${String(slotNumber).padStart(2, "0")}`;
+  const name = resolveLocalizedText(stamp.name, locale);
+  const statusText =
+    status === "stamped"
+      ? messages.acquired
+      : status === "available"
+        ? messages.available
+        : messages.locked;
 
   return (
     <button
@@ -49,9 +65,7 @@ export function StampSlot({
       type="button"
       onClick={onSelect}
       disabled={disabled}
-      aria-label={`${number} ${stamp.name}、${
-        status === "stamped" ? "取得済み" : status === "available" ? "取得可能" : "順序待ち"
-      }、${presentation.label}`}
+      aria-label={`${number} ${messages.statusLabel(name, statusText, presentation.label)}`}
     >
       <span className="stamp-slot__topline">
         <span className="stamp-slot__number">{number}</span>
@@ -63,7 +77,7 @@ export function StampSlot({
       <span className="stamp-slot__watermark" aria-hidden="true">
         {presentation.icon}
       </span>
-      <span className="stamp-slot__name">{stamp.name}</span>
+      <span className="stamp-slot__name">{name}</span>
       <span className="stamp-slot__condition">
         <span aria-hidden="true">{presentation.icon}</span>
         {presentation.label}
@@ -73,7 +87,7 @@ export function StampSlot({
         <span
           className={`stamp-imprint ${isAnimating ? "stamp-press" : ""}`}
           role="img"
-          aria-label={`取得日時 ${formatStampDate(record.acquiredAt)}`}
+          aria-label={messages.acquiredAt(formatStampDate(record.acquiredAt))}
         >
           <span className="stamp-imprint__inner">
             <span className="stamp-imprint__word">STAMP</span>

@@ -148,7 +148,59 @@ describe("StampSheet", () => {
     );
 
     expect(screen.getByText("COMPLETE!!")).toBeTruthy();
-    expect(screen.getByText("RALLY COMPLETED")).toBeTruthy();
+    expect(screen.getByText("ラリー達成")).toBeTruthy();
     expect(screen.getByRole("progressbar").getAttribute("aria-valuenow")).toBe("100");
+  });
+
+  it("resolves localized spot names and system guidance when locale changes", () => {
+    const localizedConfig: RallyConfig = {
+      ...config,
+      title: { ja: "テストラリー", en: "Test Rally" },
+      stamps: [
+        {
+          ...firstStamp,
+          name: { ja: "最初の場所", en: "First Place" },
+        },
+      ],
+    };
+    const current = {
+      rallyId: localizedConfig.id,
+      records: [],
+      updatedAt: "2026-01-02T03:04:00.000Z",
+    };
+    const { rerender } = render(
+      <StampSheet
+        title={localizedConfig.title ?? localizedConfig.id}
+        config={localizedConfig}
+        state={current}
+        progress={calculateProgress(current, localizedConfig)}
+        presentations={{ one: firstPresentation }}
+        animatedStampId={null}
+        disabled={false}
+        locale="ja"
+        onStampSelect={() => undefined}
+      />,
+    );
+
+    expect(screen.getByText("テストラリー")).toBeTruthy();
+    expect(screen.getByText("最初の場所")).toBeTruthy();
+    expect(screen.getByText("あと1箇所")).toBeTruthy();
+
+    rerender(
+      <StampSheet
+        title={localizedConfig.title ?? localizedConfig.id}
+        config={localizedConfig}
+        state={current}
+        progress={calculateProgress(current, localizedConfig)}
+        presentations={{ one: firstPresentation }}
+        animatedStampId={null}
+        disabled={false}
+        locale="en"
+        onStampSelect={() => undefined}
+      />,
+    );
+    expect(screen.getByText("Test Rally")).toBeTruthy();
+    expect(screen.getByText("First Place")).toBeTruthy();
+    expect(screen.getByText("1 spots remaining")).toBeTruthy();
   });
 });

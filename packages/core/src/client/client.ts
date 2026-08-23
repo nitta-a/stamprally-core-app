@@ -159,13 +159,23 @@ export class StampRallyClient {
   }
 
   #reconcileState(state: StampRallyState, now: string): StampRallyState {
-    if (this.#config.rewards === undefined && state.rewards === undefined) return state;
+    const configuredStampIds = new Set(this.#config.stamps.map((stamp) => stamp.id));
+    const seenStampIds = new Set<string>();
+    const records = state.records.filter((record) => {
+      if (!configuredStampIds.has(record.stampId) || seenStampIds.has(record.stampId)) return false;
+      seenStampIds.add(record.stampId);
+      return true;
+    });
+    if (this.#config.rewards === undefined && state.rewards === undefined) {
+      return records.length === state.records.length ? state : { ...state, records };
+    }
     return {
       ...state,
+      records,
       rewards: reconcileRewardStates(
         this.#config.rewards ?? [],
         state.rewards ?? [],
-        state.records.length,
+        records.length,
         now,
       ),
     };

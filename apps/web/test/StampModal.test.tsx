@@ -88,8 +88,7 @@ describe("StampModal", () => {
 
   it("supports manual QR and NFC token flows", async () => {
     const qr = renderModal(token, qrPresentation);
-    fireEvent.click(screen.getByRole("tab", { name: "手入力" }));
-    fireEvent.change(screen.getByLabelText("Token"), { target: { value: "MANUAL" } });
+    fireEvent.change(screen.getByLabelText("トークン入力"), { target: { value: "MANUAL" } });
     fireEvent.click(screen.getByRole("button", { name: "入力値で押印" }));
     await waitFor(() =>
       expect(qr.onAcquire).toHaveBeenCalledWith("token", { type: "token", token: "MANUAL" }),
@@ -97,9 +96,9 @@ describe("StampModal", () => {
 
     cleanup();
     const nfc = renderModal(token, nfcPresentation);
-    expect(screen.getByRole("tab", { name: "Web NFC" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("tab", { name: "手入力" }));
-    fireEvent.click(screen.getByRole("button", { name: "正解トークンを模擬" }));
+    expect(screen.getByRole("button", { name: /NFCタグをスキャン/ })).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("トークン入力"), { target: { value: "CORRECT" } });
+    fireEvent.click(screen.getByRole("button", { name: "入力値で押印" }));
     await waitFor(() =>
       expect(nfc.onAcquire).toHaveBeenCalledWith("token", {
         type: "token",
@@ -133,18 +132,18 @@ describe("StampModal", () => {
     }
     vi.stubGlobal("NDEFReader", MockNdefReader);
     const { onClose } = renderModal(token, nfcPresentation);
-    fireEvent.click(screen.getByRole("button", { name: "NFCタグをスキャン" }));
+    fireEvent.click(screen.getByRole("button", { name: /NFCタグをスキャン/ }));
     await waitFor(() => expect(scanSignal).toBeDefined());
-    fireEvent.click(screen.getByRole("button", { name: "スタンプ詳細を閉じる" }));
+    fireEvent.click(screen.getByRole("button", { name: "キャンセル" }));
     expect(scanSignal?.aborted).toBe(true);
-    expect(onClose).toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it("does not close while an acquisition is pending", () => {
     const { onClose } = renderModal(instant, instantPresentation, { isPending: true });
-    expect(
-      (screen.getByRole("button", { name: "スタンプ詳細を閉じる" }) as HTMLButtonElement).disabled,
-    ).toBe(true);
+    expect((screen.getByRole("button", { name: "閉じる" }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
     fireEvent(screen.getByRole("dialog"), new Event("cancel", { cancelable: true }));
     expect(onClose).not.toHaveBeenCalled();
   });

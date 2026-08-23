@@ -1,11 +1,20 @@
 import type { StampCondition } from "./conditions.js";
 
-export interface StampDefinition {
+export type SupportedLocale = "ja" | "en";
+export type LocalizedString = Record<SupportedLocale, string>;
+export type LocalizedText = string | LocalizedString;
+
+export interface SpotItem {
   readonly id: string;
-  readonly name: string;
+  readonly name: LocalizedText;
+  readonly description?: LocalizedText;
+  readonly hint?: LocalizedText;
   readonly condition: StampCondition;
   readonly order?: number;
 }
+
+/** @deprecated Use SpotItem instead. */
+export type StampDefinition = SpotItem;
 
 export interface StampRecord {
   readonly stampId: string;
@@ -21,8 +30,8 @@ export type RewardStatus = "LOCKED" | "AVAILABLE" | "CONSUMED" | "EXPIRED";
 
 export interface RewardItem {
   readonly id: string;
-  readonly title: string;
-  readonly description: string;
+  readonly title: LocalizedText;
+  readonly description: LocalizedText;
   readonly type: RewardType;
   readonly redemptionMethod: RedemptionMethod;
   readonly requiredStampCount: number;
@@ -47,6 +56,8 @@ export interface StampRallyState {
 
 export interface RallyConfig {
   readonly id: string;
+  readonly title?: LocalizedText;
+  readonly description?: LocalizedText;
   readonly stamps: ReadonlyArray<StampDefinition>;
   readonly rewards?: ReadonlyArray<RewardItem>;
   readonly isSequential?: boolean;

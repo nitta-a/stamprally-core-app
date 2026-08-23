@@ -1,20 +1,25 @@
 import type {
+  LocalizedText,
   RallyConfig,
   StampDefinition,
   StampRallyProgress,
   StampRallyState,
+  SupportedLocale,
 } from "@stamprally/core";
+import { resolveLocalizedText } from "@stamprally/core";
+import { getMessages } from "../locales/index.js";
 import { type StampPresentation, StampSlot } from "./StampSlot.js";
 import "./StampSheet.css";
 
 export interface StampSheetProps {
-  readonly title: string;
+  readonly title: LocalizedText;
   readonly config: RallyConfig;
   readonly state: StampRallyState | null;
   readonly progress: StampRallyProgress;
   readonly presentations: Readonly<Record<string, StampPresentation>>;
   readonly animatedStampId: string | null;
   readonly disabled: boolean;
+  readonly locale?: SupportedLocale;
   readonly onStampSelect: (stampId: string) => void;
 }
 
@@ -40,8 +45,10 @@ export function StampSheet({
   presentations,
   animatedStampId,
   disabled,
+  locale = "ja",
   onStampSelect,
 }: StampSheetProps) {
+  const messages = getMessages(locale);
   const records = new Map(state?.records.map((record) => [record.stampId, record]) ?? []);
   const nextIds = new Set(progress.nextAvailableStamps.map((stamp) => stamp.id));
 
@@ -49,25 +56,25 @@ export function StampSheet({
     <section className={`stamp-sheet ${progress.isCompleted ? "stamp-sheet--completed" : ""}`}>
       <header className="stamp-sheet__header">
         <div>
-          <p className="stamp-sheet__kicker">Official collection sheet</p>
-          <h2>{title}</h2>
+          <p className="stamp-sheet__kicker">{messages.officialSheet}</p>
+          <h2>{resolveLocalizedText(title, locale)}</h2>
         </div>
         <div className="stamp-sheet__score" aria-live="polite">
           <strong>
             {progress.acquired} / {progress.total}
           </strong>
-          <span>STAMPS</span>
+          <span>{messages.stamps}</span>
         </div>
       </header>
 
       <div className="stamp-sheet__progress-label">
-        <span>Journey progress</span>
+        <span>{messages.remaining(Math.max(0, progress.total - progress.acquired))}</span>
         <strong>{Math.round(progress.percentage)}%</strong>
       </div>
       <div
         className="stamp-sheet__progress-track"
         role="progressbar"
-        aria-label="スタンプ取得進捗"
+        aria-label={messages.progressLabel}
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuenow={Math.round(progress.percentage)}
@@ -86,6 +93,7 @@ export function StampSheet({
             presentation={presentations[stamp.id] ?? fallbackPresentation(stamp)}
             isAnimating={animatedStampId === stamp.id && records.has(stamp.id)}
             disabled={disabled}
+            locale={locale}
             onSelect={() => onStampSelect(stamp.id)}
           />
         ))}
@@ -99,8 +107,8 @@ export function StampSheet({
           <div className="stamp-sheet__complete-message" role="status">
             <span aria-hidden="true">🏅</span>
             <div>
-              <strong>RALLY COMPLETED</strong>
-              <span>全チェックポイントを達成しました！</span>
+              <strong>{messages.rallyCompleted}</strong>
+              <span>{messages.congratulations}</span>
             </div>
           </div>
         </>
