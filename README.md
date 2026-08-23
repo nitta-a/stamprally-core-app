@@ -4,9 +4,9 @@ A headless, storage-agnostic stamp rally engine and React integration for TypeSc
 
 ## Packages
 
-- `@stamprally/core`: dependency-free domain types, condition evaluation, immutable state transitions, progress calculation, and a storage-agnostic client.
+- `@stamprally/core`: dependency-free domain types, detailed condition evaluation, immutable state transitions, progress calculation, browser storage adapters, and a storage-agnostic client.
 - `@stamprally/react`: the `useStampRally` React hook.
-- `@stamprally/web`: a small Vite demo that exercises sequential token stamps.
+- `@stamprally/web`: a Vite field-test UI for instant, QR-token, GPS, sequential, and free-mode acquisition.
 
 ## Requirements
 
@@ -24,7 +24,7 @@ pnpm lint
 pnpm dev
 ```
 
-The development command starts the package build watchers and the Vite application. Open the URL printed by Vite. The demo uses in-memory storage, so progress is reset when the page reloads.
+The development command starts the package build watchers and the Vite application. Open the URL printed by Vite. The demo persists progress in LocalStorage; use **Clear State** to remove it. GPS presets remain available when browser geolocation is unavailable or denied.
 
 ## Core API example
 
@@ -61,3 +61,5 @@ if (!result.ok) {
 ```
 
 All engine timestamps are ISO 8601 strings. Verification inputs such as tokens and coordinates are not copied into stamp record metadata.
+
+`InMemoryStorage`, `LocalStorageAdapter`, and `IndexedDBAdapter` implement the same `StampStorage` contract. Call `client.reset()` to remove persisted progress and notify subscribers with a new empty state.

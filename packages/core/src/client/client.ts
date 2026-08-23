@@ -49,13 +49,7 @@ export class StampRallyClient {
         .load(this.#config.id)
         .then((storedState) => {
           const state =
-            storedState === null
-              ? {
-                  rallyId: this.#config.id,
-                  records: [],
-                  updatedAt: this.#clock(),
-                }
-              : cloneState(storedState);
+            storedState === null ? this.#createEmptyState(this.#clock()) : cloneState(storedState);
           this.#state = state;
           this.#emit(state);
           return state;
@@ -89,6 +83,21 @@ export class StampRallyClient {
     });
   }
 
+  reset(now: string = this.#clock()): Promise<StampRallyState> {
+    return this.#enqueue(async () => {
+      const initialization = this.#initialization;
+      if (initialization !== null) {
+        await initialization.catch(() => undefined);
+      }
+      await this.#storage.remove(this.#config.id);
+      const nextState = this.#createEmptyState(now);
+      this.#state = nextState;
+      this.#initialization = Promise.resolve(nextState);
+      this.#emit(nextState);
+      return nextState;
+    });
+  }
+
   #enqueue<T>(operation: () => Promise<T>): Promise<T> {
     const next = this.#operationQueue.then(operation, operation);
     this.#operationQueue = next.then(
@@ -102,5 +111,13 @@ export class StampRallyClient {
     for (const listener of this.#listeners) {
       listener(state);
     }
+  }
+
+  #createEmptyState(now: string): StampRallyState {
+    return {
+      rallyId: this.#config.id,
+      records: [],
+      updatedAt: now,
+    };
   }
 }

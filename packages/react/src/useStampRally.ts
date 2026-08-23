@@ -22,6 +22,7 @@ export interface UseStampRallyValue {
     context: VerificationContext,
     now?: string,
   ) => Promise<Result<ProcessStampValue, StampError>>;
+  readonly reset: (now?: string) => Promise<StampRallyState>;
 }
 
 function toError(error: unknown): Error {
@@ -85,6 +86,20 @@ export function useStampRally(config: RallyConfig, storage: StampStorage): UseSt
     [client],
   );
 
+  const reset = useCallback(
+    async (now?: string): Promise<StampRallyState> => {
+      setError(null);
+      try {
+        return now === undefined ? await client.reset() : await client.reset(now);
+      } catch (resetError) {
+        const normalizedError = toError(resetError);
+        setError(normalizedError);
+        throw normalizedError;
+      }
+    },
+    [client],
+  );
+
   const progressState: StampRallyState = state ?? {
     rallyId: config.id,
     records: [],
@@ -97,5 +112,6 @@ export function useStampRally(config: RallyConfig, storage: StampStorage): UseSt
     isLoading,
     error,
     acquire,
+    reset,
   };
 }

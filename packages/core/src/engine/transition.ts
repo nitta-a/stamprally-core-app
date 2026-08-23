@@ -1,13 +1,13 @@
 import type {
   RallyConfig,
   Result,
-  StampDefinition,
   StampError,
   StampRallyState,
   StampRecord,
   VerificationContext,
 } from "../domain/index.js";
-import { evaluateCondition } from "./evaluate.js";
+import { evaluateConditionDetailed } from "./evaluate.js";
+import { getOrderedStamps } from "./order.js";
 
 export type StampRallyEvent =
   | {
@@ -23,23 +23,6 @@ export type StampRallyEvent =
 export interface ProcessStampValue {
   readonly nextState: StampRallyState;
   readonly events: ReadonlyArray<StampRallyEvent>;
-}
-
-interface OrderedStamp {
-  readonly stamp: StampDefinition;
-  readonly index: number;
-}
-
-function getSequentialStamps(config: RallyConfig): ReadonlyArray<StampDefinition> {
-  return config.stamps
-    .map((stamp, index): OrderedStamp => ({ stamp, index }))
-    .sort((left, right) => {
-      const orderDifference =
-        (left.stamp.order ?? Number.POSITIVE_INFINITY) -
-        (right.stamp.order ?? Number.POSITIVE_INFINITY);
-      return orderDifference === 0 ? left.index - right.index : orderDifference;
-    })
-    .map(({ stamp }) => stamp);
 }
 
 export function processStamp(
@@ -63,14 +46,12 @@ export function processStamp(
   }
 
   if (config.isSequential === true) {
-    const expectedStamp = getSequentialStamps(config).find(
-      (stamp) => !acquiredStampIds.has(stamp.id),
-    );
+    const expectedStamp = getOrderedStamps(config).find((stamp) => !acquiredStampIds.has(stamp.id));
     if (expectedStamp !== undefined && expectedStamp.id !== targetStampId) {
       return {
         ok: false,
         error: {
-          code: "STAMP_OUT_OF_ORDER",
+          code: "INVALID_ORDER",
           stampId: targetStampId,
           expectedStampId: expectedStamp.id,
         },
@@ -78,10 +59,15 @@ export function processStamp(
     }
   }
 
-  if (!evaluateCondition(targetStamp.condition, context)) {
+  const conditionResult = evaluateConditionDetailed(targetStamp.condition, context, now);
+  if (!conditionResult.ok) {
     return {
       ok: false,
-      error: { code: "CONDITION_NOT_MET", stampId: targetStampId },
+      error: {
+        code: "CONDITION_MISMATCH",
+        stampId: targetStampId,
+        mismatch: conditionResult.error,
+      },
     };
   }
 

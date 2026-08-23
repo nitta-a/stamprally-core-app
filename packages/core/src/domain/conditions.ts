@@ -11,6 +11,12 @@ export type StampCondition =
       readonly type: "composite";
       readonly operator: "AND" | "OR";
       readonly conditions: ReadonlyArray<StampCondition>;
+    }
+  | {
+      readonly type: "time_window";
+      readonly startsAt: string;
+      readonly endsAt: string;
+      readonly condition: StampCondition;
     };
 
 export type VerificationContext =
