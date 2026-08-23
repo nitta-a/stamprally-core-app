@@ -8,6 +8,11 @@ export type {
 } from "./errors.js";
 export type {
   RallyConfig,
+  RedemptionMethod,
+  RewardItem,
+  RewardState,
+  RewardStatus,
+  RewardType,
   StampDefinition,
   StampRallyState,
   StampRecord,

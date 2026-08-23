@@ -4,13 +4,39 @@ import {
   isGeolocationSupported,
   isNfcSupported,
   isQrSupported,
+  normalizePasscode,
   readNfcContext,
   readQrContext,
+  verifyPasscode,
 } from "../src/index.js";
 
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+});
+
+describe("passcode detector", () => {
+  it("normalizes width, whitespace, and letter case without changing the input", () => {
+    const input = "  Ｓｔａｆｆ１２３  ";
+
+    expect(normalizePasscode(input)).toBe("STAFF123");
+    expect(input).toBe("  Ｓｔａｆｆ１２３  ");
+    expect(verifyPasscode(input, { passcode: "staff123" })).toEqual({ success: true });
+  });
+
+  it("supports case-sensitive verification and returns a typed mismatch", () => {
+    expect(verifyPasscode("Staff123", { passcode: "STAFF123", caseSensitive: true })).toEqual({
+      success: false,
+      reason: "INVALID_PASSCODE",
+      message: "The passcode is invalid.",
+    });
+    expect(
+      verifyPasscode("ＳＴＡＦＦ１２３", {
+        passcode: "STAFF123",
+        caseSensitive: true,
+      }),
+    ).toEqual({ success: true });
+  });
 });
 
 describe("geolocation detector", () => {

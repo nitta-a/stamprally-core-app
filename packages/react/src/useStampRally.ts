@@ -1,11 +1,15 @@
 import type {
+  ConsumeResult,
   ProcessStampValue,
   Result,
+  RewardConsumeError,
+  RewardState,
   StampError,
   StampRallyClient,
   StampRallyState,
   VerificationContext,
 } from "@stamprally/core";
+import { consumeReward, exportProgressToken, importProgressToken } from "@stamprally/core";
 import {
   useCallback,
   useEffect,
@@ -27,20 +31,29 @@ interface ClientStatus {
 
 interface ClientError {
   readonly client: StampRallyClient;
-  readonly value: StampError | Error;
+  readonly value: StampError | RewardConsumeError | Error;
+}
+
+export interface RedeemOptions {
+  readonly passcode?: string;
+  readonly staffId?: string;
 }
 
 export interface UseStampRallyReturn {
   readonly state: StampRallyState | null;
   readonly isLoading: boolean;
   readonly isPending: boolean;
-  readonly error: StampError | Error | null;
+  readonly error: StampError | RewardConsumeError | Error | null;
+  readonly rewardsState: ReadonlyArray<RewardState>;
   readonly acquire: (
     stampId: string,
     context: VerificationContext,
     now?: string,
   ) => Promise<Result<ProcessStampValue, StampError>>;
   readonly reset: (now?: string) => Promise<StampRallyState>;
+  readonly redeem: (rewardId: string, options?: RedeemOptions) => Promise<ConsumeResult>;
+  readonly exportRecoveryCode: () => string;
+  readonly importRecoveryCode: (token: string) => Promise<boolean>;
 }
 
 /** @deprecated Use UseStampRallyReturn instead. */
@@ -166,6 +179,140 @@ export function useStampRally(client: StampRallyClient): UseStampRallyReturn {
     [client],
   );
 
+  const redeem = useCallback(
+    (rewardId: string, options: RedeemOptions = {}): Promise<ConsumeResult> => {
+      setClientError(null);
+
+      return new Promise((resolve, reject) => {
+        startTransition(async () => {
+          const reward = client.getConfig().rewards?.find((item) => item.id === rewardId);
+          if (reward === undefined) {
+            const result: ConsumeResult = {
+              ok: false,
+              error: { code: "REWARD_NOT_FOUND", rewardId },
+            };
+            setClientError({ client, value: result.error });
+            resolve(result);
+            return;
+          }
+
+          const currentState = client.getState();
+          const currentRewardState = currentState?.rewards?.find(
+            (state) => state.rewardId === rewardId,
+          );
+          if (currentState === null || currentRewardState === undefined) {
+            const result: ConsumeResult = {
+              ok: false,
+              error: { code: "NOT_AVAILABLE", rewardId },
+            };
+            setClientError({ client, value: result.error });
+            resolve(result);
+            return;
+          }
+
+          const result = consumeReward({
+            reward,
+            currentState: currentRewardState,
+            now: new Date().toISOString(),
+            ...(options.passcode === undefined ? {} : { inputPasscode: options.passcode }),
+            ...(options.staffId === undefined ? {} : { staffId: options.staffId }),
+          });
+          if (!result.ok) {
+            setClientError({ client, value: result.error });
+            resolve(result);
+            return;
+          }
+
+          if (result.value === currentRewardState) {
+            resolve(result);
+            return;
+          }
+
+          const nextState: StampRallyState = {
+            ...currentState,
+            rewards: (currentState.rewards ?? []).map((state) =>
+              state.rewardId === rewardId ? result.value : state,
+            ),
+            updatedAt: result.value.consumedAt ?? currentState.updatedAt,
+          };
+
+          try {
+            await client.restore(nextState);
+            resolve(result);
+          } catch (redeemError) {
+            const normalizedError = toError(redeemError);
+            setClientError({ client, value: normalizedError });
+            reject(normalizedError);
+          }
+        });
+      });
+    },
+    [client],
+  );
+
+  const exportRecoveryCode = useCallback((): string => {
+    const state = client.getState();
+    if (state === null) {
+      throw new Error("Cannot export recovery code before the rally is initialized.");
+    }
+
+    return exportProgressToken({
+      version: 1,
+      rallyId: state.rallyId,
+      stamps: state.records,
+      rewards: state.rewards ?? [],
+      exportedAt: new Date().toISOString(),
+    });
+  }, [client]);
+
+  const importRecoveryCode = useCallback(
+    (token: string): Promise<boolean> => {
+      setClientError(null);
+
+      return new Promise((resolve, reject) => {
+        startTransition(async () => {
+          const config = client.getConfig();
+          const snapshot = importProgressToken(token, config.id);
+          if (snapshot === null) {
+            resolve(false);
+            return;
+          }
+
+          const stampIds = new Set(config.stamps.map((stamp) => stamp.id));
+          const rewardIds = new Set((config.rewards ?? []).map((reward) => reward.id));
+          const importedStampIds = new Set<string>();
+          const importedRewardIds = new Set<string>();
+          const stamps = snapshot.stamps.filter((record) => {
+            if (!stampIds.has(record.stampId) || importedStampIds.has(record.stampId)) return false;
+            importedStampIds.add(record.stampId);
+            return true;
+          });
+          const rewards = snapshot.rewards.filter((state) => {
+            if (!rewardIds.has(state.rewardId) || importedRewardIds.has(state.rewardId))
+              return false;
+            importedRewardIds.add(state.rewardId);
+            return true;
+          });
+
+          try {
+            await client.restore({
+              rallyId: config.id,
+              records: stamps,
+              ...(config.rewards === undefined && rewards.length === 0 ? {} : { rewards }),
+              updatedAt: snapshot.exportedAt,
+            });
+            resolve(true);
+          } catch (importError) {
+            const normalizedError = toError(importError);
+            setClientError({ client, value: normalizedError });
+            reject(normalizedError);
+          }
+        });
+      });
+    },
+    [client],
+  );
+
   const isLoading =
     rawState === null && (clientStatus.client !== client || clientStatus.isInitializing);
   const error = clientError?.client === client ? clientError.value : null;
@@ -175,7 +322,11 @@ export function useStampRally(client: StampRallyClient): UseStampRallyReturn {
     isLoading,
     isPending,
     error,
+    rewardsState: optimisticState?.rewards ?? [],
     acquire,
     reset,
+    redeem,
+    exportRecoveryCode,
+    importRecoveryCode,
   };
 }

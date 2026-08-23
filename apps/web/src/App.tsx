@@ -8,6 +8,7 @@ import {
   isQrSupported,
   LocalStorageAdapter,
   type RallyConfig,
+  type RewardConsumeError,
   readQrContext,
   type StampError,
   StampRallyClient,
@@ -92,7 +93,10 @@ function findGeoMismatch(
   return null;
 }
 
-function describeError(error: StampError | Error, config: RallyConfig): string {
+function describeError(
+  error: StampError | RewardConsumeError | Error,
+  config: RallyConfig,
+): string {
   if (error instanceof StorageAdapterError) {
     if (error.code === "STORAGE_UNAVAILABLE") {
       return "ブラウザストレージを利用できません。メモリ上で操作を継続します。";
@@ -123,6 +127,14 @@ function describeError(error: StampError | Error, config: RallyConfig): string {
       }
       return "スタンプの取得条件を満たしていません。";
     }
+    case "NOT_AVAILABLE":
+      return "この特典はまだ利用できません。";
+    case "ALREADY_CONSUMED":
+      return "この特典はすでに利用済みです。";
+    case "INVALID_PASSCODE":
+      return "スタッフ用合言葉が一致しません。";
+    case "REWARD_NOT_FOUND":
+      return "対象の特典が見つかりません。";
   }
 }
 

@@ -1,6 +1,9 @@
+import { verifyPasscode } from "../detectors/index.js";
 import type {
   RallyConfig,
   Result,
+  RewardItem,
+  RewardState,
   StampError,
   StampRallyState,
   StampRecord,
@@ -23,6 +26,103 @@ export type StampRallyEvent =
 export interface ProcessStampValue {
   readonly nextState: StampRallyState;
   readonly events: ReadonlyArray<StampRallyEvent>;
+}
+
+export type RewardConsumeError =
+  | { readonly code: "NOT_AVAILABLE"; readonly rewardId: string }
+  | { readonly code: "ALREADY_CONSUMED"; readonly rewardId: string }
+  | {
+      readonly code: "INVALID_PASSCODE";
+      readonly rewardId: string;
+      readonly message: string;
+    }
+  | { readonly code: "REWARD_NOT_FOUND"; readonly rewardId: string };
+
+export interface ConsumeRewardParams {
+  readonly reward: RewardItem;
+  readonly currentState: RewardState;
+  readonly inputPasscode?: string;
+  readonly staffId?: string;
+  readonly now: string;
+}
+
+export type ConsumeResult = Result<RewardState, RewardConsumeError>;
+
+export function reconcileRewardStates(
+  rewards: ReadonlyArray<RewardItem>,
+  currentStates: ReadonlyArray<RewardState>,
+  acquiredStampCount: number,
+  now: string,
+): ReadonlyArray<RewardState> {
+  const statesById = new Map(currentStates.map((state) => [state.rewardId, state]));
+
+  return rewards.map((reward) => {
+    const current = statesById.get(reward.id);
+    if (current?.status === "CONSUMED" || current?.status === "EXPIRED") {
+      return current;
+    }
+
+    if (acquiredStampCount >= reward.requiredStampCount) {
+      if (current?.status === "AVAILABLE") return current;
+      return {
+        rewardId: reward.id,
+        status: "AVAILABLE",
+        unlockedAt: current?.unlockedAt ?? now,
+      };
+    }
+
+    if (current?.status === "LOCKED" && current.unlockedAt === undefined) return current;
+    return { rewardId: reward.id, status: "LOCKED" };
+  });
+}
+
+export function consumeReward(params: ConsumeRewardParams): ConsumeResult {
+  const { reward, currentState } = params;
+
+  if (currentState.status === "CONSUMED") {
+    return {
+      ok: false,
+      error: { code: "ALREADY_CONSUMED", rewardId: reward.id },
+    };
+  }
+
+  if (currentState.status !== "AVAILABLE") {
+    return {
+      ok: false,
+      error: { code: "NOT_AVAILABLE", rewardId: reward.id },
+    };
+  }
+
+  if (reward.redemptionMethod === "staff_passcode") {
+    const passcodeResult =
+      reward.staffPasscode === undefined
+        ? null
+        : verifyPasscode(params.inputPasscode ?? "", { passcode: reward.staffPasscode });
+    if (passcodeResult === null || !passcodeResult.success) {
+      return {
+        ok: false,
+        error: {
+          code: "INVALID_PASSCODE",
+          rewardId: reward.id,
+          message: passcodeResult?.message ?? "The passcode is invalid.",
+        },
+      };
+    }
+  }
+
+  if (reward.redemptionMethod === "view_only") {
+    return { ok: true, value: currentState };
+  }
+
+  return {
+    ok: true,
+    value: {
+      ...currentState,
+      status: "CONSUMED",
+      consumedAt: params.now,
+      ...(params.staffId === undefined ? {} : { consumedByStaffId: params.staffId }),
+    },
+  };
 }
 
 export function processStamp(
@@ -72,9 +172,15 @@ export function processStamp(
   }
 
   const record: StampRecord = { stampId: targetStampId, acquiredAt: now };
+  const nextRecords = [...state.records, record];
+  const nextRewards =
+    config.rewards === undefined && state.rewards === undefined
+      ? undefined
+      : reconcileRewardStates(config.rewards ?? [], state.rewards ?? [], nextRecords.length, now);
   const nextState: StampRallyState = {
     ...state,
-    records: [...state.records, record],
+    records: nextRecords,
+    ...(nextRewards === undefined ? {} : { rewards: nextRewards }),
     updatedAt: now,
   };
   const events: StampRallyEvent[] = [{ type: "stampAcquired", record }];

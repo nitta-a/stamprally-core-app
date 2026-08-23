@@ -23,6 +23,19 @@ export type GeoVerificationContext = Extract<VerificationContext, { readonly typ
 export type TokenVerificationContext = Extract<VerificationContext, { readonly type: "token" }>;
 export type DetectorResult<T extends VerificationContext> = Result<T, DetectorError>;
 
+export interface PasscodeCondition {
+  readonly passcode: string;
+  readonly caseSensitive?: boolean;
+}
+
+export type CheckInResult =
+  | { readonly success: true }
+  | {
+      readonly success: false;
+      readonly reason: "INVALID_PASSCODE";
+      readonly message: string;
+    };
+
 export function createDetectorError(
   detector: DetectorKind,
   code: DetectorErrorCode,

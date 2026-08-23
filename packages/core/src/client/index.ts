@@ -4,6 +4,7 @@ export type {
   IndexedDBAdapterOptions,
   LocalStorageAdapterOptions,
   LocalStorageFailureMode,
+  RallySnapshot,
   StampStorage,
   StorageAdapterErrorCode,
   StorageLike,
@@ -11,8 +12,11 @@ export type {
   StorageWarningHandler,
 } from "./storage.js";
 export {
+  exportProgressToken,
   IndexedDBAdapter,
   InMemoryStorage,
+  importProgressToken,
+  isRewardState,
   isStampRallyState,
   LocalStorageAdapter,
   StorageAdapterError,

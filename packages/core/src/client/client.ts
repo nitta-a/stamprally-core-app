@@ -5,7 +5,7 @@ import type {
   StampRallyState,
   VerificationContext,
 } from "../domain/index.js";
-import { type ProcessStampValue, processStamp } from "../engine/index.js";
+import { type ProcessStampValue, processStamp, reconcileRewardStates } from "../engine/index.js";
 import { cloneState, type StampStorage } from "./storage.js";
 
 export type StampRallyListener = (state: StampRallyState) => void;
@@ -32,6 +32,10 @@ export class StampRallyClient {
     return this.#currentState;
   }
 
+  getConfig(): RallyConfig {
+    return this.#config;
+  }
+
   subscribe(listener: StampRallyListener): () => void {
     this.#listeners.add(listener);
     return () => {
@@ -53,7 +57,9 @@ export class StampRallyClient {
         .load(this.#config.id)
         .then((storedState) => {
           const state =
-            storedState === null ? this.#createEmptyState(this.#clock()) : cloneState(storedState);
+            storedState === null
+              ? this.#createEmptyState(this.#clock())
+              : this.#reconcileState(cloneState(storedState), storedState.updatedAt);
           this.#currentState = state;
           this.#emit(state);
           return state;
@@ -102,6 +108,27 @@ export class StampRallyClient {
     });
   }
 
+  restore(state: StampRallyState): Promise<StampRallyState> {
+    return this.#enqueue(async () => {
+      const initialization = this.#initialization;
+      if (initialization !== null) {
+        await initialization.catch(() => undefined);
+      }
+      if (state.rallyId !== this.#config.id) {
+        throw new Error(
+          `Cannot restore rally '${state.rallyId}' into client '${this.#config.id}'.`,
+        );
+      }
+
+      const nextState = this.#reconcileState(cloneState(state), state.updatedAt);
+      await this.#storage.save(nextState);
+      this.#currentState = nextState;
+      this.#initialization = Promise.resolve(nextState);
+      this.#emit(nextState);
+      return nextState;
+    });
+  }
+
   #enqueue<T>(operation: () => Promise<T>): Promise<T> {
     const next = this.#operationQueue.then(operation, operation);
     this.#operationQueue = next.then(
@@ -118,10 +145,29 @@ export class StampRallyClient {
   }
 
   #createEmptyState(now: string): StampRallyState {
-    return {
+    const state: StampRallyState = {
       rallyId: this.#config.id,
       records: [],
+      ...(this.#config.rewards === undefined
+        ? {}
+        : {
+            rewards: reconcileRewardStates(this.#config.rewards, [], 0, now),
+          }),
       updatedAt: now,
+    };
+    return state;
+  }
+
+  #reconcileState(state: StampRallyState, now: string): StampRallyState {
+    if (this.#config.rewards === undefined && state.rewards === undefined) return state;
+    return {
+      ...state,
+      rewards: reconcileRewardStates(
+        this.#config.rewards ?? [],
+        state.rewards ?? [],
+        state.records.length,
+        now,
+      ),
     };
   }
 }

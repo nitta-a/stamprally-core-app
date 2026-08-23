@@ -1,4 +1,5 @@
 import {
+  exportProgressToken,
   InMemoryStorage,
   type RallyConfig,
   StampRallyClient,
@@ -16,6 +17,25 @@ const config: RallyConfig = {
   stamps: [
     { id: "first", name: "First", condition: { type: "instant" } },
     { id: "second", name: "Second", condition: { type: "token", token: "OK" } },
+  ],
+  rewards: [
+    {
+      id: "manual-reward",
+      title: "Manual reward",
+      description: "A manually redeemed reward",
+      type: "in_person",
+      redemptionMethod: "manual_slide",
+      requiredStampCount: 1,
+    },
+    {
+      id: "staff-reward",
+      title: "Staff reward",
+      description: "A staff-verified reward",
+      type: "in_person",
+      redemptionMethod: "staff_passcode",
+      requiredStampCount: 1,
+      staffPasscode: "staff123",
+    },
   ],
 };
 
@@ -220,5 +240,135 @@ describe("useStampRally", () => {
     await waitFor(() => expect(result.current.isPending).toBe(false));
     expect(result.current.state?.records).toEqual([]);
     expect(storage.state).toBeNull();
+  });
+
+  it("redeems rewards, exposes typed failures, and prevents double redemption", async () => {
+    const client = new StampRallyClient(config, new InMemoryStorage(), () => NOW);
+    const { result } = renderHook(() => useStampRally(client));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    await act(async () => {
+      await result.current.acquire("first", { type: "instant" }, NOW);
+    });
+    expect(result.current.rewardsState).toEqual([
+      { rewardId: "manual-reward", status: "AVAILABLE", unlockedAt: NOW },
+      { rewardId: "staff-reward", status: "AVAILABLE", unlockedAt: NOW },
+    ]);
+
+    await act(async () => {
+      const mismatch = await result.current.redeem("staff-reward", { passcode: "wrong" });
+      expect(mismatch).toMatchObject({ ok: false, error: { code: "INVALID_PASSCODE" } });
+    });
+    expect(result.current.error).toMatchObject({ code: "INVALID_PASSCODE" });
+    expect(result.current.rewardsState[1]?.status).toBe("AVAILABLE");
+
+    await act(async () => {
+      const consumed = await result.current.redeem("staff-reward", {
+        passcode: " ＳＴＡＦＦ１２３ ",
+        staffId: "staff-9",
+      });
+      expect(consumed.ok).toBe(true);
+    });
+    expect(result.current.rewardsState[1]).toMatchObject({
+      status: "CONSUMED",
+      consumedByStaffId: "staff-9",
+    });
+
+    await act(async () => {
+      const duplicate = await result.current.redeem("staff-reward", { passcode: "staff123" });
+      expect(duplicate).toMatchObject({ ok: false, error: { code: "ALREADY_CONSUMED" } });
+    });
+  });
+
+  it("exports and imports confirmed stamp and reward progress", async () => {
+    const sourceClient = new StampRallyClient(config, new InMemoryStorage(), () => NOW);
+    const source = renderHook(() => useStampRally(sourceClient));
+    await waitFor(() => expect(source.result.current.isLoading).toBe(false));
+    await act(async () => {
+      await source.result.current.acquire("first", { type: "instant" }, NOW);
+      await source.result.current.redeem("manual-reward");
+    });
+    const recoveryCode = source.result.current.exportRecoveryCode();
+
+    const targetStorage = new InMemoryStorage();
+    const targetClient = new StampRallyClient(config, targetStorage, () => NOW);
+    const target = renderHook(() => useStampRally(targetClient));
+    await waitFor(() => expect(target.result.current.isLoading).toBe(false));
+
+    await act(async () => {
+      await expect(target.result.current.importRecoveryCode(recoveryCode)).resolves.toBe(true);
+    });
+    expect(target.result.current.state?.records).toEqual([{ stampId: "first", acquiredAt: NOW }]);
+    expect(target.result.current.rewardsState[0]?.status).toBe("CONSUMED");
+    await expect(targetStorage.load(config.id)).resolves.toEqual(targetClient.getState());
+  });
+
+  it("filters unknown and duplicate recovery entries and rejects invalid rally tokens", async () => {
+    const client = new StampRallyClient(config, new InMemoryStorage(), () => NOW);
+    const { result } = renderHook(() => useStampRally(client));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    const token = exportProgressToken({
+      version: 1,
+      rallyId: config.id,
+      stamps: [
+        { stampId: "first", acquiredAt: NOW },
+        { stampId: "first", acquiredAt: "2026-08-23T13:00:00.000Z" },
+        { stampId: "unknown", acquiredAt: NOW },
+      ],
+      rewards: [
+        { rewardId: "manual-reward", status: "CONSUMED", consumedAt: NOW },
+        { rewardId: "manual-reward", status: "AVAILABLE", unlockedAt: NOW },
+        { rewardId: "unknown", status: "CONSUMED", consumedAt: NOW },
+      ],
+      exportedAt: NOW,
+    });
+
+    await act(async () => {
+      await expect(result.current.importRecoveryCode(token)).resolves.toBe(true);
+    });
+    expect(result.current.state?.records).toEqual([{ stampId: "first", acquiredAt: NOW }]);
+    expect(result.current.rewardsState[0]?.status).toBe("CONSUMED");
+
+    const otherRallyToken = exportProgressToken({
+      version: 1,
+      rallyId: "another-rally",
+      stamps: [],
+      rewards: [],
+      exportedAt: NOW,
+    });
+    const snapshotBeforeFailure = result.current.state;
+    await act(async () => {
+      await expect(result.current.importRecoveryCode(otherRallyToken)).resolves.toBe(false);
+    });
+    expect(result.current.state).toBe(snapshotBeforeFailure);
+  });
+
+  it("rejects recovery persistence failures and publishes the storage error", async () => {
+    const storage = new ControlledStorage();
+    const client = new StampRallyClient(config, storage, () => NOW);
+    const { result } = renderHook(() => useStampRally(client));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    const saveGate = createDeferred();
+    storage.saveGate = saveGate;
+    const token = exportProgressToken({
+      version: 1,
+      rallyId: config.id,
+      stamps: [{ stampId: "first", acquiredAt: NOW }],
+      rewards: [],
+      exportedAt: NOW,
+    });
+
+    let importing: ReturnType<typeof result.current.importRecoveryCode> | undefined;
+    act(() => {
+      importing = result.current.importRecoveryCode(token);
+    });
+    await waitFor(() => expect(result.current.isPending).toBe(true));
+    await act(async () => {
+      saveGate.reject(new Error("restore failed"));
+      await expect(importing).rejects.toThrow("restore failed");
+    });
+    await waitFor(() => expect(result.current.isPending).toBe(false));
+    expect(result.current.error).toEqual(new Error("restore failed"));
   });
 });

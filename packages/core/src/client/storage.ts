@@ -1,4 +1,4 @@
-import type { StampRallyState, StampRecord } from "../domain/index.js";
+import type { RewardState, StampRallyState, StampRecord } from "../domain/index.js";
 
 export interface StampStorage {
   load(rallyId: string): Promise<StampRallyState | null>;
@@ -46,10 +46,15 @@ function cloneRecord(record: StampRecord): StampRecord {
     : { ...record, metadata: { ...record.metadata } };
 }
 
+function cloneRewardState(state: RewardState): RewardState {
+  return { ...state };
+}
+
 export function cloneState(state: StampRallyState): StampRallyState {
   return {
     ...state,
     records: state.records.map(cloneRecord),
+    ...(state.rewards === undefined ? {} : { rewards: state.rewards.map(cloneRewardState) }),
   };
 }
 
@@ -66,6 +71,25 @@ function isRecord(value: unknown): value is StampRecord {
   );
 }
 
+const rewardStatuses = new Set(["LOCKED", "AVAILABLE", "CONSUMED", "EXPIRED"]);
+
+function isOptionalDate(value: unknown): value is string | undefined {
+  return value === undefined || (typeof value === "string" && !Number.isNaN(Date.parse(value)));
+}
+
+export function isRewardState(value: unknown): value is RewardState {
+  if (typeof value !== "object" || value === null) return false;
+  const state = value as Partial<RewardState>;
+  return (
+    typeof state.rewardId === "string" &&
+    typeof state.status === "string" &&
+    rewardStatuses.has(state.status) &&
+    isOptionalDate(state.unlockedAt) &&
+    isOptionalDate(state.consumedAt) &&
+    (state.consumedByStaffId === undefined || typeof state.consumedByStaffId === "string")
+  );
+}
+
 export function isStampRallyState(value: unknown): value is StampRallyState {
   if (typeof value !== "object" || value === null) return false;
   const state = value as Partial<StampRallyState>;
@@ -73,8 +97,58 @@ export function isStampRallyState(value: unknown): value is StampRallyState {
     typeof state.rallyId === "string" &&
     typeof state.updatedAt === "string" &&
     Array.isArray(state.records) &&
-    state.records.every(isRecord)
+    state.records.every(isRecord) &&
+    (state.rewards === undefined ||
+      (Array.isArray(state.rewards) && state.rewards.every(isRewardState)))
   );
+}
+
+export interface RallySnapshot {
+  readonly version: 1;
+  readonly rallyId: string;
+  readonly stamps: ReadonlyArray<StampRecord>;
+  readonly rewards: ReadonlyArray<RewardState>;
+  readonly exportedAt: string;
+}
+
+function isValidDate(value: unknown): value is string {
+  return typeof value === "string" && !Number.isNaN(Date.parse(value));
+}
+
+function isSnapshotRecord(value: unknown): value is StampRecord {
+  return isRecord(value) && isValidDate(value.acquiredAt);
+}
+
+function isRallySnapshot(value: unknown): value is RallySnapshot {
+  if (typeof value !== "object" || value === null) return false;
+  const snapshot = value as Partial<RallySnapshot>;
+  return (
+    snapshot.version === 1 &&
+    typeof snapshot.rallyId === "string" &&
+    Array.isArray(snapshot.stamps) &&
+    snapshot.stamps.every(isSnapshotRecord) &&
+    Array.isArray(snapshot.rewards) &&
+    snapshot.rewards.every(isRewardState) &&
+    isValidDate(snapshot.exportedAt)
+  );
+}
+
+export function exportProgressToken(snapshot: RallySnapshot): string {
+  return globalThis.btoa(encodeURIComponent(JSON.stringify(snapshot)));
+}
+
+export function importProgressToken(token: string, currentRallyId: string): RallySnapshot | null {
+  try {
+    const parsed: unknown = JSON.parse(decodeURIComponent(globalThis.atob(token)));
+    if (!isRallySnapshot(parsed) || parsed.rallyId !== currentRallyId) return null;
+    return {
+      ...parsed,
+      stamps: parsed.stamps.map(cloneRecord),
+      rewards: parsed.rewards.map(cloneRewardState),
+    };
+  } catch {
+    return null;
+  }
 }
 
 export class InMemoryStorage implements StampStorage {

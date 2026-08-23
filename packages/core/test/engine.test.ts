@@ -2,13 +2,19 @@ import { IDBFactory } from "fake-indexeddb";
 import { describe, expect, it, vi } from "vitest";
 import {
   calculateProgress,
+  consumeReward,
   evaluateCondition,
   evaluateConditionDetailed,
+  exportProgressToken,
   IndexedDBAdapter,
   InMemoryStorage,
+  importProgressToken,
   LocalStorageAdapter,
   processStamp,
   type RallyConfig,
+  type RallySnapshot,
+  type RewardItem,
+  type RewardState,
   StampRallyClient,
   type StampRallyState,
   type StampStorage,
@@ -601,5 +607,261 @@ describe("StampRallyClient", () => {
     const resetState = await reset;
     expect(client.getState()).toEqual(resetState);
     expect(resetState.records).toEqual([]);
+  });
+});
+
+const staffReward: RewardItem = {
+  id: "staff-reward",
+  title: "Counter gift",
+  description: "Redeem at the counter",
+  type: "in_person",
+  redemptionMethod: "staff_passcode",
+  requiredStampCount: 1,
+  staffPasscode: "staff123",
+};
+
+describe("reward lifecycle", () => {
+  it("unlocks configured rewards when a stamp reaches the required count", () => {
+    const config: RallyConfig = {
+      id: "reward-rally",
+      stamps: [{ id: "first", name: "First", condition: { type: "instant" } }],
+      rewards: [staffReward],
+    };
+    const state: StampRallyState = {
+      rallyId: config.id,
+      records: [],
+      rewards: [{ rewardId: staffReward.id, status: "LOCKED" }],
+      updatedAt: "2026-08-23T11:00:00.000Z",
+    };
+
+    const result = processStamp(state, config, "first", { type: "instant" }, NOW);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.nextState.rewards).toEqual([
+      { rewardId: staffReward.id, status: "AVAILABLE", unlockedAt: NOW },
+    ]);
+    expect(state.rewards).toEqual([{ rewardId: staffReward.id, status: "LOCKED" }]);
+  });
+
+  it("consumes a staff reward using an NFKC-normalized passcode", () => {
+    const currentState: RewardState = {
+      rewardId: staffReward.id,
+      status: "AVAILABLE",
+      unlockedAt: NOW,
+    };
+    const result = consumeReward({
+      reward: staffReward,
+      currentState,
+      inputPasscode: "  ＳＴＡＦＦ１２３ ",
+      staffId: "staff-7",
+      now: NOW,
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      value: {
+        rewardId: staffReward.id,
+        status: "CONSUMED",
+        unlockedAt: NOW,
+        consumedAt: NOW,
+        consumedByStaffId: "staff-7",
+      },
+    });
+    expect(currentState.status).toBe("AVAILABLE");
+  });
+
+  it("rejects a wrong passcode and prevents double redemption", () => {
+    const available: RewardState = { rewardId: staffReward.id, status: "AVAILABLE" };
+    expect(
+      consumeReward({
+        reward: staffReward,
+        currentState: available,
+        inputPasscode: "wrong",
+        now: NOW,
+      }),
+    ).toMatchObject({ ok: false, error: { code: "INVALID_PASSCODE" } });
+
+    expect(
+      consumeReward({
+        reward: staffReward,
+        currentState: { rewardId: staffReward.id, status: "CONSUMED", consumedAt: NOW },
+        inputPasscode: "staff123",
+        now: NOW,
+      }),
+    ).toEqual({
+      ok: false,
+      error: { code: "ALREADY_CONSUMED", rewardId: staffReward.id },
+    });
+  });
+
+  it("rejects locked, expired, and misconfigured staff rewards", () => {
+    for (const status of ["LOCKED", "EXPIRED"] as const) {
+      expect(
+        consumeReward({
+          reward: staffReward,
+          currentState: { rewardId: staffReward.id, status },
+          inputPasscode: "staff123",
+          now: NOW,
+        }),
+      ).toEqual({
+        ok: false,
+        error: { code: "NOT_AVAILABLE", rewardId: staffReward.id },
+      });
+    }
+
+    const misconfiguredReward: RewardItem = {
+      id: staffReward.id,
+      title: staffReward.title,
+      description: staffReward.description,
+      type: staffReward.type,
+      redemptionMethod: staffReward.redemptionMethod,
+      requiredStampCount: staffReward.requiredStampCount,
+    };
+    expect(
+      consumeReward({
+        reward: misconfiguredReward,
+        currentState: { rewardId: staffReward.id, status: "AVAILABLE" },
+        inputPasscode: "staff123",
+        now: NOW,
+      }),
+    ).toMatchObject({ ok: false, error: { code: "INVALID_PASSCODE" } });
+  });
+
+  it("consumes manual rewards but keeps view-only rewards available", () => {
+    const available: RewardState = { rewardId: "reward", status: "AVAILABLE" };
+    const manual = consumeReward({
+      reward: {
+        ...staffReward,
+        id: "reward",
+        redemptionMethod: "manual_slide",
+      },
+      currentState: available,
+      now: NOW,
+    });
+    const viewOnly = consumeReward({
+      reward: {
+        ...staffReward,
+        id: "reward",
+        redemptionMethod: "view_only",
+      },
+      currentState: available,
+      now: NOW,
+    });
+
+    expect(manual).toMatchObject({ ok: true, value: { status: "CONSUMED" } });
+    expect(viewOnly).toEqual({ ok: true, value: available });
+  });
+});
+
+describe("recovery tokens", () => {
+  it("round-trips Unicode snapshot data and returns defensive arrays", () => {
+    const snapshot: RallySnapshot = {
+      version: 1,
+      rallyId: "東京ラリー",
+      stamps: [{ stampId: "入口", acquiredAt: NOW, metadata: { label: "獲得済み" } }],
+      rewards: [{ rewardId: "記念品", status: "AVAILABLE", unlockedAt: NOW }],
+      exportedAt: NOW,
+    };
+
+    const imported = importProgressToken(exportProgressToken(snapshot), snapshot.rallyId);
+    expect(imported).toEqual(snapshot);
+    expect(imported?.stamps).not.toBe(snapshot.stamps);
+    expect(imported?.rewards).not.toBe(snapshot.rewards);
+  });
+
+  it("rejects malformed, cross-rally, wrong-version, and invalid-shape tokens", () => {
+    const encode = (value: unknown) => globalThis.btoa(encodeURIComponent(JSON.stringify(value)));
+    expect(importProgressToken("not base64!", "rally")).toBeNull();
+    expect(
+      importProgressToken(
+        encode({ version: 1, rallyId: "other", stamps: [], rewards: [], exportedAt: NOW }),
+        "rally",
+      ),
+    ).toBeNull();
+    expect(
+      importProgressToken(
+        encode({ version: 2, rallyId: "rally", stamps: [], rewards: [], exportedAt: NOW }),
+        "rally",
+      ),
+    ).toBeNull();
+    expect(
+      importProgressToken(
+        encode({ version: 1, rallyId: "rally", stamps: {}, rewards: [], exportedAt: NOW }),
+        "rally",
+      ),
+    ).toBeNull();
+  });
+
+  it("clones and restores reward state through memory storage and the client", async () => {
+    const config: RallyConfig = {
+      id: "reward-client",
+      stamps: [{ id: "first", name: "First", condition: { type: "instant" } }],
+      rewards: [staffReward],
+    };
+    const storage = new InMemoryStorage();
+    await storage.save({
+      rallyId: config.id,
+      records: [{ stampId: "first", acquiredAt: NOW }],
+      updatedAt: NOW,
+    });
+    const client = new StampRallyClient(config, storage, () => NOW);
+    const initialized = await client.init();
+    expect(initialized.rewards).toEqual([
+      { rewardId: staffReward.id, status: "AVAILABLE", unlockedAt: NOW },
+    ]);
+
+    const listener = vi.fn();
+    client.subscribe(listener);
+    const restored = await client.restore({
+      ...initialized,
+      rewards: [{ rewardId: staffReward.id, status: "CONSUMED", consumedAt: NOW }],
+    });
+    expect(client.getState()).toBe(restored);
+    expect(listener).toHaveBeenCalledWith(restored);
+    await expect(storage.load(config.id)).resolves.toEqual(restored);
+
+    const reset = await client.reset(NOW);
+    expect(reset.rewards).toEqual([{ rewardId: staffReward.id, status: "LOCKED" }]);
+  });
+
+  it("round-trips reward state through every storage adapter", async () => {
+    const values = new Map<string, string>();
+    const localStorageLike: StorageLike = {
+      getItem: (key) => values.get(key) ?? null,
+      setItem: (key, value) => values.set(key, value),
+      removeItem: (key) => values.delete(key),
+    };
+    const storages: ReadonlyArray<StampStorage> = [
+      new InMemoryStorage(),
+      new LocalStorageAdapter({ storage: localStorageLike, failureMode: "throw" }),
+      new IndexedDBAdapter({
+        indexedDB: new IDBFactory(),
+        databaseName: "stamprally-reward-state-test",
+      }),
+    ];
+    const state: StampRallyState = {
+      rallyId: "adapter-rewards",
+      records: [{ stampId: "first", acquiredAt: NOW }],
+      rewards: [
+        {
+          rewardId: staffReward.id,
+          status: "CONSUMED",
+          unlockedAt: NOW,
+          consumedAt: NOW,
+          consumedByStaffId: "staff-1",
+        },
+      ],
+      updatedAt: NOW,
+    };
+
+    for (const storage of storages) {
+      await storage.save(state);
+      const restored = await storage.load(state.rallyId);
+      expect(restored).toEqual(state);
+      expect(restored?.rewards).not.toBe(state.rewards);
+      expect(restored?.rewards?.[0]).not.toBe(state.rewards?.[0]);
+      await storage.remove(state.rallyId);
+      await expect(storage.load(state.rallyId)).resolves.toBeNull();
+    }
   });
 });
