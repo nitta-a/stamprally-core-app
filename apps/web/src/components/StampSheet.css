@@ -7,6 +7,7 @@
   border: 1px solid #d4c59f;
   border-radius: 24px;
   color: var(--stamp-text, #352f25);
+  font-family: var(--stamp-font-family, Georgia, "Times New Roman", serif);
   background-color: var(--stamp-bg, #fbf4df);
   background-image:
     repeating-linear-gradient(0deg, rgb(105 81 40 / 3%) 0 1px, transparent 1px 5px),
@@ -55,7 +56,7 @@
 
 .stamp-sheet__header h2 {
   margin: 0;
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: var(--stamp-font-family, Georgia, "Times New Roman", serif);
   font-size: clamp(1.25rem, 3vw, 2.05rem);
   letter-spacing: 0.045em;
 }
@@ -69,7 +70,7 @@
 }
 
 .stamp-sheet__score strong {
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: var(--stamp-font-family, Georgia, "Times New Roman", serif);
   font-size: clamp(1.7rem, 4vw, 2.7rem);
   line-height: 1;
 }
@@ -249,7 +250,7 @@
   position: relative;
   z-index: 1;
   margin-top: auto;
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: var(--stamp-font-family, Georgia, "Times New Roman", serif);
   font-size: clamp(1rem, 2vw, 1.25rem);
   font-weight: 800;
   line-height: 1.15;
@@ -295,6 +296,20 @@
   mix-blend-mode: multiply;
 }
 
+.stamp-imprint::after {
+  position: absolute;
+  inset: -12%;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 8% 35%, currentcolor 0 1.5px, transparent 2px),
+    radial-gradient(circle at 94% 58%, currentcolor 0 2px, transparent 2.5px),
+    radial-gradient(circle at 65% 4%, currentcolor 0 1px, transparent 1.5px),
+    radial-gradient(circle at 35% 98%, currentcolor 0 1.5px, transparent 2px);
+  opacity: 0.48;
+  content: "";
+  pointer-events: none;
+}
+
 .stamp-slot--vermilion .stamp-imprint {
   color: var(--stamp-completed-color, #b33c2e);
 }
@@ -316,7 +331,7 @@
 }
 
 .stamp-imprint__word {
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: var(--stamp-font-family, Georgia, "Times New Roman", serif);
   font-size: clamp(0.85rem, 2vw, 1.12rem);
   font-weight: 950;
   letter-spacing: 0.08em;
@@ -344,7 +359,7 @@
   padding: 9px 18px;
   border: 7px double currentcolor;
   color: color-mix(in srgb, var(--stamp-primary, #9d2f24) 58%, transparent);
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: var(--stamp-font-family, Georgia, "Times New Roman", serif);
   font-size: clamp(2rem, 8vw, 5.4rem);
   font-weight: 950;
   letter-spacing: 0.04em;
@@ -597,16 +612,22 @@
 @keyframes stamp-press {
   0% {
     opacity: 0;
-    transform: translate(-50%, -130%) scale(2) rotate(-15deg);
+    filter: blur(2px);
+    transform: translate(-50%, -145%) scale(2.15) rotate(-17deg);
   }
 
-  52% {
+  48% {
     opacity: 0.95;
-    transform: translate(-50%, -50%) scale(0.88) rotate(-3deg);
+    filter: blur(0);
+    transform: translate(-50%, -48%) scale(0.82) rotate(-2deg);
   }
 
-  72% {
-    transform: translate(-50%, -50%) scale(1.08) rotate(-7deg);
+  65% {
+    transform: translate(-50%, -52%) scale(1.13) rotate(-8deg);
+  }
+
+  82% {
+    transform: translate(-50%, -49%) scale(0.97) rotate(-4deg);
   }
 
   100% {

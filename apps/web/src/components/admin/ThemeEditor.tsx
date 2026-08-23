@@ -1,4 +1,9 @@
-import { DEFAULT_SHEET_THEME, type SheetTheme, type SupportedLocale } from "@stamprally/core";
+import {
+  DEFAULT_SHEET_THEME,
+  type FontFamily,
+  type SheetTheme,
+  type SupportedLocale,
+} from "@stamprally/core";
 import { getMessages } from "../../locales/index.js";
 import { ThemePresetSelector } from "./ThemePresetSelector.js";
 
@@ -104,7 +109,20 @@ export function ThemeEditor({ theme, locale, onChange }: ThemeEditorProps) {
             />
           </div>
 
-          <div className="editor-grid editor-grid--three">
+          <div className="editor-grid editor-grid--four">
+            <label>
+              {messages.fontFamily}
+              <select
+                value={resolved.fontFamily ?? "serif"}
+                onChange={(event) => update({ fontFamily: event.target.value as FontFamily })}
+              >
+                <option value="system-ui">{messages.fontSystemUi}</option>
+                <option value="serif">{messages.fontSerif}</option>
+                <option value="rounded-sans">{messages.fontRoundedSans}</option>
+                <option value="monospace">{messages.fontMonospace}</option>
+                <option value="handwritten">{messages.fontHandwritten}</option>
+              </select>
+            </label>
             <label>
               {messages.slotShape}
               <select

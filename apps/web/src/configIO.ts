@@ -1,5 +1,6 @@
 import {
   DEFAULT_SHEET_THEME,
+  type FontFamily,
   type LocalizedString,
   type LocalizedText,
   type RallyConfig,
@@ -15,6 +16,13 @@ export const DRAFT_CONFIG_KEY = "stamprally:editor-draft:v1";
 export const PUBLISHED_CONFIG_KEY = "stamprally:published-config:v1";
 const MAX_CONDITION_DEPTH = 8;
 const HEX_COLOR_PATTERN = /^#[0-9a-fA-F]{6}$/;
+const FONT_FAMILIES = [
+  "system-ui",
+  "serif",
+  "rounded-sans",
+  "monospace",
+  "handwritten",
+] as const satisfies ReadonlyArray<FontFamily>;
 
 export type ConfigParseResult =
   | { readonly ok: true; readonly config: RallyConfig }
@@ -141,6 +149,13 @@ function parseTheme(value: unknown, errors: string[]): SheetTheme | undefined {
   if (unclaimedOpacity !== undefined && (unclaimedOpacity < 0.1 || unclaimedOpacity > 1)) {
     errors.push("theme.unclaimedOpacity must be between 0.1 and 1.");
   }
+  const fontFamily =
+    value.fontFamily === undefined
+      ? undefined
+      : FONT_FAMILIES.find((candidate) => candidate === value.fontFamily);
+  if (value.fontFamily !== undefined && fontFamily === undefined) {
+    errors.push(`theme.fontFamily must be one of: ${FONT_FAMILIES.join(", ")}.`);
+  }
 
   return {
     primaryColor,
@@ -152,6 +167,7 @@ function parseTheme(value: unknown, errors: string[]): SheetTheme | undefined {
     gridColumns,
     ...(unclaimedOpacity === undefined ? {} : { unclaimedOpacity }),
     ...(completedStampColor === undefined ? {} : { completedStampColor }),
+    ...(fontFamily === undefined ? {} : { fontFamily }),
   };
 }
 

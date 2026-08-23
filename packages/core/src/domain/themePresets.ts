@@ -17,6 +17,7 @@ export const THEME_PRESETS: ReadonlyArray<ThemePreset> = [
       gridColumns: 3,
       unclaimedOpacity: 1,
       completedStampColor: "#dc2626",
+      fontFamily: "serif",
     },
   },
   {
@@ -35,6 +36,7 @@ export const THEME_PRESETS: ReadonlyArray<ThemePreset> = [
       gridColumns: 3,
       unclaimedOpacity: 1,
       completedStampColor: "#34d399",
+      fontFamily: "system-ui",
     },
   },
   {
@@ -53,6 +55,7 @@ export const THEME_PRESETS: ReadonlyArray<ThemePreset> = [
       gridColumns: 2,
       unclaimedOpacity: 1,
       completedStampColor: "#f43f5e",
+      fontFamily: "rounded-sans",
     },
   },
   {
@@ -71,6 +74,7 @@ export const THEME_PRESETS: ReadonlyArray<ThemePreset> = [
       gridColumns: 3,
       unclaimedOpacity: 1,
       completedStampColor: "#b91c1c",
+      fontFamily: "handwritten",
     },
   },
   {
@@ -89,6 +93,7 @@ export const THEME_PRESETS: ReadonlyArray<ThemePreset> = [
       gridColumns: 4,
       unclaimedOpacity: 1,
       completedStampColor: "#a855f7",
+      fontFamily: "monospace",
     },
   },
 ];

@@ -440,6 +440,7 @@ function ParticipantApp({ locale, onLocaleChange }: ParticipantAppProps) {
           states={rewardsState}
           locale={locale}
           isPending={isPending}
+          isCompleted={progress.isCompleted}
           onRedeem={redeem}
           onNotify={(ok, message) => setToast({ kind: ok ? "success" : "error", message })}
         />

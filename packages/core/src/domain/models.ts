@@ -5,6 +5,7 @@ export type LocalizedString = Record<SupportedLocale, string>;
 export type LocalizedText = string | LocalizedString;
 
 export type SlotShape = "circle" | "square" | "rounded";
+export type FontFamily = "system-ui" | "serif" | "rounded-sans" | "monospace" | "handwritten";
 
 export interface SheetTheme {
   readonly primaryColor: string;
@@ -16,6 +17,7 @@ export interface SheetTheme {
   readonly gridColumns: number;
   readonly unclaimedOpacity?: number;
   readonly completedStampColor?: string;
+  readonly fontFamily?: FontFamily;
 }
 
 export type ThemePresetId = "default" | "modern_dark" | "pop_candy" | "retro_craft" | "cyber";
@@ -35,6 +37,7 @@ export const DEFAULT_SHEET_THEME: SheetTheme = {
   slotShape: "rounded",
   gridColumns: 3,
   unclaimedOpacity: 1,
+  fontFamily: "serif",
 };
 
 export interface SpotItem {

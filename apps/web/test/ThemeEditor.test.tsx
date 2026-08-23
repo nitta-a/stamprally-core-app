@@ -62,4 +62,17 @@ describe("ThemeEditor presets", () => {
     expect(screen.getByText("Detailed customization")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Apply “Cyber Neon” preset" })).toBeTruthy();
   });
+
+  it("immutably updates the selected sheet font", () => {
+    const onChange = vi.fn<(theme: SheetTheme) => void>();
+    const classic = preset("default");
+    render(<ThemeEditor theme={classic.theme} locale="ja" onChange={onChange} />);
+
+    fireEvent.change(screen.getByLabelText("台紙フォント"), {
+      target: { value: "handwritten" },
+    });
+
+    expect(onChange).toHaveBeenCalledWith({ ...classic.theme, fontFamily: "handwritten" });
+    expect(classic.theme.fontFamily).toBe("serif");
+  });
 });

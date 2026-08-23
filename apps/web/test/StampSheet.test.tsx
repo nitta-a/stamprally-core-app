@@ -217,6 +217,7 @@ describe("StampSheet", () => {
         gridColumns: 4,
         unclaimedOpacity: 0.45,
         completedStampColor: "#654321",
+        fontFamily: "monospace",
       },
     };
     const current = state([]);
@@ -241,6 +242,7 @@ describe("StampSheet", () => {
     expect(sheet.style.getPropertyValue("--stamp-grid-cols-mobile")).toBe("2");
     expect(sheet.style.getPropertyValue("--stamp-unclaimed-opacity")).toBe("0.45");
     expect(sheet.style.getPropertyValue("--stamp-completed-color")).toBe("#654321");
+    expect(sheet.style.getPropertyValue("--stamp-font-family")).toContain("ui-monospace");
     expect(sheet.style.getPropertyValue("--stamp-background-image")).toContain(
       "https://example.com/sheet.jpg",
     );
@@ -264,6 +266,7 @@ describe("StampSheet", () => {
     const sheet = requiredElement(container.querySelector<HTMLElement>(".stamp-sheet"));
     expect(sheet.style.getPropertyValue("--stamp-grid-cols")).toBe("3");
     expect(sheet.style.getPropertyValue("--stamp-completed-color")).toBe("");
+    expect(sheet.style.getPropertyValue("--stamp-font-family")).toContain("Georgia");
     expect(container.querySelectorAll(".stamp-slot--shape-rounded")).toHaveLength(2);
   });
 });

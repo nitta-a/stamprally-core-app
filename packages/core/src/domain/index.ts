@@ -8,6 +8,7 @@ export type {
 } from "./errors.js";
 export { resolveLocalizedText, toLocalizedString } from "./i18n.js";
 export type {
+  FontFamily,
   LocalizedString,
   LocalizedText,
   RallyConfig,

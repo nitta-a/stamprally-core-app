@@ -112,4 +112,35 @@ describe("RewardPanel", () => {
     expect(screen.getByText("Manual Reward")).toBeTruthy();
     expect(screen.getByText("Locked")).toBeTruthy();
   });
+
+  it("shows and dismisses the rally completion celebration", async () => {
+    const { rerender } = render(
+      <RewardPanel
+        rewards={[]}
+        states={[]}
+        locale="ja"
+        isPending={false}
+        isCompleted={false}
+        onRedeem={async (rewardId) => success(rewardId)}
+        onNotify={() => undefined}
+      />,
+    );
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    rerender(
+      <RewardPanel
+        rewards={[]}
+        states={[]}
+        locale="ja"
+        isPending={false}
+        isCompleted={true}
+        onRedeem={async (rewardId) => success(rewardId)}
+        onNotify={() => undefined}
+      />,
+    );
+
+    expect(await screen.findByRole("dialog", { name: "全スポット制覇！" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "台紙へ戻る" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
 });

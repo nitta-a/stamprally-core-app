@@ -21,6 +21,7 @@ import { getMessages } from "../../locales/index.js";
 import { LanguageSelector } from "../LanguageSelector.js";
 import { StampSheet } from "../StampSheet.js";
 import { GeneralSettingsForm } from "./GeneralSettingsForm.js";
+import { QrExportModal } from "./QrExportModal.js";
 import { RewardListEditor } from "./RewardListEditor.js";
 import { SpotItemForm } from "./SpotItemForm.js";
 import { ThemeEditor } from "./ThemeEditor.js";
@@ -57,6 +58,7 @@ export function RallyEditor({ locale, onLocaleChange }: RallyEditorProps) {
   );
   const [json, setJson] = useState(() => serializeRallyConfig(config));
   const [notice, setNotice] = useState<string | null>(null);
+  const [showQrExport, setShowQrExport] = useState(false);
   const validation = useMemo(() => parseRallyConfig(normalizeRallyConfig(config)), [config]);
   const previewState = useMemo(
     () => ({ rallyId: config.id, records: [], updatedAt: "" }),
@@ -177,6 +179,9 @@ export function RallyEditor({ locale, onLocaleChange }: RallyEditorProps) {
           <a className="secondary-button" href="?view=participant">
             {messages.participant}
           </a>
+          <button className="secondary-button" type="button" onClick={() => setShowQrExport(true)}>
+            {messages.printPop}
+          </button>
           <button
             className="primary-button"
             type="button"
@@ -289,6 +294,12 @@ export function RallyEditor({ locale, onLocaleChange }: RallyEditorProps) {
           />
         </aside>
       </div>
+      <QrExportModal
+        open={showQrExport}
+        config={config}
+        locale={locale}
+        onClose={() => setShowQrExport(false)}
+      />
     </main>
   );
 }

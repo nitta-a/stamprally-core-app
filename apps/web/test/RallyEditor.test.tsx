@@ -119,6 +119,9 @@ describe("RallyEditor", () => {
     fireEvent.change(screen.getByLabelText("グリッド列数"), {
       target: { value: "4" },
     });
+    fireEvent.change(screen.getByLabelText("台紙フォント"), {
+      target: { value: "rounded-sans" },
+    });
     fireEvent.change(screen.getByRole("slider", { name: "未獲得の不透明度" }), {
       target: { value: "0.5" },
     });
@@ -139,6 +142,7 @@ describe("RallyEditor", () => {
     expect(preview.style.getPropertyValue("--stamp-grid-cols-mobile")).toBe("2");
     expect(preview.style.getPropertyValue("--stamp-unclaimed-opacity")).toBe("0.5");
     expect(preview.style.getPropertyValue("--stamp-completed-color")).toBe("#654321");
+    expect(preview.style.getPropertyValue("--stamp-font-family")).toContain("Arial Rounded");
     expect(document.querySelector(".admin-preview .stamp-slot--shape-square")).not.toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "デモへ反映" }));
@@ -148,12 +152,14 @@ describe("RallyEditor", () => {
         primaryColor: string;
         backgroundImageUrl: string;
         completedStampColor: string;
+        fontFamily: string;
       };
     };
     expect(published.theme).toMatchObject({
       primaryColor: "#123456",
       backgroundImageUrl: "/images/theme.jpg",
       completedStampColor: "#654321",
+      fontFamily: "rounded-sans",
     });
   });
 
@@ -196,6 +202,7 @@ describe("RallyEditor", () => {
         slotShape: "rounded",
         gridColumns: 3,
         unclaimedOpacity: 0.8,
+        fontFamily: "serif",
       },
     };
     expect(parseRallyConfig(base).ok).toBe(true);
@@ -207,6 +214,9 @@ describe("RallyEditor", () => {
       false,
     );
     expect(parseRallyConfig({ ...base, theme: { ...base.theme, slotShape: "pill" } }).ok).toBe(
+      false,
+    );
+    expect(parseRallyConfig({ ...base, theme: { ...base.theme, fontFamily: "fantasy" } }).ok).toBe(
       false,
     );
     expect(

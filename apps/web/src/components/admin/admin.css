@@ -237,6 +237,9 @@
 .editor-grid--three {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
+.editor-grid--four {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
 .admin-card label,
 .condition-editor label {
   display: grid;
@@ -310,6 +313,105 @@
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   font-size: 0.8rem;
 }
+.qr-export-modal {
+  width: min(1180px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  padding: 24px;
+  border: 1px solid #b9ccc3;
+  border-radius: 22px;
+  color: #24342f;
+  background: #f7f5ed;
+  box-shadow: 0 30px 90px rgb(16 28 24 / 38%);
+}
+.qr-export-modal::backdrop {
+  background: rgb(20 33 29 / 62%);
+  backdrop-filter: blur(5px);
+}
+.qr-export-modal__toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 22px;
+}
+.qr-export-modal__toolbar h2,
+.qr-export-modal__toolbar p {
+  margin: 0;
+}
+.qr-export-modal__toolbar h2 {
+  margin-top: 4px;
+}
+.qr-export-modal__toolbar p:not(.eyebrow) {
+  margin-top: 7px;
+  color: #61716a;
+}
+.qr-pop-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+.qr-pop-card {
+  display: grid;
+  min-width: 0;
+  place-items: center;
+  padding: 18px;
+  border: 2px solid #1e5145;
+  border-radius: 16px;
+  background: #fff;
+  text-align: center;
+  break-inside: avoid;
+}
+.qr-pop-card header {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: #53665f;
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.qr-pop-card h3 {
+  margin: 14px 0 10px;
+  color: #173e34;
+  font-size: 1.35rem;
+}
+.qr-pop-card__qr,
+.qr-pop-card__loading {
+  width: min(210px, 85%);
+  aspect-ratio: 1;
+}
+.qr-pop-card__loading {
+  display: grid;
+  place-items: center;
+  border: 1px dashed #aabdb4;
+  color: #697a73;
+}
+.qr-pop-card__passcode {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 9px;
+  background: #edf4f0;
+}
+.qr-pop-card__passcode span,
+.qr-pop-card small {
+  color: #65756f;
+  font-size: 0.65rem;
+}
+.qr-pop-card__passcode strong {
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 0.92rem;
+  letter-spacing: 0.06em;
+}
+.qr-pop-card small {
+  margin-top: 9px;
+}
 .file-button {
   position: relative;
   display: inline-grid;
@@ -368,6 +470,9 @@
   .admin-preview {
     position: static;
   }
+  .qr-pop-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 @media (max-width: 700px) {
   .admin-hero,
@@ -378,6 +483,7 @@
   .localized-fields,
   .editor-grid,
   .editor-grid--three,
+  .editor-grid--four,
   .theme-color-grid {
     grid-template-columns: 1fr;
   }
@@ -386,5 +492,61 @@
   }
   .theme-preset-grid {
     grid-template-columns: 1fr;
+  }
+  .qr-export-modal__toolbar {
+    flex-direction: column;
+  }
+  .qr-pop-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 10mm;
+  }
+
+  body * {
+    visibility: hidden;
+  }
+
+  body .qr-export-modal,
+  body .qr-export-modal * {
+    visibility: visible;
+  }
+
+  body .qr-export-modal {
+    position: absolute;
+    inset: 0;
+    display: block;
+    width: auto;
+    max-width: none;
+    max-height: none;
+    overflow: visible;
+    padding: 0;
+    border: 0;
+    background: #fff;
+    box-shadow: none;
+  }
+
+  .qr-export-modal::backdrop,
+  .qr-export-modal__toolbar {
+    display: none;
+  }
+
+  .qr-pop-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8mm;
+  }
+
+  .qr-pop-card {
+    min-height: 78mm;
+    padding: 6mm;
+    border-radius: 3mm;
+  }
+
+  .qr-pop-card__qr {
+    width: 42mm;
   }
 }

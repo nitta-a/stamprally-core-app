@@ -42,6 +42,7 @@ describe("sheet theme", () => {
       slotShape: "rounded",
       gridColumns: 3,
       unclaimedOpacity: 1,
+      fontFamily: "serif",
     });
   });
 
@@ -66,6 +67,7 @@ describe("sheet theme", () => {
         gridColumns: theme.gridColumns,
         unclaimedOpacity: theme.unclaimedOpacity,
         completedStampColor: theme.completedStampColor,
+        fontFamily: theme.fontFamily,
       })),
     ).toEqual([
       {
@@ -78,6 +80,7 @@ describe("sheet theme", () => {
         gridColumns: 3,
         unclaimedOpacity: 1,
         completedStampColor: "#dc2626",
+        fontFamily: "serif",
       },
       {
         id: "modern_dark",
@@ -89,6 +92,7 @@ describe("sheet theme", () => {
         gridColumns: 3,
         unclaimedOpacity: 1,
         completedStampColor: "#34d399",
+        fontFamily: "system-ui",
       },
       {
         id: "pop_candy",
@@ -100,6 +104,7 @@ describe("sheet theme", () => {
         gridColumns: 2,
         unclaimedOpacity: 1,
         completedStampColor: "#f43f5e",
+        fontFamily: "rounded-sans",
       },
       {
         id: "retro_craft",
@@ -111,6 +116,7 @@ describe("sheet theme", () => {
         gridColumns: 3,
         unclaimedOpacity: 1,
         completedStampColor: "#b91c1c",
+        fontFamily: "handwritten",
       },
       {
         id: "cyber",
@@ -122,6 +128,7 @@ describe("sheet theme", () => {
         gridColumns: 4,
         unclaimedOpacity: 1,
         completedStampColor: "#a855f7",
+        fontFamily: "monospace",
       },
     ]);
     expect(THEME_PRESETS[0]?.name).toEqual({ ja: "クラシックブルー", en: "Classic Blue" });

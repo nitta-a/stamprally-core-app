@@ -1,4 +1,5 @@
 import type {
+  FontFamily,
   LocalizedText,
   RallyConfig,
   StampDefinition,
@@ -11,6 +12,14 @@ import type { CSSProperties } from "react";
 import { getMessages } from "../locales/index.js";
 import { type StampPresentation, StampSlot } from "./StampSlot.js";
 import "./StampSheet.css";
+
+const FONT_STACKS: Readonly<Record<FontFamily, string>> = {
+  "system-ui": 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+  serif: 'Georgia, "Times New Roman", "Yu Mincho", serif',
+  "rounded-sans": '"Arial Rounded MT Bold", "Hiragino Maru Gothic ProN", "Yu Gothic", sans-serif',
+  monospace: 'ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace',
+  handwritten: '"Segoe Print", "Bradley Hand", "Comic Sans MS", cursive',
+};
 
 export interface StampSheetProps {
   readonly title: LocalizedText;
@@ -66,6 +75,7 @@ export function StampSheet({
     "--stamp-grid-cols-mobile": String(Math.min(theme.gridColumns, 2)),
     "--stamp-unclaimed-opacity": String(theme.unclaimedOpacity ?? 1),
     "--stamp-background-image": backgroundImage,
+    "--stamp-font-family": FONT_STACKS[theme.fontFamily ?? "serif"],
     ...(theme.completedStampColor === undefined
       ? {}
       : { "--stamp-completed-color": theme.completedStampColor }),

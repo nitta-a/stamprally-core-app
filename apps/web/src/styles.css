@@ -312,6 +312,167 @@ h3 {
   color: #176d59;
 }
 
+.completion-celebration {
+  position: fixed;
+  z-index: 30;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgb(13 31 26 / 68%);
+  backdrop-filter: blur(6px);
+  animation: celebration-backdrop 280ms ease-out both;
+}
+
+.completion-celebration__card {
+  position: relative;
+  width: min(480px, 100%);
+  overflow: hidden;
+  padding: 38px clamp(24px, 6vw, 48px);
+  border: 2px solid #e7c877;
+  border-radius: 28px;
+  background: radial-gradient(circle at 50% 0, rgb(255 228 140 / 55%), transparent 42%), #fffdf4;
+  box-shadow: 0 34px 90px rgb(0 0 0 / 35%);
+  text-align: center;
+  animation: celebration-pop 720ms cubic-bezier(0.18, 0.9, 0.25, 1.2) both;
+}
+
+.completion-celebration__card h2 {
+  margin: 5px 0 10px;
+  color: #754616;
+  font-size: clamp(1.8rem, 7vw, 3rem);
+}
+
+.completion-celebration__card > p:not(.eyebrow) {
+  margin: 0 auto 24px;
+  color: #6c6254;
+  line-height: 1.7;
+}
+
+.completion-celebration__medal {
+  display: block;
+  font-size: 4.5rem;
+  filter: drop-shadow(0 8px 12px rgb(130 82 15 / 25%));
+  animation: medal-bounce 920ms 180ms cubic-bezier(0.2, 0.8, 0.25, 1.15) both;
+}
+
+.completion-celebration__confetti span {
+  position: absolute;
+  top: -20px;
+  left: calc(8% * var(--confetti-index, 1));
+  width: 8px;
+  height: 16px;
+  border-radius: 2px;
+  background: #e85d75;
+  animation: confetti-fall 1.5s ease-out both;
+}
+
+.completion-celebration__confetti span:nth-child(3n) {
+  background: #2b9d82;
+}
+
+.completion-celebration__confetti span:nth-child(3n + 2) {
+  background: #e3ad30;
+}
+
+.completion-celebration__confetti span:nth-child(1) {
+  --confetti-index: 1;
+}
+
+.completion-celebration__confetti span:nth-child(2) {
+  --confetti-index: 2;
+}
+
+.completion-celebration__confetti span:nth-child(3) {
+  --confetti-index: 3;
+}
+
+.completion-celebration__confetti span:nth-child(4) {
+  --confetti-index: 4;
+}
+
+.completion-celebration__confetti span:nth-child(5) {
+  --confetti-index: 5;
+}
+
+.completion-celebration__confetti span:nth-child(6) {
+  --confetti-index: 6;
+}
+
+.completion-celebration__confetti span:nth-child(7) {
+  --confetti-index: 7;
+}
+
+.completion-celebration__confetti span:nth-child(8) {
+  --confetti-index: 8;
+}
+
+.completion-celebration__confetti span:nth-child(9) {
+  --confetti-index: 9;
+}
+
+.completion-celebration__confetti span:nth-child(10) {
+  --confetti-index: 10;
+}
+
+.completion-celebration__confetti span:nth-child(11) {
+  --confetti-index: 11;
+}
+
+.completion-celebration__confetti span:nth-child(12) {
+  --confetti-index: 12;
+}
+
+@keyframes celebration-backdrop {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes celebration-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.68) rotate(-3deg);
+  }
+
+  70% {
+    transform: scale(1.04) rotate(1deg);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1) rotate(0);
+  }
+}
+
+@keyframes medal-bounce {
+  from {
+    opacity: 0;
+    transform: translateY(-60px) scale(1.6) rotate(-12deg);
+  }
+
+  60% {
+    transform: translateY(6px) scale(0.92) rotate(4deg);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1) rotate(0);
+  }
+}
+
+@keyframes confetti-fall {
+  from {
+    opacity: 1;
+    transform: translateY(0) rotate(0);
+  }
+
+  to {
+    opacity: 0;
+    transform: translateY(420px) rotate(640deg);
+  }
+}
+
 .section-heading {
   display: flex;
   align-items: flex-end;
@@ -629,7 +790,11 @@ footer {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .toast.success {
+  .toast.success,
+  .completion-celebration,
+  .completion-celebration__card,
+  .completion-celebration__medal,
+  .completion-celebration__confetti span {
     animation: none;
   }
 }

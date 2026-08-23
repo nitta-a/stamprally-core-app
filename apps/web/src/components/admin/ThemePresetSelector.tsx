@@ -24,9 +24,12 @@ function themesMatch(left: SheetTheme, right: SheetTheme): boolean {
     left.slotShape === right.slotShape &&
     left.gridColumns === right.gridColumns &&
     (left.unclaimedOpacity ?? 1) === (right.unclaimedOpacity ?? 1) &&
-    (left.completedStampColor ?? "") === (right.completedStampColor ?? "")
+    (left.completedStampColor ?? "") === (right.completedStampColor ?? "") &&
+    (left.fontFamily ?? DEFAULT_FONT_FAMILY) === (right.fontFamily ?? DEFAULT_FONT_FAMILY)
   );
 }
+
+const DEFAULT_FONT_FAMILY = "serif";
 
 export function ThemePresetSelector({ theme, locale, onChange }: ThemePresetSelectorProps) {
   const messages = getMessages(locale);

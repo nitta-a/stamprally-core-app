@@ -5,14 +5,30 @@ import {
   resolveLocalizedText,
   type SupportedLocale,
 } from "@stamprally/core";
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useEffect, useState } from "react";
 import { getMessages } from "../locales/index.js";
+
+const CONFETTI_PIECES = [
+  "piece-1",
+  "piece-2",
+  "piece-3",
+  "piece-4",
+  "piece-5",
+  "piece-6",
+  "piece-7",
+  "piece-8",
+  "piece-9",
+  "piece-10",
+  "piece-11",
+  "piece-12",
+] as const;
 
 interface RewardPanelProps {
   readonly rewards: ReadonlyArray<RewardItem>;
   readonly states: ReadonlyArray<RewardState>;
   readonly locale: SupportedLocale;
   readonly isPending: boolean;
+  readonly isCompleted?: boolean;
   readonly onRedeem: (
     rewardId: string,
     options?: { readonly passcode?: string; readonly staffId?: string },
@@ -29,12 +45,18 @@ export function RewardPanel({
   states,
   locale,
   isPending,
+  isCompleted = false,
   onRedeem,
   onNotify,
 }: RewardPanelProps) {
   const messages = getMessages(locale);
   const [passcodes, setPasscodes] = useState<Record<string, string>>({});
   const [slides, setSlides] = useState<Record<string, number>>({});
+  const [showCelebration, setShowCelebration] = useState(false);
+
+  useEffect(() => {
+    setShowCelebration(isCompleted);
+  }, [isCompleted]);
 
   async function redeem(reward: RewardItem, passcode?: string): Promise<void> {
     const result = await onRedeem(
@@ -161,6 +183,35 @@ export function RewardPanel({
               </article>
             );
           })}
+        </div>
+      )}
+      {showCelebration && (
+        <div className="completion-celebration" role="presentation">
+          <section
+            className="completion-celebration__card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="completion-celebration-title"
+          >
+            <div className="completion-celebration__confetti" aria-hidden="true">
+              {CONFETTI_PIECES.map((piece) => (
+                <span key={piece} />
+              ))}
+            </div>
+            <span className="completion-celebration__medal" aria-hidden="true">
+              🏆
+            </span>
+            <p className="eyebrow">COMPLETE</p>
+            <h2 id="completion-celebration-title">{messages.completionCelebrationTitle}</h2>
+            <p>{messages.completionCelebrationDescription}</p>
+            <button
+              className="primary-button"
+              type="button"
+              onClick={() => setShowCelebration(false)}
+            >
+              {messages.continueExploring}
+            </button>
+          </section>
         </div>
       )}
     </section>
