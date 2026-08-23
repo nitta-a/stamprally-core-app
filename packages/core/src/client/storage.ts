@@ -97,78 +97,110 @@ export class InMemoryStorage implements StampStorage {
 export interface LocalStorageAdapterOptions {
   readonly storage?: StorageLike | null;
   readonly keyPrefix?: string;
+  readonly failureMode?: LocalStorageFailureMode;
+  readonly onWarning?: StorageWarningHandler;
 }
+
+export type LocalStorageFailureMode = "fallback" | "throw";
+export type StorageWarningHandler = (error: StorageAdapterError) => void;
+
+const defaultStorageWarningHandler: StorageWarningHandler = (error) => {
+  console.warn(`[@stamprally/core] ${error.message}`, error);
+};
 
 export class LocalStorageAdapter implements StampStorage {
   readonly #providedStorage: StorageLike | null | undefined;
   readonly #keyPrefix: string;
+  readonly #failureMode: LocalStorageFailureMode;
+  readonly #onWarning: StorageWarningHandler;
+  readonly #fallbackStorage = new InMemoryStorage();
+  #isFallbackActive = false;
 
   constructor(options: LocalStorageAdapterOptions = {}) {
     this.#providedStorage = options.storage;
     this.#keyPrefix = options.keyPrefix ?? "stamprally:";
+    this.#failureMode = options.failureMode ?? "fallback";
+    this.#onWarning = options.onWarning ?? defaultStorageWarningHandler;
   }
 
   async load(rallyId: string): Promise<StampRallyState | null> {
-    const storage = this.#getStorage("load", rallyId);
-    let serialized: string | null;
-    try {
-      serialized = storage.getItem(this.#key(rallyId));
-    } catch (cause) {
-      throw new StorageAdapterError(
-        "STORAGE_READ_FAILED",
-        "load",
-        `Failed to read rally '${rallyId}' from localStorage.`,
-        { cause, rallyId },
-      );
-    }
-    if (serialized === null) return null;
+    if (this.#isFallbackActive) return this.#fallbackStorage.load(rallyId);
 
-    let parsed: unknown;
     try {
-      parsed = JSON.parse(serialized);
+      const serialized = this.#getStorage("load", rallyId).getItem(this.#key(rallyId));
+      if (serialized === null) return null;
+
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(serialized);
+      } catch (cause) {
+        throw new StorageAdapterError(
+          "STORAGE_INVALID_DATA",
+          "load",
+          `Stored rally '${rallyId}' is not valid JSON.`,
+          { cause, rallyId },
+        );
+      }
+      if (!isStampRallyState(parsed) || parsed.rallyId !== rallyId) {
+        throw new StorageAdapterError(
+          "STORAGE_INVALID_DATA",
+          "load",
+          `Stored rally '${rallyId}' has an invalid state shape.`,
+          { rallyId },
+        );
+      }
+      return cloneState(parsed);
     } catch (cause) {
-      throw new StorageAdapterError(
-        "STORAGE_INVALID_DATA",
-        "load",
-        `Stored rally '${rallyId}' is not valid JSON.`,
-        { cause, rallyId },
+      return this.#handleFailure(
+        this.#normalizeError(
+          cause,
+          "STORAGE_READ_FAILED",
+          "load",
+          `Failed to read rally '${rallyId}' from localStorage.`,
+          rallyId,
+        ),
+        () => this.#fallbackStorage.load(rallyId),
       );
     }
-    if (!isStampRallyState(parsed) || parsed.rallyId !== rallyId) {
-      throw new StorageAdapterError(
-        "STORAGE_INVALID_DATA",
-        "load",
-        `Stored rally '${rallyId}' has an invalid state shape.`,
-        { rallyId },
-      );
-    }
-    return cloneState(parsed);
   }
 
   async save(state: StampRallyState): Promise<void> {
-    const storage = this.#getStorage("save", state.rallyId);
+    if (this.#isFallbackActive) return this.#fallbackStorage.save(state);
+
     try {
-      storage.setItem(this.#key(state.rallyId), JSON.stringify(state));
+      this.#getStorage("save", state.rallyId).setItem(
+        this.#key(state.rallyId),
+        JSON.stringify(state),
+      );
     } catch (cause) {
-      throw new StorageAdapterError(
-        "STORAGE_WRITE_FAILED",
-        "save",
-        `Failed to save rally '${state.rallyId}' to localStorage.`,
-        { cause, rallyId: state.rallyId },
+      return this.#handleFailure(
+        this.#normalizeError(
+          cause,
+          "STORAGE_WRITE_FAILED",
+          "save",
+          `Failed to save rally '${state.rallyId}' to localStorage.`,
+          state.rallyId,
+        ),
+        () => this.#fallbackStorage.save(state),
       );
     }
   }
 
   async remove(rallyId: string): Promise<void> {
-    const storage = this.#getStorage("remove", rallyId);
+    if (this.#isFallbackActive) return this.#fallbackStorage.remove(rallyId);
+
     try {
-      storage.removeItem(this.#key(rallyId));
+      this.#getStorage("remove", rallyId).removeItem(this.#key(rallyId));
     } catch (cause) {
-      throw new StorageAdapterError(
-        "STORAGE_REMOVE_FAILED",
-        "remove",
-        `Failed to remove rally '${rallyId}' from localStorage.`,
-        { cause, rallyId },
+      return this.#handleFailure(
+        this.#normalizeError(
+          cause,
+          "STORAGE_REMOVE_FAILED",
+          "remove",
+          `Failed to remove rally '${rallyId}' from localStorage.`,
+          rallyId,
+        ),
+        () => this.#fallbackStorage.remove(rallyId),
       );
     }
   }
@@ -187,8 +219,16 @@ export class LocalStorageAdapter implements StampStorage {
       );
     }
     if (this.#providedStorage !== undefined) return this.#providedStorage;
+    if (typeof window === "undefined") {
+      throw new StorageAdapterError(
+        "STORAGE_UNAVAILABLE",
+        operation,
+        "localStorage is unavailable in this environment.",
+        { rallyId },
+      );
+    }
     try {
-      const storage = (globalThis as { readonly localStorage?: StorageLike }).localStorage;
+      const storage = window.localStorage;
       if (storage !== undefined) return storage;
     } catch (cause) {
       throw new StorageAdapterError(
@@ -204,6 +244,29 @@ export class LocalStorageAdapter implements StampStorage {
       "localStorage is unavailable in this environment.",
       { rallyId },
     );
+  }
+
+  #normalizeError(
+    cause: unknown,
+    code: StorageAdapterErrorCode,
+    operation: StorageOperation,
+    message: string,
+    rallyId: string,
+  ): StorageAdapterError {
+    return cause instanceof StorageAdapterError
+      ? cause
+      : new StorageAdapterError(code, operation, message, { cause, rallyId });
+  }
+
+  #handleFailure<T>(error: StorageAdapterError, fallback: () => Promise<T>): Promise<T> {
+    if (this.#failureMode === "throw") throw error;
+    this.#isFallbackActive = true;
+    try {
+      this.#onWarning(error);
+    } catch {
+      // Warning handlers must not prevent the safe in-memory fallback.
+    }
+    return fallback();
   }
 }
 

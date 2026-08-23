@@ -90,10 +90,17 @@ export function useStampRally(client: StampRallyClient): UseStampRallyReturn {
   useEffect(() => {
     let active = true;
     setClientError(null);
-    setClientStatus({ client, isInitializing: client.getState() === null });
+    if (rawState !== null) {
+      setClientStatus({ client, isInitializing: false });
+      return () => {
+        active = false;
+      };
+    }
+
+    setClientStatus({ client, isInitializing: true });
 
     void client
-      .initialize()
+      .init()
       .catch((initializationError: unknown) => {
         if (active) {
           setClientError({ client, value: toError(initializationError) });
@@ -108,7 +115,7 @@ export function useStampRally(client: StampRallyClient): UseStampRallyReturn {
     return () => {
       active = false;
     };
-  }, [client]);
+  }, [client, rawState]);
 
   const acquire = useCallback(
     (

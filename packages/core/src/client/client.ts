@@ -39,6 +39,10 @@ export class StampRallyClient {
     };
   }
 
+  init(): Promise<StampRallyState> {
+    return this.initialize();
+  }
+
   initialize(): Promise<StampRallyState> {
     if (this.#currentState !== null) {
       return Promise.resolve(this.#currentState);

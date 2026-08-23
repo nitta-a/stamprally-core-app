@@ -372,7 +372,9 @@ describe("storage adapters", () => {
     const webStorage = new MemoryWebStorage();
     webStorage.setItem(`stamprally:${sequentialConfig.id}`, "not-json");
     await expect(
-      new LocalStorageAdapter({ storage: webStorage }).load(sequentialConfig.id),
+      new LocalStorageAdapter({ storage: webStorage, failureMode: "throw" }).load(
+        sequentialConfig.id,
+      ),
     ).rejects.toMatchObject({ code: "STORAGE_INVALID_DATA", operation: "load" });
 
     const throwingStorage: StorageLike = {
@@ -386,18 +388,80 @@ describe("storage adapters", () => {
         throw new Error("blocked");
       },
     };
-    const failure = new LocalStorageAdapter({ storage: throwingStorage }).load(sequentialConfig.id);
+    const failure = new LocalStorageAdapter({
+      storage: throwingStorage,
+      failureMode: "throw",
+    }).load(sequentialConfig.id);
     await expect(failure).rejects.toBeInstanceOf(StorageAdapterError);
     await expect(failure).rejects.toMatchObject({ code: "STORAGE_READ_FAILED" });
   });
 
   it("reports explicitly unavailable browser storage", async () => {
     await expect(
-      new LocalStorageAdapter({ storage: null }).load(sequentialConfig.id),
+      new LocalStorageAdapter({ storage: null, failureMode: "throw" }).load(sequentialConfig.id),
     ).rejects.toMatchObject({ code: "STORAGE_UNAVAILABLE", operation: "load" });
     await expect(
       new IndexedDBAdapter({ indexedDB: null }).load(sequentialConfig.id),
     ).rejects.toMatchObject({ code: "STORAGE_UNAVAILABLE", operation: "open" });
+  });
+
+  it("falls back to session memory after a localStorage failure", async () => {
+    const warning = vi.fn();
+    const throwingStorage: StorageLike = {
+      getItem: () => {
+        throw new DOMException("blocked", "SecurityError");
+      },
+      setItem: () => {
+        throw new DOMException("full", "QuotaExceededError");
+      },
+      removeItem: () => {
+        throw new DOMException("blocked", "SecurityError");
+      },
+    };
+    const storage = new LocalStorageAdapter({ storage: throwingStorage, onWarning: warning });
+    const state = createState([{ stampId: "first", acquiredAt: NOW }]);
+
+    await expect(storage.load(state.rallyId)).resolves.toBeNull();
+    await storage.save(state);
+    await expect(storage.load(state.rallyId)).resolves.toEqual(state);
+    await storage.remove(state.rallyId);
+    await expect(storage.load(state.rallyId)).resolves.toBeNull();
+    expect(warning).toHaveBeenCalledTimes(1);
+    expect(warning).toHaveBeenCalledWith(
+      expect.objectContaining({ code: "STORAGE_READ_FAILED", operation: "load" }),
+    );
+  });
+
+  it("wraps QuotaExceededError as a typed strict-mode write failure", async () => {
+    const quotaStorage: StorageLike = {
+      getItem: () => null,
+      setItem: () => {
+        throw new DOMException("full", "QuotaExceededError");
+      },
+      removeItem: () => undefined,
+    };
+    const storage = new LocalStorageAdapter({
+      storage: quotaStorage,
+      failureMode: "throw",
+    });
+
+    await expect(storage.save(createState())).rejects.toMatchObject({
+      code: "STORAGE_WRITE_FAILED",
+      operation: "save",
+    });
+  });
+
+  it("uses the same fallback behavior when localStorage is unavailable during SSR", async () => {
+    const warning = vi.fn();
+    const storage = new LocalStorageAdapter({ storage: null, onWarning: warning });
+    const state = createState([{ stampId: "first", acquiredAt: NOW }]);
+
+    await storage.save(state);
+    await expect(storage.load(state.rallyId)).resolves.toEqual(state);
+    expect(warning).toHaveBeenCalledTimes(1);
+    expect(warning).toHaveBeenCalledWith(
+      expect.objectContaining({ code: "STORAGE_UNAVAILABLE", operation: "save" }),
+    );
   });
 
   it("round-trips and removes IndexedDB state", async () => {
@@ -426,7 +490,9 @@ describe("StampRallyClient", () => {
     const client = new StampRallyClient(sequentialConfig, storage, () => NOW);
     expect(client.getState()).toBeNull();
 
-    const initialized = await client.initialize();
+    const initialization = client.init();
+    expect(client.init()).toBe(initialization);
+    const initialized = await initialization;
     expect(client.getState()).toBe(initialized);
     expect(client.getState()).toBe(initialized);
 

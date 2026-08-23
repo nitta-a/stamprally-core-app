@@ -1,15 +1,23 @@
 import {
   type ConditionMismatch,
+  calculateDistanceMeters,
   calculateProgress,
+  type DetectorError,
+  getCurrentGeoContext,
+  isGeolocationSupported,
+  isNfcSupported,
+  isQrSupported,
   LocalStorageAdapter,
   type RallyConfig,
+  readNfcContext,
+  readQrContext,
   type StampError,
   StampRallyClient,
   StorageAdapterError,
   type VerificationContext,
 } from "@stamprally/core";
 import { useStampRally } from "@stamprally/react";
-import { type FormEvent, useEffect, useMemo, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 const DEMO_TOKEN = "STAMP-B-2026";
 const SPOT_C = {
@@ -45,6 +53,32 @@ const storage = new LocalStorageAdapter();
 
 type RallyMode = "sequential" | "free";
 type Toast = { readonly kind: "error" | "success"; readonly message: string };
+type ActiveDetector = "geolocation" | "nfc" | "qr";
+
+function describeDetectorError(error: DetectorError): string {
+  switch (error.code) {
+    case "UNSUPPORTED":
+      return error.detector === "nfc"
+        ? "この端末はWeb NFCに対応していません。手入力または模擬QRをご利用ください。"
+        : error.detector === "qr"
+          ? "このブラウザはライブQR読取に対応していません。手入力または模擬QRをご利用ください。"
+          : "このブラウザは位置情報取得に対応していません。";
+    case "PERMISSION_DENIED":
+      return "センサーの利用が拒否されました。ブラウザの権限設定を確認してください。";
+    case "POSITION_UNAVAILABLE":
+      return "現在地を取得できませんでした。屋外で再試行するかプリセット座標をご利用ください。";
+    case "TIMEOUT":
+      return "センサーの待機時間を超えました。もう一度お試しください。";
+    case "ABORTED":
+      return "センサーの読み取りをキャンセルしました。";
+    case "NO_TOKEN":
+      return "タグに読み取り可能なテキストトークンがありません。";
+    case "INVALID_DATA":
+      return "センサーから無効なデータが返されました。";
+    case "READ_FAILED":
+      return "センサーの読み取りに失敗しました。";
+  }
+}
 
 function findGeoMismatch(
   mismatch: ConditionMismatch,
@@ -100,8 +134,10 @@ export function App() {
   const [token, setToken] = useState("");
   const [latitude, setLatitude] = useState(String(OUTSIDE_PRESET.latitude));
   const [longitude, setLongitude] = useState(String(OUTSIDE_PRESET.longitude));
-  const [isLocating, setIsLocating] = useState(false);
+  const [activeDetector, setActiveDetector] = useState<ActiveDetector | null>(null);
   const [toast, setToast] = useState<Toast | null>(null);
+  const detectorController = useRef<AbortController | null>(null);
+  const qrVideo = useRef<HTMLVideoElement | null>(null);
 
   const config = useMemo<RallyConfig>(
     () => ({
@@ -117,13 +153,34 @@ export function App() {
     state ?? { rallyId: config.id, records: [], updatedAt: "" },
     config,
   );
-  const isBusy = isLoading || isPending;
+  const isBusy = isLoading || isPending || activeDetector !== null;
+  const currentLatitude = Number(latitude);
+  const currentLongitude = Number(longitude);
+  const currentDistance =
+    Number.isFinite(currentLatitude) && Number.isFinite(currentLongitude)
+      ? calculateDistanceMeters(
+          SPOT_C.latitude,
+          SPOT_C.longitude,
+          currentLatitude,
+          currentLongitude,
+        )
+      : null;
+  const geolocationSupported = isGeolocationSupported();
+  const nfcSupported = isNfcSupported();
+  const qrSupported = isQrSupported();
 
   useEffect(() => {
     if (error !== null) {
       setToast({ kind: "error", message: describeError(error, config) });
     }
   }, [config, error]);
+
+  useEffect(
+    () => () => {
+      detectorController.current?.abort();
+    },
+    [],
+  );
 
   const recordsById = new Map(state?.records.map((record) => [record.stampId, record]) ?? []);
   const nextAvailableIds = new Set(progress.nextAvailableStamps.map((stamp) => stamp.id));
@@ -172,29 +229,80 @@ export function App() {
     setToast(null);
   }
 
-  function requestCurrentLocation(): void {
-    if (!("geolocation" in navigator)) {
-      setToast({ kind: "error", message: "このブラウザは位置情報取得に対応していません。" });
+  function beginDetector(kind: ActiveDetector): AbortController | null {
+    if (detectorController.current !== null) return null;
+    const controller = new AbortController();
+    detectorController.current = controller;
+    setActiveDetector(kind);
+    setToast(null);
+    return controller;
+  }
+
+  function finishDetector(controller: AbortController): void {
+    if (detectorController.current !== controller) return;
+    detectorController.current = null;
+    setActiveDetector(null);
+  }
+
+  function cancelDetector(): void {
+    detectorController.current?.abort();
+  }
+
+  async function requestCurrentLocation(): Promise<void> {
+    const controller = beginDetector("geolocation");
+    if (controller === null) return;
+    try {
+      const result = await getCurrentGeoContext({ enableHighAccuracy: true, timeout: 10_000 });
+      if (controller.signal.aborted) return;
+      if (!result.ok) {
+        setToast({ kind: "error", message: describeDetectorError(result.error) });
+        return;
+      }
+      setLatitude(result.value.currentLatitude.toFixed(6));
+      setLongitude(result.value.currentLongitude.toFixed(6));
+      await tryAcquire("spot-c", result.value);
+    } finally {
+      finishDetector(controller);
+    }
+  }
+
+  async function scanNfc(): Promise<void> {
+    const controller = beginDetector("nfc");
+    if (controller === null) return;
+    try {
+      const result = await readNfcContext({ signal: controller.signal });
+      if (!result.ok) {
+        setToast({ kind: "error", message: describeDetectorError(result.error) });
+        return;
+      }
+      setToken(result.value.token);
+      await tryAcquire("spot-b", result.value);
+    } finally {
+      finishDetector(controller);
+    }
+  }
+
+  async function scanQr(): Promise<void> {
+    const controller = beginDetector("qr");
+    if (controller === null) return;
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    const video = qrVideo.current;
+    if (video === null) {
+      finishDetector(controller);
+      setToast({ kind: "error", message: "QRプレビューを初期化できませんでした。" });
       return;
     }
-    setIsLocating(true);
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        setLatitude(position.coords.latitude.toFixed(6));
-        setLongitude(position.coords.longitude.toFixed(6));
-        setIsLocating(false);
-        setToast({ kind: "success", message: "現在地を取得しました。" });
-      },
-      (locationError) => {
-        setIsLocating(false);
-        const message =
-          locationError.code === locationError.PERMISSION_DENIED
-            ? "位置情報の利用が拒否されました。プリセット座標でも検証できます。"
-            : "現在地を取得できませんでした。プリセット座標をお試しください。";
-        setToast({ kind: "error", message });
-      },
-      { enableHighAccuracy: true, timeout: 10_000, maximumAge: 0 },
-    );
+    try {
+      const result = await readQrContext(video, { signal: controller.signal });
+      if (!result.ok) {
+        setToast({ kind: "error", message: describeDetectorError(result.error) });
+        return;
+      }
+      setToken(result.value.token);
+      await tryAcquire("spot-b", result.value);
+    } finally {
+      finishDetector(controller);
+    }
   }
 
   async function clearState(): Promise<void> {
@@ -334,7 +442,7 @@ export function App() {
                 <span className="spot-index">B</span>
                 <div>
                   <h2>QR Token</h2>
-                  <p>文字列一致をQRとして模擬</p>
+                  <p>手入力・QRカメラ・NFC</p>
                 </div>
                 <span className={`status-badge ${recordsById.has("spot-b") ? "done" : ""}`}>
                   {statusFor("spot-b")}
@@ -366,6 +474,67 @@ export function App() {
                   </button>
                 </div>
               </form>
+              <div className="detector-block">
+                <div className="detector-heading">
+                  <strong>Live QR camera</strong>
+                  <span className={`support-badge ${qrSupported ? "supported" : ""}`}>
+                    {qrSupported ? "対応" : "非対応"}
+                  </span>
+                </div>
+                {/* biome-ignore lint/a11y/useMediaCaption: The muted camera preview has no audio content. */}
+                <video
+                  ref={qrVideo}
+                  className={`qr-preview ${activeDetector === "qr" ? "active" : ""}`}
+                  aria-label="QRカメラプレビュー"
+                />
+                <div className="button-row">
+                  <button
+                    className="secondary-button"
+                    type="button"
+                    disabled={isBusy || !qrSupported}
+                    onClick={() => void scanQr()}
+                  >
+                    {activeDetector === "qr" ? "QR待機中…" : "ライブQRをスキャン"}
+                  </button>
+                  {activeDetector === "qr" && (
+                    <button
+                      className="secondary-button cancel-button"
+                      type="button"
+                      onClick={cancelDetector}
+                    >
+                      キャンセル
+                    </button>
+                  )}
+                </div>
+              </div>
+              <div className="detector-block">
+                <div className="detector-heading">
+                  <strong>Web NFC</strong>
+                  <span className={`support-badge ${nfcSupported ? "supported" : ""}`}>
+                    {nfcSupported ? "対応" : "非対応"}
+                  </span>
+                </div>
+                <p className="detector-note">HTTPS・対応Android端末・権限許可が必要です。</p>
+                <div className="button-row">
+                  <button
+                    className="secondary-button"
+                    type="button"
+                    disabled={isBusy || !nfcSupported}
+                    onClick={() => void scanNfc()}
+                  >
+                    {activeDetector === "nfc" ? "NFC待機中…" : "NFCタグをスキャン"}
+                  </button>
+                  {activeDetector === "nfc" && (
+                    <button
+                      className="secondary-button cancel-button"
+                      type="button"
+                      onClick={cancelDetector}
+                    >
+                      キャンセル
+                    </button>
+                  )}
+                </div>
+              </div>
               <StampTimestamp acquiredAt={recordsById.get("spot-b")?.acquiredAt} />
             </article>
 
@@ -406,10 +575,12 @@ export function App() {
                 <button
                   className="secondary-button"
                   type="button"
-                  onClick={requestCurrentLocation}
-                  disabled={isBusy || isLocating}
+                  onClick={() => void requestCurrentLocation()}
+                  disabled={isBusy || !geolocationSupported}
                 >
-                  {isLocating ? "GPS取得中…" : "現在地を使用"}
+                  {activeDetector === "geolocation"
+                    ? "GPS取得中…"
+                    : "ブラウザの現在地を取得して押印"}
                 </button>
                 <button
                   className="secondary-button"
@@ -428,11 +599,12 @@ export function App() {
                   圏外プリセット
                 </button>
               </div>
-              <button
-                type="button"
-                onClick={() => void acquireGeoStamp()}
-                disabled={isBusy || isLocating}
-              >
+              <p className="distance-readout" aria-live="polite">
+                {currentDistance === null
+                  ? "有効な座標を入力すると目標地点までの距離を表示します。"
+                  : `現在座標: ${currentLatitude.toFixed(6)}, ${currentLongitude.toFixed(6)} · 目標まで約${Math.round(currentDistance)}m`}
+              </p>
+              <button type="button" onClick={() => void acquireGeoStamp()} disabled={isBusy}>
                 {isPending
                   ? "処理中…"
                   : recordsById.has("spot-c")

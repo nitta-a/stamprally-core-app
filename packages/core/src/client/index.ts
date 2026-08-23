@@ -3,10 +3,12 @@ export { StampRallyClient } from "./client.js";
 export type {
   IndexedDBAdapterOptions,
   LocalStorageAdapterOptions,
+  LocalStorageFailureMode,
   StampStorage,
   StorageAdapterErrorCode,
   StorageLike,
   StorageOperation,
+  StorageWarningHandler,
 } from "./storage.js";
 export {
   IndexedDBAdapter,

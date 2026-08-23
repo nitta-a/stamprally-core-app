@@ -6,7 +6,7 @@ import {
   type StampStorage,
 } from "@stamprally/core";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { useStampRally } from "../src/index.js";
 
 const NOW = "2026-08-23T12:00:00.000Z";
@@ -62,6 +62,24 @@ class ControlledStorage implements StampStorage {
 afterEach(cleanup);
 
 describe("useStampRally", () => {
+  it("initializes only a client whose synchronous snapshot is null", async () => {
+    const initializedClient = new StampRallyClient(config, new InMemoryStorage(), () => NOW);
+    await initializedClient.init();
+    const initializedSpy = vi.spyOn(initializedClient, "init");
+    const initializedHook = renderHook(() => useStampRally(initializedClient));
+
+    await waitFor(() => expect(initializedHook.result.current.isLoading).toBe(false));
+    expect(initializedSpy).not.toHaveBeenCalled();
+    initializedHook.unmount();
+
+    const freshClient = new StampRallyClient(config, new InMemoryStorage(), () => NOW);
+    const freshSpy = vi.spyOn(freshClient, "init");
+    const freshHook = renderHook(() => useStampRally(freshClient));
+
+    await waitFor(() => expect(freshHook.result.current.isLoading).toBe(false));
+    expect(freshSpy).toHaveBeenCalledTimes(1);
+  });
+
   it("restores, subscribes, and switches clients without mirroring store state", async () => {
     const firstStorage = new InMemoryStorage();
     await firstStorage.save({
