@@ -1,0 +1,38 @@
+{
+  "name": "@stamprally/react",
+  "version": "0.1.0",
+  "description": "React hooks for @stamprally/core.",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "files": [
+    "dist"
+  ],
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@stamprally/core": "workspace:*"
+  },
+  "peerDependencies": {
+    "react": ">=18.2.0 <20.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.18",
+    "react": "^19.2.8",
+    "tsup": "^8.5.1",
+    "typescript": "^6.0.3"
+  }
+}
