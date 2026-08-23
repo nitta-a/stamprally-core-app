@@ -1,0 +1,659 @@
+.stamp-sheet {
+  position: relative;
+  isolation: isolate;
+  margin-top: 22px;
+  overflow: hidden;
+  padding: clamp(20px, 4vw, 38px);
+  border: 1px solid #d4c59f;
+  border-radius: 24px;
+  color: #352f25;
+  background-color: #fbf4df;
+  background-image:
+    repeating-linear-gradient(0deg, rgb(105 81 40 / 3%) 0 1px, transparent 1px 5px),
+    repeating-linear-gradient(90deg, rgb(105 81 40 / 2%) 0 1px, transparent 1px 7px),
+    radial-gradient(circle at 16% 12%, rgb(255 255 255 / 75%), transparent 28rem);
+  box-shadow:
+    inset 0 0 0 7px rgb(126 98 49 / 5%),
+    0 24px 65px rgb(54 44 27 / 14%);
+}
+
+.stamp-sheet::before {
+  position: absolute;
+  z-index: -1;
+  inset: 12px;
+  border: 1px solid rgb(120 93 46 / 18%);
+  border-radius: 17px;
+  pointer-events: none;
+  content: "";
+}
+
+.stamp-sheet__header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  padding-bottom: 18px;
+  border-bottom: 2px solid rgb(96 72 33 / 20%);
+}
+
+.stamp-sheet__kicker {
+  margin: 0 0 5px;
+  color: #9e551e;
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.stamp-sheet__header h2 {
+  margin: 0;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(1.25rem, 3vw, 2.05rem);
+  letter-spacing: 0.045em;
+}
+
+.stamp-sheet__score {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: baseline;
+  gap: 8px;
+  color: #873b26;
+}
+
+.stamp-sheet__score strong {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(1.7rem, 4vw, 2.7rem);
+  line-height: 1;
+}
+
+.stamp-sheet__score span {
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+}
+
+.stamp-sheet__progress-label {
+  display: flex;
+  justify-content: space-between;
+  margin: 17px 0 7px;
+  color: #756446;
+  font-size: 0.72rem;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.stamp-sheet__progress-track {
+  height: 10px;
+  overflow: hidden;
+  border: 1px solid rgb(102 78 38 / 20%);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 55%);
+}
+
+.stamp-sheet__progress-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #a9412a, #d67047);
+  transition: width 300ms ease;
+}
+
+.stamp-sheet__grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: clamp(12px, 2.5vw, 22px);
+  margin-top: 25px;
+}
+
+.stamp-slot {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  min-height: 210px;
+  overflow: hidden;
+  flex-direction: column;
+  align-items: stretch;
+  padding: 15px;
+  border: 2px dashed #b6aa91;
+  border-radius: 18px;
+  color: #4a453c;
+  text-align: left;
+  background: rgb(255 255 255 / 28%);
+  cursor: pointer;
+  transition:
+    transform 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.stamp-slot:hover:not(:disabled) {
+  z-index: 1;
+  transform: translateY(-3px);
+  box-shadow: 0 12px 25px rgb(75 57 28 / 13%);
+}
+
+.stamp-slot:focus-visible,
+.stamp-modal button:focus-visible,
+.stamp-modal input:focus-visible {
+  outline: 3px solid rgb(33 110 144 / 35%);
+  outline-offset: 3px;
+}
+
+.stamp-slot:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.stamp-slot--locked {
+  filter: grayscale(0.85);
+  opacity: 0.68;
+}
+
+.stamp-slot--available {
+  border-color: #b2672d;
+  background: rgb(255 252 237 / 72%);
+  box-shadow: inset 0 0 0 3px rgb(178 103 45 / 8%);
+}
+
+.stamp-slot--stamped {
+  border-style: solid;
+  border-color: rgb(123 91 45 / 26%);
+  background: rgb(255 253 245 / 70%);
+}
+
+.stamp-slot__topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.stamp-slot__number {
+  color: #84775f;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+}
+
+.stamp-slot__state {
+  padding: 4px 7px;
+  border-radius: 999px;
+  font-size: 0.58rem;
+  font-weight: 900;
+  letter-spacing: 0.11em;
+}
+
+.stamp-slot__state--locked {
+  color: #777166;
+  background: #e6e0d4;
+}
+
+.stamp-slot__state--available {
+  color: #8b461e;
+  background: #ffe0ad;
+}
+
+.stamp-slot__state--stamped {
+  color: #fff7ef;
+  background: #774130;
+}
+
+.stamp-slot__watermark {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  color: #6e675d;
+  font-size: clamp(3.2rem, 8vw, 5.3rem);
+  filter: grayscale(1);
+  opacity: 0.075;
+  transform: translate(-50%, -50%) rotate(-9deg);
+  pointer-events: none;
+}
+
+.stamp-slot__name {
+  position: relative;
+  z-index: 1;
+  margin-top: auto;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(1rem, 2vw, 1.25rem);
+  font-weight: 800;
+  line-height: 1.15;
+}
+
+.stamp-slot__condition {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  color: #746854;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.stamp-imprint {
+  position: absolute;
+  z-index: 2;
+  top: 43%;
+  left: 50%;
+  display: grid;
+  width: min(132px, 72%);
+  aspect-ratio: 1;
+  place-items: center;
+  border: 5px double currentcolor;
+  border-radius: 50%;
+  opacity: 0.88;
+  background-image: repeating-radial-gradient(
+    circle at 25% 35%,
+    transparent 0 4px,
+    currentcolor 4px 5px,
+    transparent 5px 10px
+  );
+  background-size: 17px 19px;
+  box-shadow:
+    inset 0 0 0 4px rgb(255 255 255 / 45%),
+    inset 0 0 0 7px currentcolor;
+  transform: translate(-50%, -50%) rotate(-5deg);
+  mix-blend-mode: multiply;
+}
+
+.stamp-slot--vermilion .stamp-imprint {
+  color: #b33c2e;
+}
+
+.stamp-slot--indigo .stamp-imprint {
+  color: #285c85;
+}
+
+.stamp-imprint__inner {
+  display: flex;
+  width: 75%;
+  height: 75%;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid currentcolor;
+  border-radius: 50%;
+  background: rgb(251 244 223 / 84%);
+}
+
+.stamp-imprint__word {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(0.85rem, 2vw, 1.12rem);
+  font-weight: 950;
+  letter-spacing: 0.08em;
+}
+
+.stamp-imprint__date {
+  max-width: 88%;
+  margin-top: 5px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: clamp(0.48rem, 1vw, 0.58rem);
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.stamp-press {
+  will-change: transform, opacity;
+  animation: stamp-press 760ms cubic-bezier(0.2, 0.8, 0.25, 1.15) both;
+}
+
+.stamp-sheet__complete-mark {
+  position: absolute;
+  z-index: 4;
+  top: 49%;
+  left: 50%;
+  padding: 9px 18px;
+  border: 7px double currentcolor;
+  color: rgb(157 47 36 / 58%);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(2rem, 8vw, 5.4rem);
+  font-weight: 950;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  transform: translate(-50%, -50%) rotate(-12deg);
+  pointer-events: none;
+  mix-blend-mode: multiply;
+  animation: complete-reveal 580ms ease-out both;
+}
+
+.stamp-sheet__complete-message {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 21px;
+  padding: 12px 16px;
+  border-radius: 12px;
+  color: #74422f;
+  background: rgb(255 255 255 / 55%);
+  text-align: left;
+}
+
+.stamp-sheet__complete-message > span {
+  font-size: 1.6rem;
+}
+
+.stamp-sheet__complete-message div {
+  display: flex;
+  flex-direction: column;
+}
+
+.stamp-sheet__complete-message strong {
+  font-size: 0.78rem;
+  letter-spacing: 0.09em;
+}
+
+.stamp-sheet__complete-message div span {
+  color: #786c59;
+  font-size: 0.72rem;
+}
+
+.stamp-modal {
+  width: min(620px, calc(100vw - 28px));
+  max-height: min(820px, calc(100vh - 28px));
+  overflow: auto;
+  padding: 0;
+  border: 1px solid #d7c59a;
+  border-radius: 20px;
+  color: #282c29;
+  background: #fffdf6;
+  box-shadow: 0 30px 90px rgb(16 28 24 / 35%);
+}
+
+.stamp-modal::backdrop {
+  background: rgb(20 33 29 / 58%);
+  backdrop-filter: blur(4px);
+}
+
+.stamp-modal__content {
+  padding: clamp(20px, 4vw, 30px);
+}
+
+.stamp-modal__header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 13px;
+  padding-bottom: 17px;
+  border-bottom: 1px solid #e4dac1;
+}
+
+.stamp-modal__header p,
+.stamp-modal__header h2 {
+  margin: 0;
+}
+
+.stamp-modal__header p {
+  color: #8e7043;
+  font-size: 0.68rem;
+  font-weight: 850;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.stamp-modal__header h2 {
+  margin-top: 3px;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.35rem;
+}
+
+.stamp-modal__icon {
+  display: grid;
+  width: 48px;
+  height: 48px;
+  place-items: center;
+  border: 2px solid currentcolor;
+  border-radius: 50%;
+  font-size: 1.4rem;
+}
+
+.stamp-modal__icon--vermilion {
+  color: #ae4332;
+}
+
+.stamp-modal__icon--indigo {
+  color: #2e638b;
+}
+
+.stamp-modal__close {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border-radius: 50%;
+  color: #5d665f;
+  font-size: 1.45rem;
+  background: #edf1ed;
+  cursor: pointer;
+}
+
+.stamp-modal__notice,
+.stamp-modal__feedback {
+  margin: 14px 0 0;
+  padding: 11px 13px;
+  border-radius: 10px;
+  color: #53635c;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  background: #edf4f0;
+}
+
+.stamp-modal__notice--locked,
+.stamp-modal__feedback--error {
+  color: #803b32;
+  background: #fff0ed;
+}
+
+.stamp-modal__feedback--success {
+  color: #17604e;
+  background: #e4f6ed;
+}
+
+.stamp-modal__body {
+  margin-top: 19px;
+}
+
+.stamp-modal__action-panel {
+  display: grid;
+  gap: 13px;
+}
+
+.stamp-modal__action-panel > p {
+  margin: 0;
+  color: #66736d;
+  line-height: 1.6;
+}
+
+.primary-button,
+.stamp-modal .primary-button {
+  padding: 12px 16px;
+  border: 0;
+  border-radius: 11px;
+  color: #fff;
+  font-weight: 800;
+  background: #176d59;
+  cursor: pointer;
+}
+
+.stamp-modal__tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding: 4px;
+  border-radius: 12px;
+  background: #edf0ea;
+}
+
+.stamp-modal__tabs button {
+  padding: 9px 12px;
+  border-radius: 9px;
+  color: #5c6761;
+  font-weight: 800;
+  background: transparent;
+  cursor: pointer;
+}
+
+.stamp-modal__tabs button.active {
+  color: #fff;
+  background: #315e52;
+}
+
+.stamp-modal__sensor-panel,
+.stamp-modal__token-form {
+  display: grid;
+  gap: 11px;
+}
+
+.stamp-modal__token-form label,
+.stamp-modal__coordinate-grid label {
+  color: #58655f;
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+.stamp-modal__geo-details {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+}
+
+.stamp-modal__geo-details div {
+  padding: 11px 12px;
+  border-radius: 10px;
+  background: #f0f3ed;
+}
+
+.stamp-modal__geo-details dt {
+  color: #8d7752;
+  font-size: 0.62rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.stamp-modal__geo-details dd {
+  margin: 4px 0 0;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 0.75rem;
+}
+
+.stamp-modal__coordinate-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.stamp-modal__coordinate-grid input {
+  display: block;
+  margin-top: 5px;
+}
+
+.stamp-modal__distance {
+  margin: 0;
+  color: #765f3b;
+  font-size: 0.78rem;
+  font-weight: 750;
+}
+
+@keyframes stamp-press {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -130%) scale(2) rotate(-15deg);
+  }
+
+  52% {
+    opacity: 0.95;
+    transform: translate(-50%, -50%) scale(0.88) rotate(-3deg);
+  }
+
+  72% {
+    transform: translate(-50%, -50%) scale(1.08) rotate(-7deg);
+  }
+
+  100% {
+    opacity: 0.88;
+    transform: translate(-50%, -50%) scale(1) rotate(-5deg);
+  }
+}
+
+@keyframes complete-reveal {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -50%) rotate(-18deg) scale(1.65);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) rotate(-12deg) scale(1);
+  }
+}
+
+@media (max-width: 760.98px) {
+  .stamp-sheet__grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .stamp-slot {
+    min-height: 185px;
+    padding: 12px;
+  }
+
+  .stamp-sheet__complete-mark {
+    top: 52%;
+  }
+}
+
+@media (max-width: 480px) {
+  .stamp-sheet {
+    padding: 18px 13px;
+    border-radius: 18px;
+  }
+
+  .stamp-sheet::before {
+    inset: 7px;
+  }
+
+  .stamp-sheet__header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 11px;
+  }
+
+  .stamp-sheet__score {
+    align-self: flex-end;
+  }
+
+  .stamp-sheet__grid {
+    gap: 9px;
+  }
+
+  .stamp-slot {
+    min-height: 168px;
+  }
+
+  .stamp-imprint {
+    width: min(108px, 75%);
+  }
+
+  .stamp-modal__coordinate-grid,
+  .stamp-modal__geo-details {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stamp-press,
+  .stamp-sheet__complete-mark {
+    animation: none;
+  }
+
+  .stamp-slot,
+  .stamp-sheet__progress-fill {
+    transition: none;
+  }
+}
