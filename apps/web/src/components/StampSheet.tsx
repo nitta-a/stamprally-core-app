@@ -6,7 +6,8 @@ import type {
   StampRallyState,
   SupportedLocale,
 } from "@stamprally/core";
-import { resolveLocalizedText } from "@stamprally/core";
+import { DEFAULT_SHEET_THEME, resolveLocalizedText } from "@stamprally/core";
+import type { CSSProperties } from "react";
 import { getMessages } from "../locales/index.js";
 import { type StampPresentation, StampSlot } from "./StampSlot.js";
 import "./StampSheet.css";
@@ -49,11 +50,33 @@ export function StampSheet({
   onStampSelect,
 }: StampSheetProps) {
   const messages = getMessages(locale);
+  const theme = config.theme ?? DEFAULT_SHEET_THEME;
   const records = new Map(state?.records.map((record) => [record.stampId, record]) ?? []);
   const nextIds = new Set(progress.nextAvailableStamps.map((stamp) => stamp.id));
+  const backgroundImage =
+    theme.backgroundImageUrl === undefined
+      ? "none"
+      : `url(${JSON.stringify(theme.backgroundImageUrl)})`;
+  const themeStyles = {
+    "--stamp-primary": theme.primaryColor,
+    "--stamp-bg": theme.backgroundColor ?? DEFAULT_SHEET_THEME.backgroundColor ?? "#ffffff",
+    "--stamp-card-bg": theme.cardBackgroundColor,
+    "--stamp-text": theme.textColor,
+    "--stamp-grid-cols": String(theme.gridColumns),
+    "--stamp-grid-cols-mobile": String(Math.min(theme.gridColumns, 2)),
+    "--stamp-unclaimed-opacity": String(theme.unclaimedOpacity ?? 1),
+    "--stamp-background-image": backgroundImage,
+    ...(theme.completedStampColor === undefined
+      ? {}
+      : { "--stamp-completed-color": theme.completedStampColor }),
+  } as CSSProperties;
 
   return (
-    <section className={`stamp-sheet ${progress.isCompleted ? "stamp-sheet--completed" : ""}`}>
+    <section
+      className={`stamp-sheet ${progress.isCompleted ? "stamp-sheet--completed" : ""}`}
+      style={themeStyles}
+      data-grid-columns={theme.gridColumns}
+    >
       <header className="stamp-sheet__header">
         <div>
           <p className="stamp-sheet__kicker">{messages.officialSheet}</p>
@@ -93,6 +116,7 @@ export function StampSheet({
             presentation={presentations[stamp.id] ?? fallbackPresentation(stamp)}
             isAnimating={animatedStampId === stamp.id && records.has(stamp.id)}
             disabled={disabled}
+            slotShape={theme.slotShape}
             locale={locale}
             onSelect={() => onStampSelect(stamp.id)}
           />

@@ -203,4 +203,72 @@ describe("StampSheet", () => {
     expect(screen.getByText("First Place")).toBeTruthy();
     expect(screen.getByText("1 spots remaining")).toBeTruthy();
   });
+
+  it("binds a custom theme to CSS variables and slot shape classes", () => {
+    const themedConfig: RallyConfig = {
+      ...config,
+      theme: {
+        primaryColor: "#123456",
+        backgroundColor: "#f0f1f2",
+        backgroundImageUrl: "https://example.com/sheet.jpg",
+        cardBackgroundColor: "#abcdef",
+        textColor: "#111111",
+        slotShape: "circle",
+        gridColumns: 4,
+        unclaimedOpacity: 0.45,
+        completedStampColor: "#654321",
+      },
+    };
+    const current = state([]);
+    const { container } = render(
+      <StampSheet
+        title="THEMED RALLY"
+        config={themedConfig}
+        state={current}
+        progress={calculateProgress(current, themedConfig)}
+        presentations={presentations}
+        animatedStampId={null}
+        disabled={false}
+        onStampSelect={() => undefined}
+      />,
+    );
+    const sheet = requiredElement(container.querySelector<HTMLElement>(".stamp-sheet"));
+    expect(sheet.style.getPropertyValue("--stamp-primary")).toBe("#123456");
+    expect(sheet.style.getPropertyValue("--stamp-bg")).toBe("#f0f1f2");
+    expect(sheet.style.getPropertyValue("--stamp-card-bg")).toBe("#abcdef");
+    expect(sheet.style.getPropertyValue("--stamp-text")).toBe("#111111");
+    expect(sheet.style.getPropertyValue("--stamp-grid-cols")).toBe("4");
+    expect(sheet.style.getPropertyValue("--stamp-grid-cols-mobile")).toBe("2");
+    expect(sheet.style.getPropertyValue("--stamp-unclaimed-opacity")).toBe("0.45");
+    expect(sheet.style.getPropertyValue("--stamp-completed-color")).toBe("#654321");
+    expect(sheet.style.getPropertyValue("--stamp-background-image")).toContain(
+      "https://example.com/sheet.jpg",
+    );
+    expect(container.querySelectorAll(".stamp-slot--shape-circle")).toHaveLength(2);
+  });
+
+  it("uses the default theme and preserves presentation ink when theme is omitted", () => {
+    const current = state([]);
+    const { container } = render(
+      <StampSheet
+        title="DEFAULT RALLY"
+        config={config}
+        state={current}
+        progress={calculateProgress(current, config)}
+        presentations={presentations}
+        animatedStampId={null}
+        disabled={false}
+        onStampSelect={() => undefined}
+      />,
+    );
+    const sheet = requiredElement(container.querySelector<HTMLElement>(".stamp-sheet"));
+    expect(sheet.style.getPropertyValue("--stamp-grid-cols")).toBe("3");
+    expect(sheet.style.getPropertyValue("--stamp-completed-color")).toBe("");
+    expect(container.querySelectorAll(".stamp-slot--shape-rounded")).toHaveLength(2);
+  });
 });
+
+function requiredElement<T>(value: T | null): T {
+  if (value === null) throw new Error("Expected element was not rendered.");
+  return value;
+}

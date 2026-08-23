@@ -1,8 +1,11 @@
 import {
+  DEFAULT_SHEET_THEME,
   type LocalizedString,
   type LocalizedText,
   type RallyConfig,
   type RewardItem,
+  type SheetTheme,
+  type SlotShape,
   type SpotItem,
   type StampCondition,
   toLocalizedString,
@@ -11,6 +14,7 @@ import {
 export const DRAFT_CONFIG_KEY = "stamprally:editor-draft:v1";
 export const PUBLISHED_CONFIG_KEY = "stamprally:published-config:v1";
 const MAX_CONDITION_DEPTH = 8;
+const HEX_COLOR_PATTERN = /^#[0-9a-fA-F]{6}$/;
 
 export type ConfigParseResult =
   | { readonly ok: true; readonly config: RallyConfig }
@@ -39,6 +43,116 @@ function finiteNumber(value: unknown, path: string, errors: string[]): number {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   errors.push(`${path} must be a finite number.`);
   return 0;
+}
+
+function parseColor(value: unknown, path: string, fallback: string, errors: string[]): string {
+  if (typeof value === "string" && HEX_COLOR_PATTERN.test(value)) return value;
+  errors.push(`${path} must be a 6-digit hex color.`);
+  return fallback;
+}
+
+function parseOptionalColor(value: unknown, path: string, errors: string[]): string | undefined {
+  if (value === undefined || value === "") return undefined;
+  return parseColor(value, path, "#000000", errors);
+}
+
+function parseBackgroundImageUrl(
+  value: unknown,
+  path: string,
+  errors: string[],
+): string | undefined {
+  if (value === undefined || value === "") return undefined;
+  if (typeof value !== "string") {
+    errors.push(`${path} must be a URL string.`);
+    return undefined;
+  }
+  const trimmed = value.trim();
+  if (trimmed === "") return undefined;
+  try {
+    const parsed = new URL(trimmed, "https://stamprally.invalid/");
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      errors.push(`${path} must use a relative, http, or https URL.`);
+      return undefined;
+    }
+    return trimmed;
+  } catch {
+    errors.push(`${path} must be a valid URL.`);
+    return undefined;
+  }
+}
+
+function parseTheme(value: unknown, errors: string[]): SheetTheme | undefined {
+  if (value === undefined) return undefined;
+  if (!isObject(value)) {
+    errors.push("theme must be an object.");
+    return undefined;
+  }
+
+  const primaryColor = parseColor(
+    value.primaryColor,
+    "theme.primaryColor",
+    DEFAULT_SHEET_THEME.primaryColor,
+    errors,
+  );
+  const cardBackgroundColor = parseColor(
+    value.cardBackgroundColor,
+    "theme.cardBackgroundColor",
+    DEFAULT_SHEET_THEME.cardBackgroundColor,
+    errors,
+  );
+  const textColor = parseColor(
+    value.textColor,
+    "theme.textColor",
+    DEFAULT_SHEET_THEME.textColor,
+    errors,
+  );
+  const backgroundColor = parseOptionalColor(
+    value.backgroundColor,
+    "theme.backgroundColor",
+    errors,
+  );
+  const completedStampColor = parseOptionalColor(
+    value.completedStampColor,
+    "theme.completedStampColor",
+    errors,
+  );
+  const backgroundImageUrl = parseBackgroundImageUrl(
+    value.backgroundImageUrl,
+    "theme.backgroundImageUrl",
+    errors,
+  );
+  const slotShape: SlotShape =
+    value.slotShape === "circle" || value.slotShape === "square" ? value.slotShape : "rounded";
+  if (
+    value.slotShape !== "circle" &&
+    value.slotShape !== "square" &&
+    value.slotShape !== "rounded"
+  ) {
+    errors.push("theme.slotShape must be circle, square, or rounded.");
+  }
+  const gridColumns = finiteNumber(value.gridColumns, "theme.gridColumns", errors);
+  if (!Number.isInteger(gridColumns) || gridColumns < 1 || gridColumns > 4) {
+    errors.push("theme.gridColumns must be an integer from 1 to 4.");
+  }
+  const unclaimedOpacity =
+    value.unclaimedOpacity === undefined
+      ? undefined
+      : finiteNumber(value.unclaimedOpacity, "theme.unclaimedOpacity", errors);
+  if (unclaimedOpacity !== undefined && (unclaimedOpacity < 0.1 || unclaimedOpacity > 1)) {
+    errors.push("theme.unclaimedOpacity must be between 0.1 and 1.");
+  }
+
+  return {
+    primaryColor,
+    ...(backgroundColor === undefined ? {} : { backgroundColor }),
+    ...(backgroundImageUrl === undefined ? {} : { backgroundImageUrl }),
+    cardBackgroundColor,
+    textColor,
+    slotShape,
+    gridColumns,
+    ...(unclaimedOpacity === undefined ? {} : { unclaimedOpacity }),
+    ...(completedStampColor === undefined ? {} : { completedStampColor }),
+  };
 }
 
 function parseCondition(
@@ -214,6 +328,7 @@ export function parseRallyConfig(value: unknown): ConfigParseResult {
   const rewards = Array.isArray(value.rewards)
     ? value.rewards.map((reward, index) => parseReward(reward, index, errors))
     : [];
+  const theme = parseTheme(value.theme, errors);
   for (const [name, ids] of [
     ["stamp", stamps.map((stamp) => stamp.id)],
     ["reward", rewards.map((reward) => reward.id)],
@@ -230,6 +345,7 @@ export function parseRallyConfig(value: unknown): ConfigParseResult {
       stamps,
       ...(rewards.length === 0 ? {} : { rewards }),
       ...(typeof value.isSequential === "boolean" ? { isSequential: value.isSequential } : {}),
+      ...(theme === undefined ? {} : { theme }),
     },
   };
 }

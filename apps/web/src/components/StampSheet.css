@@ -6,12 +6,20 @@
   padding: clamp(20px, 4vw, 38px);
   border: 1px solid #d4c59f;
   border-radius: 24px;
-  color: #352f25;
-  background-color: #fbf4df;
+  color: var(--stamp-text, #352f25);
+  background-color: var(--stamp-bg, #fbf4df);
   background-image:
     repeating-linear-gradient(0deg, rgb(105 81 40 / 3%) 0 1px, transparent 1px 5px),
     repeating-linear-gradient(90deg, rgb(105 81 40 / 2%) 0 1px, transparent 1px 7px),
-    radial-gradient(circle at 16% 12%, rgb(255 255 255 / 75%), transparent 28rem);
+    radial-gradient(circle at 16% 12%, rgb(255 255 255 / 75%), transparent 28rem),
+    var(--stamp-background-image, none);
+  background-position:
+    0 0,
+    0 0,
+    center,
+    center;
+  background-size: auto, auto, auto, cover;
+  background-repeat: repeat, repeat, no-repeat, no-repeat;
   box-shadow:
     inset 0 0 0 7px rgb(126 98 49 / 5%),
     0 24px 65px rgb(54 44 27 / 14%);
@@ -38,7 +46,7 @@
 
 .stamp-sheet__kicker {
   margin: 0 0 5px;
-  color: #9e551e;
+  color: var(--stamp-primary, #9e551e);
   font-size: 0.68rem;
   font-weight: 900;
   letter-spacing: 0.18em;
@@ -57,7 +65,7 @@
   flex: 0 0 auto;
   align-items: baseline;
   gap: 8px;
-  color: #873b26;
+  color: var(--stamp-primary, #873b26);
 }
 
 .stamp-sheet__score strong {
@@ -94,13 +102,17 @@
 .stamp-sheet__progress-fill {
   height: 100%;
   border-radius: inherit;
-  background: linear-gradient(90deg, #a9412a, #d67047);
+  background: linear-gradient(
+    90deg,
+    var(--stamp-primary, #a9412a),
+    color-mix(in srgb, var(--stamp-primary, #a9412a) 70%, white)
+  );
   transition: width 300ms ease;
 }
 
 .stamp-sheet__grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(var(--stamp-grid-cols, 3), minmax(0, 1fr));
   gap: clamp(12px, 2.5vw, 22px);
   margin-top: 25px;
 }
@@ -116,9 +128,9 @@
   padding: 15px;
   border: 2px dashed #b6aa91;
   border-radius: 18px;
-  color: #4a453c;
+  color: var(--stamp-text, #4a453c);
   text-align: left;
-  background: rgb(255 255 255 / 28%);
+  background: color-mix(in srgb, var(--stamp-card-bg, #fffdf5) 82%, transparent);
   cursor: pointer;
   transition:
     transform 160ms ease,
@@ -146,19 +158,41 @@
 
 .stamp-slot--locked {
   filter: grayscale(0.85);
-  opacity: 0.68;
+}
+
+.stamp-slot--locked,
+.stamp-slot--available {
+  opacity: var(--stamp-unclaimed-opacity, 1);
 }
 
 .stamp-slot--available {
-  border-color: #b2672d;
-  background: rgb(255 252 237 / 72%);
-  box-shadow: inset 0 0 0 3px rgb(178 103 45 / 8%);
+  border-color: var(--stamp-primary, #b2672d);
+  background: color-mix(in srgb, var(--stamp-card-bg, #fffdf5) 88%, transparent);
+  box-shadow: inset 0 0 0 3px color-mix(in srgb, var(--stamp-primary, #b2672d) 8%, transparent);
 }
 
 .stamp-slot--stamped {
   border-style: solid;
   border-color: rgb(123 91 45 / 26%);
-  background: rgb(255 253 245 / 70%);
+  background: color-mix(in srgb, var(--stamp-card-bg, #fffdf5) 92%, transparent);
+}
+
+.stamp-slot--shape-rounded {
+  border-radius: 18px;
+}
+
+.stamp-slot--shape-square,
+.stamp-slot--shape-circle {
+  min-height: 0;
+  aspect-ratio: 1;
+}
+
+.stamp-slot--shape-square {
+  border-radius: 0;
+}
+
+.stamp-slot--shape-circle {
+  border-radius: 50%;
 }
 
 .stamp-slot__topline {
@@ -190,13 +224,13 @@
 }
 
 .stamp-slot__state--available {
-  color: #8b461e;
-  background: #ffe0ad;
+  color: var(--stamp-primary, #8b461e);
+  background: color-mix(in srgb, var(--stamp-primary, #8b461e) 18%, white);
 }
 
 .stamp-slot__state--stamped {
   color: #fff7ef;
-  background: #774130;
+  background: var(--stamp-primary, #774130);
 }
 
 .stamp-slot__watermark {
@@ -262,11 +296,11 @@
 }
 
 .stamp-slot--vermilion .stamp-imprint {
-  color: #b33c2e;
+  color: var(--stamp-completed-color, #b33c2e);
 }
 
 .stamp-slot--indigo .stamp-imprint {
-  color: #285c85;
+  color: var(--stamp-completed-color, #285c85);
 }
 
 .stamp-imprint__inner {
@@ -278,7 +312,7 @@
   justify-content: center;
   border: 2px solid currentcolor;
   border-radius: 50%;
-  background: rgb(251 244 223 / 84%);
+  background: color-mix(in srgb, var(--stamp-card-bg, #fbf4df) 84%, transparent);
 }
 
 .stamp-imprint__word {
@@ -309,7 +343,7 @@
   left: 50%;
   padding: 9px 18px;
   border: 7px double currentcolor;
-  color: rgb(157 47 36 / 58%);
+  color: color-mix(in srgb, var(--stamp-primary, #9d2f24) 58%, transparent);
   font-family: Georgia, "Times New Roman", serif;
   font-size: clamp(2rem, 8vw, 5.4rem);
   font-weight: 950;
@@ -329,7 +363,7 @@
   margin-top: 21px;
   padding: 12px 16px;
   border-radius: 12px;
-  color: #74422f;
+  color: var(--stamp-primary, #74422f);
   background: rgb(255 255 255 / 55%);
   text-align: left;
 }
@@ -595,7 +629,7 @@
 
 @media (max-width: 760.98px) {
   .stamp-sheet__grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(var(--stamp-grid-cols-mobile, 2), minmax(0, 1fr));
   }
 
   .stamp-slot {
@@ -644,6 +678,11 @@
   .stamp-modal__geo-details {
     grid-template-columns: 1fr;
   }
+}
+
+.stamp-slot--shape-square,
+.stamp-slot--shape-circle {
+  min-height: 0;
 }
 
 @media (prefers-reduced-motion: reduce) {

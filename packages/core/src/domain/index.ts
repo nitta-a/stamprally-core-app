@@ -16,9 +16,12 @@ export type {
   RewardState,
   RewardStatus,
   RewardType,
+  SheetTheme,
+  SlotShape,
   SpotItem,
   StampDefinition,
   StampRallyState,
   StampRecord,
   SupportedLocale,
 } from "./models.js";
+export { DEFAULT_SHEET_THEME } from "./models.js";

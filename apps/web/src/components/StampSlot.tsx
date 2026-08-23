@@ -1,5 +1,6 @@
 import {
   resolveLocalizedText,
+  type SlotShape,
   type StampDefinition,
   type StampRecord,
   type SupportedLocale,
@@ -24,6 +25,7 @@ export interface StampSlotProps {
   readonly presentation: StampPresentation;
   readonly isAnimating: boolean;
   readonly disabled: boolean;
+  readonly slotShape?: SlotShape;
   readonly locale?: SupportedLocale;
   readonly onSelect: () => void;
 }
@@ -45,6 +47,7 @@ export function StampSlot({
   presentation,
   isAnimating,
   disabled,
+  slotShape = "rounded",
   locale = "ja",
   onSelect,
 }: StampSlotProps) {
@@ -61,7 +64,7 @@ export function StampSlot({
 
   return (
     <button
-      className={`stamp-slot stamp-slot--${status} stamp-slot--${presentation.ink}`}
+      className={`stamp-slot stamp-slot--${status} stamp-slot--${presentation.ink} stamp-slot--shape-${slotShape}`}
       type="button"
       onClick={onSelect}
       disabled={disabled}

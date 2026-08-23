@@ -4,6 +4,30 @@ export type SupportedLocale = "ja" | "en";
 export type LocalizedString = Record<SupportedLocale, string>;
 export type LocalizedText = string | LocalizedString;
 
+export type SlotShape = "circle" | "square" | "rounded";
+
+export interface SheetTheme {
+  readonly primaryColor: string;
+  readonly backgroundColor?: string;
+  readonly backgroundImageUrl?: string;
+  readonly cardBackgroundColor: string;
+  readonly textColor: string;
+  readonly slotShape: SlotShape;
+  readonly gridColumns: number;
+  readonly unclaimedOpacity?: number;
+  readonly completedStampColor?: string;
+}
+
+export const DEFAULT_SHEET_THEME: SheetTheme = {
+  primaryColor: "#9e551e",
+  backgroundColor: "#fbf4df",
+  cardBackgroundColor: "#fffdf5",
+  textColor: "#352f25",
+  slotShape: "rounded",
+  gridColumns: 3,
+  unclaimedOpacity: 1,
+};
+
 export interface SpotItem {
   readonly id: string;
   readonly name: LocalizedText;
@@ -61,4 +85,5 @@ export interface RallyConfig {
   readonly stamps: ReadonlyArray<StampDefinition>;
   readonly rewards?: ReadonlyArray<RewardItem>;
   readonly isSequential?: boolean;
+  readonly theme?: SheetTheme;
 }

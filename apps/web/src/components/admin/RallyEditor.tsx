@@ -23,6 +23,7 @@ import { StampSheet } from "../StampSheet.js";
 import { GeneralSettingsForm } from "./GeneralSettingsForm.js";
 import { RewardListEditor } from "./RewardListEditor.js";
 import { SpotItemForm } from "./SpotItemForm.js";
+import { ThemeEditor } from "./ThemeEditor.js";
 import "./admin.css";
 
 interface RallyEditorProps {
@@ -203,6 +204,11 @@ export function RallyEditor({ locale, onLocaleChange }: RallyEditorProps) {
       <div className="admin-layout">
         <div className="admin-forms">
           <GeneralSettingsForm config={config} locale={locale} onChange={setConfig} />
+          <ThemeEditor
+            theme={config.theme}
+            locale={locale}
+            onChange={(theme) => setConfig((current) => ({ ...current, theme }))}
+          />
           <section className="admin-section">
             <div className="admin-section__heading">
               <h2>{messages.spots}</h2>

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_SHEET_THEME,
   exportProgressToken,
   InMemoryStorage,
   importProgressToken,
@@ -27,6 +28,36 @@ describe("localized text", () => {
 
   it("honors an explicit fallback locale", () => {
     expect(resolveLocalizedText({ ja: "", en: "English" }, "ja", "en")).toBe("English");
+  });
+});
+
+describe("sheet theme", () => {
+  it("exports the paper-inspired default theme", () => {
+    expect(DEFAULT_SHEET_THEME).toEqual({
+      primaryColor: "#9e551e",
+      backgroundColor: "#fbf4df",
+      cardBackgroundColor: "#fffdf5",
+      textColor: "#352f25",
+      slotShape: "rounded",
+      gridColumns: 3,
+      unclaimedOpacity: 1,
+    });
+  });
+
+  it("accepts a theme without changing engine behavior", async () => {
+    const config: RallyConfig = {
+      id: "themed-rally",
+      stamps: [{ id: "one", name: "One", condition: { type: "instant" } }],
+      theme: {
+        ...DEFAULT_SHEET_THEME,
+        primaryColor: "#123456",
+        slotShape: "circle",
+        gridColumns: 1,
+      },
+    };
+    const state = await new StampRallyClient(config, new InMemoryStorage(), () => NOW).init();
+    expect(state.records).toEqual([]);
+    expect(config.theme?.primaryColor).toBe("#123456");
   });
 });
 
