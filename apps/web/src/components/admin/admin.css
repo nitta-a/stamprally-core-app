@@ -293,9 +293,6 @@
   top: 18px;
   min-width: 0;
 }
-.admin-preview .stamp-slot--shape-rounded {
-  min-height: 170px;
-}
 .admin-notice,
 .admin-errors {
   margin: 20px 0 0;

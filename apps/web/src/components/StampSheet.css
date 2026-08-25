@@ -179,6 +179,7 @@
 }
 
 .stamp-slot--shape-rounded {
+  min-height: 170px;
   border-radius: 18px;
 }
 

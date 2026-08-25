@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import {
   calculateProgress,
   type RallyConfig,
@@ -8,6 +10,8 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { StampSheet } from "../src/components/StampSheet.js";
 import { type StampPresentation, StampSlot } from "../src/components/StampSlot.js";
+
+const stampSheetStyles = readFileSync(resolve("src/components/StampSheet.css"), "utf8");
 
 const firstStamp: StampDefinition = {
   id: "one",
@@ -268,6 +272,7 @@ describe("StampSheet", () => {
     expect(sheet.style.getPropertyValue("--stamp-completed-color")).toBe("");
     expect(sheet.style.getPropertyValue("--stamp-font-family")).toContain("Georgia");
     expect(container.querySelectorAll(".stamp-slot--shape-rounded")).toHaveLength(2);
+    expect(stampSheetStyles).toMatch(/\.stamp-slot--shape-rounded\s*{[^}]*min-height:\s*170px;/);
   });
 });
 
