@@ -195,6 +195,28 @@
 
 .stamp-slot--shape-circle {
   border-radius: 50%;
+  align-items: center;
+  padding: 16px;
+  text-align: center;
+}
+
+.stamp-slot--shape-circle .stamp-slot__topline {
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+
+.stamp-slot--shape-circle .stamp-slot__name {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  font-size: clamp(0.86rem, 2vw, 1.1rem);
+}
+
+.stamp-slot--shape-circle .stamp-slot__condition {
+  justify-content: center;
+  flex-wrap: wrap;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 .stamp-slot__topline {

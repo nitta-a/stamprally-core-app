@@ -273,6 +273,12 @@ describe("StampSheet", () => {
     expect(sheet.style.getPropertyValue("--stamp-font-family")).toContain("Georgia");
     expect(container.querySelectorAll(".stamp-slot--shape-rounded")).toHaveLength(2);
     expect(stampSheetStyles).toMatch(/\.stamp-slot--shape-rounded\s*{[^}]*min-height:\s*170px;/);
+    expect(stampSheetStyles).toMatch(
+      /\.stamp-slot--shape-circle\s*{[^}]*align-items:\s*center;[^}]*padding:\s*16px;/,
+    );
+    expect(stampSheetStyles).toMatch(
+      /\.stamp-slot--shape-circle \.stamp-slot__name\s*{[^}]*overflow-wrap:\s*anywhere;/,
+    );
   });
 });
 
