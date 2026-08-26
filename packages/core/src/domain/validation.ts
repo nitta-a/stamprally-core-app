@@ -144,6 +144,14 @@ function validateSpot(value: unknown, index: number, errors: ValidationError[]):
       add(errors, `${path}.${field}`, "INVALID_TYPE", `${field} must be an array of IDs.`);
     }
   }
+  for (const field of ["order", "orderIndex"] as const) {
+    if (
+      value[field] !== undefined &&
+      (typeof value[field] !== "number" || !Number.isFinite(value[field]))
+    ) {
+      add(errors, `${path}.${field}`, "INVALID_TYPE", `${field} must be a finite number.`);
+    }
+  }
 }
 
 function validateReward(
@@ -186,7 +194,7 @@ function validateReward(
   ) {
     add(errors, `${path}.validUntil`, "INVALID_DATE", "Reward expiry must be a valid ISO date.");
   }
-  for (const field of ["maxStock", "limitPerUser"] as const) {
+  for (const field of ["maxStock", "limitPerUser", "stockLimit", "userClaimLimit"] as const) {
     const count = value[field];
     if (
       count !== undefined &&

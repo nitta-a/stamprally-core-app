@@ -1,5 +1,5 @@
 import type { StampCondition } from "./conditions.js";
-import type { RallyConfig, RewardItem, SheetTheme, SpotItem } from "./models.js";
+import type { RallyConfig, RewardItem, SheetTheme, SpotItem, SupportedLocale } from "./models.js";
 import { CURRENT_RALLY_CONFIG_VERSION } from "./validation.js";
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -78,7 +78,11 @@ function migrateSpot(value: unknown, index: number): SpotItem {
       source.condition ??
         (typeof source.token === "string" ? { type: "token", token: source.token } : undefined),
     ),
-    ...(typeof source.order === "number" ? { order: source.order } : {}),
+    ...(typeof source.orderIndex === "number"
+      ? { orderIndex: source.orderIndex }
+      : typeof source.order === "number"
+        ? { order: source.order }
+        : {}),
     ...(typeof source.deckId === "string" ? { deckId: source.deckId } : {}),
     ...(typeof source.groupId === "string" ? { groupId: source.groupId } : {}),
     ...(typeof source.guideId === "string" ? { guideId: source.guideId } : {}),
@@ -106,7 +110,9 @@ function migrateReward(value: unknown, index: number): RewardItem {
     description: text(source.description) ?? "",
     type: source.type === "digital" ? "digital" : "in_person",
     redemptionMethod:
-      source.redemptionMethod === "staff_passcode" || source.redemptionMethod === "view_only"
+      source.redemptionMethod === "staff_passcode" ||
+      source.redemptionMethod === "view_only" ||
+      source.redemptionMethod === "server_claim"
         ? source.redemptionMethod
         : "manual_slide",
     requiredStampCount:
@@ -120,13 +126,17 @@ function migrateReward(value: unknown, index: number): RewardItem {
     ...(typeof source.validUntil === "string" ? { validUntil: source.validUntil } : {}),
     ...(typeof source.maxStock === "number" ? { maxStock: source.maxStock } : {}),
     ...(typeof source.limitPerUser === "number" ? { limitPerUser: source.limitPerUser } : {}),
+    ...(typeof source.stockLimit === "number" ? { stockLimit: source.stockLimit } : {}),
+    ...(typeof source.userClaimLimit === "number" ? { userClaimLimit: source.userClaimLimit } : {}),
     ...(typeof source.claimTicketNumber === "string"
       ? { claimTicketNumber: source.claimTicketNumber }
       : {}),
   };
 }
 
-export function migrateRallyConfig(raw: unknown): RallyConfig {
+export function migrateRallyConfig<TLocale extends string = SupportedLocale>(
+  raw: unknown,
+): RallyConfig<TLocale> {
   const source = isObject(raw) ? raw : {};
   const rawStamps = Array.isArray(source.stamps)
     ? source.stamps
@@ -158,5 +168,5 @@ export function migrateRallyConfig(raw: unknown): RallyConfig {
       : typeof source.endsAt === "string"
         ? { endDate: source.endsAt }
         : {}),
-  };
+  } as RallyConfig<TLocale>;
 }

@@ -10,8 +10,8 @@ export function getOrderedStamps(config: RallyConfig): ReadonlyArray<StampDefini
     .map((stamp, index): OrderedStamp => ({ stamp, index }))
     .sort((left, right) => {
       const orderDifference =
-        (left.stamp.order ?? Number.POSITIVE_INFINITY) -
-        (right.stamp.order ?? Number.POSITIVE_INFINITY);
+        (left.stamp.orderIndex ?? left.stamp.order ?? Number.POSITIVE_INFINITY) -
+        (right.stamp.orderIndex ?? right.stamp.order ?? Number.POSITIVE_INFINITY);
       return orderDifference === 0 ? left.index - right.index : orderDifference;
     })
     .map(({ stamp }) => stamp);

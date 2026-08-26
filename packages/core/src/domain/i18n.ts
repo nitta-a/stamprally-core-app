@@ -7,8 +7,11 @@ export function resolveLocalizedText<TLocale extends string = SupportedLocale>(
 ): string {
   if (text === undefined || text === "") return "";
   if (typeof text === "string") return text;
-  const fallback = fallbackLocale ?? "ja";
-  return text[locale as TLocale] || text[fallback as TLocale] || "";
+  const fallback =
+    fallbackLocale === undefined
+      ? Object.values(text).find((value): value is string => typeof value === "string")
+      : text[fallbackLocale as TLocale];
+  return text[locale as TLocale] || fallback || "";
 }
 
 export function toLocalizedString(text: LocalizedText | undefined): LocalizedString;

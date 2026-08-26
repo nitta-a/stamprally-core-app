@@ -1,6 +1,7 @@
 import {
   type ConsumeResult,
   DEFAULT_SHEET_THEME,
+  type LocaleDictionary,
   type LocalizedText,
   type RallyConfig,
   type RewardItem,
@@ -16,6 +17,8 @@ import {
 } from "@stamprally/core";
 import type { CSSProperties, FormEvent, RefObject } from "react";
 import { useEffect, useRef, useState } from "react";
+
+export type { LocaleDictionary } from "@stamprally/core";
 
 function useFocusTrap(
   active: boolean,
@@ -77,8 +80,8 @@ export interface StampPresentation {
   readonly channel?: "instant" | "qr" | "nfc" | "geo";
 }
 
-export interface StampSlotProps {
-  readonly stamp: SpotItem;
+export interface StampSlotProps<TLocale extends string = SupportedLocale> {
+  readonly stamp: SpotItem<TLocale>;
   readonly record?: StampRallyState["records"][number] | undefined;
   readonly isNext?: boolean;
   readonly slotNumber?: number;
@@ -86,7 +89,8 @@ export interface StampSlotProps {
   readonly isAnimating?: boolean;
   readonly disabled?: boolean;
   readonly slotShape?: SlotShape;
-  readonly locale?: SupportedLocale;
+  readonly locale?: TLocale;
+  readonly dictionary?: LocaleDictionary<TLocale>;
   readonly statusText?: string;
   readonly onSelect?: () => void;
 }
@@ -106,7 +110,7 @@ function formatStampDate(value: string): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
-export function StampSlot({
+export function StampSlot<TLocale extends string = SupportedLocale>({
   stamp,
   record,
   isNext = false,
@@ -115,10 +119,10 @@ export function StampSlot({
   isAnimating = false,
   disabled = false,
   slotShape = "rounded",
-  locale = "ja",
+  locale = "ja" as TLocale,
   statusText,
   onSelect,
-}: StampSlotProps) {
+}: StampSlotProps<TLocale>) {
   const status = record === undefined ? (isNext ? "available" : "locked") : "stamped";
   const resolvedStatus = statusText ?? status;
   const statusSeparator = statusText !== undefined && locale === "ja" ? "、" : ", ";
@@ -164,20 +168,21 @@ export function StampSlot({
   );
 }
 
-export interface StampSheetProps {
-  readonly title?: LocalizedText;
-  readonly config: RallyConfig;
+export interface StampSheetProps<TLocale extends string = SupportedLocale> {
+  readonly title?: LocalizedText<TLocale>;
+  readonly config: RallyConfig<TLocale>;
   readonly state?: StampRallyState | null;
   readonly progress?: StampRallyProgress;
   readonly presentations?: Readonly<Record<string, StampPresentation>>;
   readonly animatedStampId?: string | null;
   readonly disabled?: boolean;
-  readonly locale?: SupportedLocale;
+  readonly locale?: TLocale;
+  readonly dictionary?: LocaleDictionary<TLocale>;
   readonly theme?: SheetTheme;
   readonly onStampSelect?: (stampId: string) => void;
 }
 
-export function StampSheet({
+export function StampSheet<TLocale extends string = SupportedLocale>({
   title,
   config,
   state = null,
@@ -185,10 +190,11 @@ export function StampSheet({
   presentations = {},
   animatedStampId = null,
   disabled = false,
-  locale = "ja",
+  locale = "ja" as TLocale,
+  dictionary,
   theme = config.theme ?? DEFAULT_SHEET_THEME,
   onStampSelect,
-}: StampSheetProps) {
+}: StampSheetProps<TLocale>) {
   const acquired = new Set(state?.records.map((record) => record.stampId) ?? []);
   const next = new Set(progress?.nextAvailableStamps.map((stamp) => stamp.id) ?? []);
   const count = progress?.acquired ?? acquired.size;
@@ -212,22 +218,16 @@ export function StampSheet({
     "--stamprally-text": `var(--stamprally-text-override, ${theme.textColor})`,
     "--stamprally-columns": String(theme.gridColumns),
   } as CSSProperties;
-  const messages =
-    locale === "en"
-      ? {
-          available: "available",
-          locked: "locked",
-          stamped: "stamped",
-          remaining: (value: number) => `${value} spots remaining`,
-          completed: "RALLY COMPLETED",
-        }
-      : {
-          available: "取得可能",
-          locked: "順序待ち",
-          stamped: "取得済み",
-          remaining: (value: number) => `あと${value}箇所`,
-          completed: "ラリー達成",
-        };
+  const messages = {
+    available: dictionary?.[locale]?.available ?? (locale === "en" ? "available" : "取得可能"),
+    locked: dictionary?.[locale]?.locked ?? (locale === "en" ? "locked" : "順序待ち"),
+    stamped: dictionary?.[locale]?.stamped ?? (locale === "en" ? "stamped" : "取得済み"),
+    remaining: (value: number) =>
+      dictionary?.[locale]?.remaining?.replace("{count}", String(value)) ??
+      (locale === "en" ? `${value} spots remaining` : `あと${value}箇所`),
+    completed:
+      dictionary?.[locale]?.completed ?? (locale === "en" ? "RALLY COMPLETED" : "ラリー達成"),
+  };
   return (
     <section
       className={`stamp-sheet ${percentage >= 100 ? "stamp-sheet--completed" : ""}`}
@@ -274,6 +274,7 @@ export function StampSheet({
               disabled={disabled}
               slotShape={theme.slotShape}
               locale={locale}
+              {...(dictionary === undefined ? {} : { dictionary })}
               statusText={
                 recordForStamp === undefined
                   ? next.has(stamp.id)
@@ -302,16 +303,17 @@ export interface AcquisitionFeedback {
   readonly ok: boolean;
   readonly message: string;
 }
-export interface StampModalProps {
+export interface StampModalProps<TLocale extends string = SupportedLocale> {
   readonly open: boolean;
-  readonly stamp: SpotItem | null;
+  readonly stamp: SpotItem<TLocale> | null;
   readonly record?: StampRallyState["records"][number] | undefined;
   readonly presentation?: StampPresentation | null;
   readonly requiredStampName?: string | null;
   readonly isAvailable?: boolean;
   readonly isPending?: boolean;
   readonly isCompleted?: boolean;
-  readonly locale?: SupportedLocale;
+  readonly locale?: TLocale;
+  readonly dictionary?: LocaleDictionary<TLocale>;
   readonly onClose: () => void;
   readonly onAcquire?: (
     stampId: string,
@@ -324,18 +326,19 @@ export interface StampModalProps {
   readonly onNotify?: (feedback: AcquisitionFeedback) => void;
 }
 
-export function StampModal({
+export function StampModal<TLocale extends string = SupportedLocale>({
   open,
   stamp,
   record,
   isAvailable = true,
   isPending = false,
-  locale = "ja",
+  locale = "ja" as TLocale,
+  dictionary,
   onClose,
   onAcquire,
   onCheckIn,
   onNotify,
-}: StampModalProps) {
+}: StampModalProps<TLocale>) {
   const [token, setToken] = useState("");
   const modalRef = useFocusTrap(open && stamp !== null, onClose, isPending);
   useEffect(() => {
@@ -351,6 +354,7 @@ export function StampModal({
     if (feedback.ok) onClose();
   };
   const name = resolveLocalizedText(stamp.name, locale);
+  const messages = dictionary?.[locale] ?? {};
   return (
     <div
       role="dialog"
@@ -370,7 +374,7 @@ export function StampModal({
         </button>
         <h2 id="stamprally-modal-title">{name}</h2>
         {record !== undefined ? (
-          <p>Already claimed.</p>
+          <p>{messages.alreadyClaimed ?? "Already claimed."}</p>
         ) : (
           <p>{resolveLocalizedText(stamp.description, locale)}</p>
         )}
@@ -382,7 +386,8 @@ export function StampModal({
             }}
           >
             <label>
-              Passcode <input value={token} onChange={(event) => setToken(event.target.value)} />
+              {messages.passcode ?? "Passcode"}{" "}
+              <input value={token} onChange={(event) => setToken(event.target.value)} />
             </label>
             <button
               type="submit"
@@ -390,7 +395,7 @@ export function StampModal({
               aria-disabled={!isAvailable || isPending}
               disabled={!isAvailable || isPending}
             >
-              Claim stamp
+              {messages.claimStamp ?? "Claim stamp"}
             </button>
           </form>
         ) : (
@@ -401,7 +406,7 @@ export function StampModal({
             onClick={() => void submit({ type: "instant" })}
             disabled={!isAvailable || isPending}
           >
-            Claim stamp
+            {messages.claimStamp ?? "Claim stamp"}
           </button>
         )}
       </div>
@@ -409,10 +414,11 @@ export function StampModal({
   );
 }
 
-export interface RewardPanelProps {
-  readonly rewards: ReadonlyArray<RewardItem>;
+export interface RewardPanelProps<TLocale extends string = SupportedLocale> {
+  readonly rewards: ReadonlyArray<RewardItem<TLocale>>;
   readonly states: ReadonlyArray<RewardState>;
-  readonly locale?: SupportedLocale;
+  readonly locale?: TLocale;
+  readonly dictionary?: LocaleDictionary<TLocale>;
   readonly isPending?: boolean;
   readonly open?: boolean;
   readonly onClose?: () => void;
@@ -423,16 +429,17 @@ export interface RewardPanelProps {
   readonly onNotify?: (ok: boolean, message: string) => void;
 }
 
-export function RewardPanel({
+export function RewardPanel<TLocale extends string = SupportedLocale>({
   rewards,
   states,
-  locale = "ja",
+  locale = "ja" as TLocale,
+  dictionary,
   isPending = false,
   open = true,
   onClose,
   onRedeem,
   onNotify,
-}: RewardPanelProps) {
+}: RewardPanelProps<TLocale>) {
   const [passcodes, setPasscodes] = useState<Readonly<Record<string, string>>>({});
   const panelRef = useFocusTrap(open && onClose !== undefined, onClose, isPending);
   if (!open) return null;
@@ -446,7 +453,7 @@ export function RewardPanel({
       tabIndex={-1}
     >
       <header className="stamprally-rewards__header">
-        <h2 id="stamprally-rewards-title">Rewards</h2>
+        <h2 id="stamprally-rewards-title">{dictionary?.[locale]?.rewards ?? "Rewards"}</h2>
         {onClose !== undefined && (
           <button
             type="button"
@@ -464,7 +471,12 @@ export function RewardPanel({
         const available = state?.status === "AVAILABLE";
         const redeem = async (options?: { readonly passcode?: string }): Promise<void> => {
           const result = await onRedeem(reward.id, options);
-          onNotify?.(result.ok, result.ok ? "Reward claimed." : result.error.code);
+          onNotify?.(
+            result.ok,
+            result.ok
+              ? (dictionary?.[locale]?.rewardClaimed ?? "Reward claimed.")
+              : result.error.code,
+          );
         };
         return (
           <article
@@ -484,7 +496,7 @@ export function RewardPanel({
                 }}
               >
                 <label>
-                  Staff passcode{" "}
+                  {dictionary?.[locale]?.staffPasscode ?? "Staff passcode"}{" "}
                   <input
                     type="password"
                     value={passcodes[reward.id] ?? ""}
@@ -499,7 +511,7 @@ export function RewardPanel({
                   aria-disabled={!available || isPending}
                   disabled={!available || isPending}
                 >
-                  Redeem
+                  {dictionary?.[locale]?.redeem ?? "Redeem"}
                 </button>
               </form>
             )}
@@ -511,7 +523,7 @@ export function RewardPanel({
                 disabled={!available || isPending}
                 onClick={() => void redeem()}
               >
-                Redeem
+                {dictionary?.[locale]?.redeem ?? "Redeem"}
               </button>
             )}
           </article>

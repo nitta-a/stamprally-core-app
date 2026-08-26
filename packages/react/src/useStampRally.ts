@@ -4,12 +4,20 @@ import type {
   Result,
   RewardConsumeError,
   RewardState,
+  SecureTokenOptions,
   StampError,
   StampRallyClient,
   StampRallyState,
   VerificationContext,
 } from "@stamprally/core";
-import { consumeReward, exportProgressToken, importProgressToken } from "@stamprally/core";
+import {
+  consumeReward,
+  createSecureToken,
+  exportProgressToken,
+  importProgressToken,
+  isStampRallyState,
+  verifySecureToken,
+} from "@stamprally/core";
 import {
   useCallback,
   useEffect,
@@ -65,6 +73,7 @@ export interface UseStampRallyOptions {
   readonly onStampClaimed?: StampRallyEventHandlers["onStampClaimed"];
   readonly onRewardUnlocked?: StampRallyEventHandlers["onRewardUnlocked"];
   readonly onRewardConsumed?: StampRallyEventHandlers["onRewardConsumed"];
+  readonly serverUserId?: string;
 }
 
 export interface RedeemOptions {
@@ -88,6 +97,12 @@ export interface UseStampRallyReturn {
   readonly redeem: (rewardId: string, options?: RedeemOptions) => Promise<ConsumeResult>;
   readonly exportRecoveryCode: () => string;
   readonly importRecoveryCode: (token: string) => Promise<boolean>;
+  readonly exportRecoveryToken: (
+    secretKey: string,
+    options?: SecureTokenOptions,
+  ) => Promise<string>;
+  readonly importRecoveryToken: (token: string, secretKey: string) => Promise<boolean>;
+  readonly syncWithServer: (serverEndpoint: string, authHeader?: string) => Promise<void>;
   readonly offlineQueue: ReadonlyArray<CheckInRequest>;
   readonly queuedCount: number;
   readonly flushQueue: () => Promise<void>;
@@ -102,6 +117,10 @@ function getServerSnapshot(): null {
 
 function toError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function applyOptimisticAcquire(
@@ -543,6 +562,114 @@ export function useStampRally(
     [client],
   );
 
+  const exportRecoveryToken = useCallback(
+    async (secretKey: string, tokenOptions: SecureTokenOptions = {}): Promise<string> => {
+      const state = client.getState();
+      if (state === null)
+        throw new Error("Cannot export recovery token before the rally is initialized.");
+      return createSecureToken(
+        {
+          type: "recovery",
+          rallyId: state.rallyId,
+          state,
+          exportedAt: new Date().toISOString(),
+        },
+        secretKey,
+        { encrypt: tokenOptions.encrypt ?? true, ...tokenOptions },
+      );
+    },
+    [client],
+  );
+
+  const importRecoveryToken = useCallback(
+    async (token: string, secretKey: string): Promise<boolean> => {
+      setClientError(null);
+      setIsOperationPending(true);
+      try {
+        const verified = await verifySecureToken(token, secretKey);
+        if (
+          !verified.ok ||
+          verified.payload.type !== "recovery" ||
+          verified.payload.rallyId !== client.getConfig().id
+        ) {
+          setIsOperationPending(false);
+          return false;
+        }
+        const candidate = verified.payload.state;
+        if (!isStampRallyState(candidate)) {
+          setIsOperationPending(false);
+          return false;
+        }
+        await client.restore(candidate);
+        setIsOperationPending(false);
+        return true;
+      } catch (error) {
+        setClientError({ client, value: toError(error) });
+        setIsOperationPending(false);
+        return false;
+      }
+    },
+    [client],
+  );
+
+  const syncWithServer = useCallback(
+    async (serverEndpoint: string, authHeader?: string): Promise<void> => {
+      if (typeof fetch !== "function")
+        throw new Error("Fetch API is unavailable in this environment.");
+      setClientError(null);
+      setIsOperationPending(true);
+      try {
+        const endpoint = serverEndpoint.replace(/\/$/u, "").endsWith("/sync")
+          ? serverEndpoint
+          : `${serverEndpoint.replace(/\/$/u, "")}/api/sync`;
+        const response = await fetch(endpoint, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            ...(authHeader === undefined ? {} : { authorization: authHeader }),
+          },
+          body: JSON.stringify({
+            userId: options.serverUserId ?? "anonymous",
+            queue: offlineQueue.map((request) => ({
+              ...request,
+              userId: options.serverUserId ?? "anonymous",
+              spotId: request.stampId,
+              claimMethod: request.context.type,
+              proofData:
+                request.context.type === "token"
+                  ? { token: request.context.token }
+                  : request.context.type === "geo"
+                    ? {
+                        latitude: request.context.currentLatitude,
+                        longitude: request.context.currentLongitude,
+                      }
+                    : undefined,
+            })),
+          }),
+        });
+        const payload: unknown = await response.json();
+        if (
+          !response.ok ||
+          !isObject(payload) ||
+          payload.ok !== true ||
+          !isStampRallyState(payload.state)
+        ) {
+          throw new Error("Server synchronization was rejected.");
+        }
+        await client.restore(payload.state);
+        queuedMetadata.current.clear();
+        setOfflineQueue([]);
+        client.notifySyncCompleted(payload.state);
+      } catch (error) {
+        setClientError({ client, value: toError(error) });
+        throw error;
+      } finally {
+        setIsOperationPending(false);
+      }
+    },
+    [client, offlineQueue, options.serverUserId],
+  );
+
   const isLoading =
     rawState === null && (clientStatus.client !== client || clientStatus.isInitializing);
   const error = clientError?.client === client ? clientError.value : null;
@@ -644,6 +771,9 @@ export function useStampRally(
     redeem,
     exportRecoveryCode,
     importRecoveryCode,
+    exportRecoveryToken,
+    importRecoveryToken,
+    syncWithServer,
     offlineQueue,
     queuedCount: offlineQueue.length,
     flushQueue,

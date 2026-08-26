@@ -1,10 +1,12 @@
 import {
   CURRENT_RALLY_CONFIG_VERSION,
   DEFAULT_SHEET_THEME,
+  type LocaleDictionary,
   type LocalizedText,
   migrateRallyConfig,
   type RallyConfig,
   type RewardItem,
+  type RewardUnlockCondition,
   resolveLocalizedText,
   type SheetTheme,
   type SpotItem,
@@ -17,26 +19,33 @@ import {
 import type { ChangeEvent } from "react";
 import { useState } from "react";
 
-const localePair = (value: LocalizedText | undefined): { ja: string; en: string } => ({
-  ja: resolveLocalizedText(value, "ja"),
-  en: resolveLocalizedText(value, "en"),
-});
+export type { LocaleDictionary } from "@stamprally/core";
 
-function updateText(
-  value: LocalizedText | undefined,
-  locale: "ja" | "en",
-  next: string,
-): LocalizedText {
+const localePair = (value: LocalizedText | undefined): Record<string, string> => {
+  if (typeof value === "string") return { ja: value, en: "" };
+  const result: Record<string, string> = {};
+  for (const [key, text] of Object.entries(value ?? {})) {
+    if (text !== undefined) result[key] = text;
+  }
+  return result;
+};
+
+function updateText(value: LocalizedText | undefined, locale: string, next: string): LocalizedText {
   const current = localePair(value);
   return { ...current, [locale]: next };
 }
 
-export interface GeneralSettingsFormProps {
-  readonly config: RallyConfig;
-  readonly locale?: SupportedLocale;
-  readonly onChange: (config: RallyConfig) => void;
+export interface GeneralSettingsFormProps<TLocale extends string = SupportedLocale> {
+  readonly config: RallyConfig<TLocale>;
+  readonly locale?: TLocale;
+  readonly dictionary?: LocaleDictionary<TLocale>;
+  readonly onChange: (config: RallyConfig<TLocale>) => void;
 }
-export function GeneralSettingsForm({ config, locale = "ja", onChange }: GeneralSettingsFormProps) {
+export function GeneralSettingsForm<TLocale extends string = SupportedLocale>({
+  config,
+  locale = "ja" as TLocale,
+  onChange,
+}: GeneralSettingsFormProps<TLocale>) {
   const pair = localePair(config.title);
   return (
     <fieldset className="stamprally-admin-card">
@@ -95,7 +104,7 @@ export function GeneralSettingsForm({ config, locale = "ja", onChange }: General
 export interface ConditionEditorProps {
   readonly condition: StampCondition;
   readonly onChange: (condition: StampCondition) => void;
-  readonly locale?: SupportedLocale;
+  readonly locale?: SupportedLocale | (string & {});
 }
 export function ConditionEditor({ condition, onChange }: ConditionEditorProps) {
   const type = condition.type;
@@ -169,23 +178,31 @@ export function ConditionEditor({ condition, onChange }: ConditionEditorProps) {
   );
 }
 
-export interface SpotItemFormProps {
-  readonly spot: SpotItem;
+export interface SpotItemFormProps<TLocale extends string = SupportedLocale> {
+  readonly spot: SpotItem<TLocale>;
   readonly index?: number;
-  readonly locale?: SupportedLocale;
-  readonly onChange: (spot: SpotItem) => void;
+  readonly locale?: TLocale;
+  readonly dictionary?: LocaleDictionary<TLocale>;
+  readonly onChange: (spot: SpotItem<TLocale>) => void;
   readonly onDelete?: () => void;
 }
-export function SpotItemForm({
+export function SpotItemForm<TLocale extends string = SupportedLocale>({
   spot,
   index = 0,
-  locale = "ja",
+  locale = "ja" as TLocale,
   onChange,
   onDelete,
-}: SpotItemFormProps) {
+}: SpotItemFormProps<TLocale>) {
   const pair = localePair(spot.name);
   const setField = (
-    field: "iconUrl" | "imageUrl" | "externalUrl" | "guideId" | "groupId" | "deckId",
+    field:
+      | "iconUrl"
+      | "imageUrl"
+      | "externalUrl"
+      | "guideId"
+      | "groupId"
+      | "deckId"
+      | "redirectUrlAfterClaim",
     event: ChangeEvent<HTMLInputElement>,
   ) => {
     if (event.target.value === "") {
@@ -221,6 +238,35 @@ export function SpotItemForm({
         />
       </label>
       <label>
+        Description ({locale}){" "}
+        <textarea
+          value={resolveLocalizedText(spot.description, locale)}
+          onChange={(event) =>
+            onChange({
+              ...spot,
+              description: updateText(spot.description, locale, event.target.value),
+            })
+          }
+        />
+      </label>
+      <label>
+        Hint ({locale}){" "}
+        <textarea
+          value={resolveLocalizedText(spot.hint, locale)}
+          onChange={(event) =>
+            onChange({ ...spot, hint: updateText(spot.hint, locale, event.target.value) })
+          }
+        />
+      </label>
+      <label>
+        Order index{" "}
+        <input
+          type="number"
+          value={spot.orderIndex ?? spot.order ?? index + 1}
+          onChange={(event) => onChange({ ...spot, orderIndex: Number(event.target.value) })}
+        />
+      </label>
+      <label>
         Icon URL{" "}
         <input value={spot.iconUrl ?? ""} onChange={(event) => setField("iconUrl", event)} />
       </label>
@@ -235,6 +281,45 @@ export function SpotItemForm({
           onChange={(event) => setField("externalUrl", event)}
         />
       </label>
+      <label>
+        Redirect URL after claim{" "}
+        <input
+          value={spot.redirectUrlAfterClaim ?? ""}
+          onChange={(event) => setField("redirectUrlAfterClaim", event)}
+        />
+      </label>
+      <label>
+        Prerequisites (comma-separated stamp IDs){" "}
+        <input
+          value={(spot.requiresStampIds ?? spot.dependsOn ?? []).join(", ")}
+          onChange={(event) => {
+            const ids = event.target.value
+              .split(",")
+              .map((item) => item.trim())
+              .filter(Boolean);
+            if (ids.length === 0) {
+              const { requiresStampIds: _requiresStampIds, ...rest } = spot;
+              onChange(rest);
+            } else onChange({ ...spot, requiresStampIds: ids });
+          }}
+        />
+      </label>
+      <label>
+        Metadata (JSON){" "}
+        <textarea
+          value={JSON.stringify(spot.metadata ?? {}, null, 2)}
+          onChange={(event) => {
+            try {
+              const parsed: unknown = JSON.parse(event.target.value);
+              if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+                onChange({ ...spot, metadata: parsed as Record<string, unknown> });
+              }
+            } catch {
+              // Keep the last valid metadata while the user edits JSON.
+            }
+          }}
+        />
+      </label>
       <ConditionEditor
         condition={spot.condition}
         onChange={(condition) => onChange({ ...spot, condition })}
@@ -244,12 +329,17 @@ export function SpotItemForm({
   );
 }
 
-export interface SpotListEditorProps {
-  readonly spots: ReadonlyArray<SpotItem>;
-  readonly locale?: SupportedLocale;
-  readonly onChange: (spots: ReadonlyArray<SpotItem>) => void;
+export interface SpotListEditorProps<TLocale extends string = SupportedLocale> {
+  readonly spots: ReadonlyArray<SpotItem<TLocale>>;
+  readonly locale?: TLocale;
+  readonly dictionary?: LocaleDictionary<TLocale>;
+  readonly onChange: (spots: ReadonlyArray<SpotItem<TLocale>>) => void;
 }
-export function SpotListEditor({ spots, locale = "ja", onChange }: SpotListEditorProps) {
+export function SpotListEditor<TLocale extends string = SupportedLocale>({
+  spots,
+  locale = "ja" as TLocale,
+  onChange,
+}: SpotListEditorProps<TLocale>) {
   return (
     <section aria-label="Spots">
       <h2>Spots</h2>
@@ -269,12 +359,17 @@ export function SpotListEditor({ spots, locale = "ja", onChange }: SpotListEdito
   );
 }
 
-export interface RewardListEditorProps {
-  readonly rewards: ReadonlyArray<RewardItem>;
-  readonly locale?: SupportedLocale;
-  readonly onChange: (rewards: ReadonlyArray<RewardItem>) => void;
+export interface RewardListEditorProps<TLocale extends string = SupportedLocale> {
+  readonly rewards: ReadonlyArray<RewardItem<TLocale>>;
+  readonly locale?: TLocale;
+  readonly dictionary?: LocaleDictionary<TLocale>;
+  readonly onChange: (rewards: ReadonlyArray<RewardItem<TLocale>>) => void;
 }
-export function RewardListEditor({ rewards, locale = "ja", onChange }: RewardListEditorProps) {
+export function RewardListEditor<TLocale extends string = SupportedLocale>({
+  rewards,
+  locale = "ja" as TLocale,
+  onChange,
+}: RewardListEditorProps<TLocale>) {
   return (
     <section aria-label="Rewards">
       <h2>Rewards</h2>
@@ -302,6 +397,24 @@ export function RewardListEditor({ rewards, locale = "ja", onChange }: RewardLis
                   rewards.map((item, itemIndex) =>
                     itemIndex === index
                       ? { ...item, title: updateText(item.title, locale, event.target.value) }
+                      : item,
+                  ),
+                )
+              }
+            />
+          </label>
+          <label>
+            Description ({locale}){" "}
+            <textarea
+              value={resolveLocalizedText(reward.description, locale)}
+              onChange={(event) =>
+                onChange(
+                  rewards.map((item, itemIndex) =>
+                    itemIndex === index
+                      ? {
+                          ...item,
+                          description: updateText(item.description, locale, event.target.value),
+                        }
                       : item,
                   ),
                 )
@@ -344,6 +457,107 @@ export function RewardListEditor({ rewards, locale = "ja", onChange }: RewardLis
               }
             />
           </label>
+          <label>
+            Stock limit{" "}
+            <input
+              type="number"
+              min={1}
+              value={reward.stockLimit ?? reward.maxStock ?? ""}
+              onChange={(event) =>
+                onChange(
+                  rewards.map((item, itemIndex) => {
+                    if (itemIndex !== index) return item;
+                    if (event.target.value === "") {
+                      const { stockLimit: _stockLimit, ...rest } = item;
+                      return rest;
+                    }
+                    return { ...item, stockLimit: Number(event.target.value) };
+                  }),
+                )
+              }
+            />
+          </label>
+          <label>
+            User claim limit{" "}
+            <input
+              type="number"
+              min={1}
+              value={reward.userClaimLimit ?? reward.limitPerUser ?? ""}
+              onChange={(event) =>
+                onChange(
+                  rewards.map((item, itemIndex) => {
+                    if (itemIndex !== index) return item;
+                    if (event.target.value === "") {
+                      const { userClaimLimit: _userClaimLimit, ...rest } = item;
+                      return rest;
+                    }
+                    return { ...item, userClaimLimit: Number(event.target.value) };
+                  }),
+                )
+              }
+            />
+          </label>
+          <label>
+            Redemption method{" "}
+            <select
+              value={reward.redemptionMethod}
+              onChange={(event) =>
+                onChange(
+                  rewards.map((item, itemIndex) =>
+                    itemIndex === index
+                      ? {
+                          ...item,
+                          redemptionMethod: event.target.value as RewardItem["redemptionMethod"],
+                        }
+                      : item,
+                  ),
+                )
+              }
+            >
+              <option value="manual_slide">manual_slide</option>
+              <option value="staff_passcode">staff_passcode</option>
+              <option value="view_only">view_only</option>
+              <option value="server_claim">server_claim</option>
+            </select>
+          </label>
+          {reward.redemptionMethod === "staff_passcode" && (
+            <label>
+              Staff passcode{" "}
+              <input
+                type="password"
+                value={reward.staffPasscode ?? ""}
+                onChange={(event) =>
+                  onChange(
+                    rewards.map((item, itemIndex) =>
+                      itemIndex === index ? { ...item, staffPasscode: event.target.value } : item,
+                    ),
+                  )
+                }
+              />
+            </label>
+          )}
+          <label>
+            Conditions (JSON){" "}
+            <textarea
+              value={JSON.stringify(reward.conditions ?? [], null, 2)}
+              onChange={(event) => {
+                try {
+                  const parsed: unknown = JSON.parse(event.target.value);
+                  if (Array.isArray(parsed)) {
+                    onChange(
+                      rewards.map((item, itemIndex) =>
+                        itemIndex === index
+                          ? { ...item, conditions: parsed as ReadonlyArray<RewardUnlockCondition> }
+                          : item,
+                      ),
+                    );
+                  }
+                } catch {
+                  // Keep the last valid condition set while the user edits JSON.
+                }
+              }}
+            />
+          </label>
         </article>
       ))}
     </section>
@@ -352,7 +566,7 @@ export function RewardListEditor({ rewards, locale = "ja", onChange }: RewardLis
 
 export interface ThemePresetSelectorProps {
   readonly value?: SheetTheme;
-  readonly locale?: SupportedLocale;
+  readonly locale?: SupportedLocale | (string & {});
   readonly onChange: (theme: SheetTheme) => void;
 }
 export function ThemePresetSelector({ value, locale = "ja", onChange }: ThemePresetSelectorProps) {
@@ -382,7 +596,7 @@ export function ThemePresetSelector({ value, locale = "ja", onChange }: ThemePre
 
 export interface ThemeEditorProps {
   readonly theme?: SheetTheme;
-  readonly locale?: SupportedLocale;
+  readonly locale?: SupportedLocale | (string & {});
   readonly onChange: (theme: SheetTheme) => void;
 }
 export function ThemeEditor({
@@ -418,13 +632,18 @@ export function ThemeEditor({
   );
 }
 
-export interface QrExportModalProps {
+export interface QrExportModalProps<TLocale extends string = SupportedLocale> {
   readonly open: boolean;
-  readonly config: RallyConfig;
-  readonly locale?: SupportedLocale;
+  readonly config: RallyConfig<TLocale>;
+  readonly locale?: TLocale;
   readonly onClose: () => void;
 }
-export function QrExportModal({ open, config, locale = "ja", onClose }: QrExportModalProps) {
+export function QrExportModal<TLocale extends string = SupportedLocale>({
+  open,
+  config,
+  locale = "ja" as TLocale,
+  onClose,
+}: QrExportModalProps<TLocale>) {
   if (!open) return null;
   return (
     <div role="dialog" aria-modal="true" className="stamprally-qr-modal">
@@ -455,17 +674,20 @@ export function QrExportModal({ open, config, locale = "ja", onClose }: QrExport
   );
 }
 
-export interface JsonConfigIOProps {
-  readonly config: RallyConfig;
-  readonly onImport: (config: RallyConfig) => void;
-  readonly locale?: SupportedLocale;
+export interface JsonConfigIOProps<TLocale extends string = SupportedLocale> {
+  readonly config: RallyConfig<TLocale>;
+  readonly onImport: (config: RallyConfig<TLocale>) => void;
+  readonly locale?: TLocale;
 }
-export function JsonConfigIO({ config, onImport }: JsonConfigIOProps) {
+export function JsonConfigIO<TLocale extends string = SupportedLocale>({
+  config,
+  onImport,
+}: JsonConfigIOProps<TLocale>) {
   const [value, setValue] = useState(() => JSON.stringify(stripSensitiveConfig(config), null, 2));
   const [error, setError] = useState<string | null>(null);
   const importConfig = (): void => {
     try {
-      const migrated = migrateRallyConfig(JSON.parse(value) as unknown);
+      const migrated = migrateRallyConfig<TLocale>(JSON.parse(value) as unknown);
       const validation = validateRallyConfig(migrated);
       if (!validation.valid) {
         setError(validation.errors.map((item) => `${item.path}: ${item.message}`).join(" "));
@@ -496,12 +718,17 @@ export function JsonConfigIO({ config, onImport }: JsonConfigIOProps) {
   );
 }
 
-export interface RallyEditorProps {
-  readonly config: RallyConfig;
-  readonly locale?: SupportedLocale;
-  readonly onChange: (config: RallyConfig) => void;
+export interface RallyEditorProps<TLocale extends string = SupportedLocale> {
+  readonly config: RallyConfig<TLocale>;
+  readonly locale?: TLocale;
+  readonly dictionary?: LocaleDictionary<TLocale>;
+  readonly onChange: (config: RallyConfig<TLocale>) => void;
 }
-export function RallyEditor({ config, locale = "ja", onChange }: RallyEditorProps) {
+export function RallyEditor<TLocale extends string = SupportedLocale>({
+  config,
+  locale = "ja" as TLocale,
+  onChange,
+}: RallyEditorProps<TLocale>) {
   const [showQr, setShowQr] = useState(false);
   return (
     <main className="stamprally-admin">

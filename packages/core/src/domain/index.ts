@@ -10,6 +10,7 @@ export { resolveLocalizedText, toLocalizedString } from "./i18n.js";
 export { migrateRallyConfig } from "./migration.js";
 export type {
   FontFamily,
+  LocaleDictionary,
   LocalizedString,
   LocalizedText,
   RallyConfig,
@@ -18,6 +19,7 @@ export type {
   RewardState,
   RewardStatus,
   RewardType,
+  RewardUnlockCondition,
   SheetTheme,
   SlotShape,
   SpotItem,

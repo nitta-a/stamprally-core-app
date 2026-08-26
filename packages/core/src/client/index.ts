@@ -1,4 +1,9 @@
-export type { Clock, StampRallyListener } from "./client.js";
+export type {
+  Clock,
+  StampRallyClientEvent,
+  StampRallyEventListener,
+  StampRallyListener,
+} from "./client.js";
 export { StampRallyClient } from "./client.js";
 export type {
   IndexedDBAdapterOptions,

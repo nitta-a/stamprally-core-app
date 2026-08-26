@@ -1,4 +1,5 @@
 import type {
+  PublicRallyConfig,
   RallyConfig,
   Result,
   StampError,
@@ -9,13 +10,20 @@ import { type ProcessStampValue, processStamp, reconcileRewardStates } from "../
 import { cloneState, type StampStorage } from "./storage.js";
 
 export type StampRallyListener = (state: StampRallyState) => void;
+export type StampRallyClientEvent =
+  | { readonly type: "checkIn"; readonly stampId: string; readonly state: StampRallyState }
+  | { readonly type: "rewardClaimed"; readonly rewardId: string; readonly state: StampRallyState }
+  | { readonly type: "syncCompleted"; readonly state: StampRallyState }
+  | { readonly type: "error"; readonly error: unknown };
+export type StampRallyEventListener = (event: StampRallyClientEvent) => void;
 export type Clock = () => string;
 
 const systemClock: Clock = () => new Date().toISOString();
 
 export class StampRallyClient {
   readonly #listeners = new Set<StampRallyListener>();
-  readonly #config: RallyConfig;
+  readonly #eventListeners = new Set<StampRallyEventListener>();
+  #config: RallyConfig;
   readonly #storage: StampStorage;
   readonly #clock: Clock;
   #currentState: StampRallyState | null = null;
@@ -36,11 +44,46 @@ export class StampRallyClient {
     return this.#config;
   }
 
-  subscribe(listener: StampRallyListener): () => void {
-    this.#listeners.add(listener);
+  subscribe(listener: StampRallyListener): () => void;
+  subscribe(listener: StampRallyEventListener, options: { readonly events: true }): () => void;
+  subscribe(
+    listener: StampRallyListener | StampRallyEventListener,
+    options: { readonly events?: boolean } = {},
+  ): () => void {
+    if (options.events === true) {
+      this.#eventListeners.add(listener as StampRallyEventListener);
+      return () => this.#eventListeners.delete(listener as StampRallyEventListener);
+    }
+    this.#listeners.add(listener as StampRallyListener);
     return () => {
-      this.#listeners.delete(listener);
+      this.#listeners.delete(listener as StampRallyListener);
     };
+  }
+
+  subscribeEvents(listener: StampRallyEventListener): () => void {
+    this.#eventListeners.add(listener);
+    return () => this.#eventListeners.delete(listener);
+  }
+
+  async updateConfig(newConfig: PublicRallyConfig): Promise<StampRallyState> {
+    return this.#enqueue(async () => {
+      const current = await this.initialize();
+      this.#config = newConfig;
+      const next = this.#reconcileState(cloneState(current), this.#clock());
+      await this.#storage.save(next);
+      this.#currentState = next;
+      this.#initialization = Promise.resolve(next);
+      this.#emit(next);
+      return next;
+    });
+  }
+
+  notifyRewardClaimed(rewardId: string, state = this.#currentState): void {
+    if (state !== null) this.#emitEvent({ type: "rewardClaimed", rewardId, state });
+  }
+
+  notifySyncCompleted(state = this.#currentState): void {
+    if (state !== null) this.#emitEvent({ type: "syncCompleted", state });
   }
 
   init(): Promise<StampRallyState> {
@@ -83,12 +126,14 @@ export class StampRallyClient {
       const result = processStamp(currentState, this.#config, stampId, context, now);
 
       if (!result.ok) {
+        this.#emitEvent({ type: "error", error: result.error });
         return result;
       }
 
       await this.#storage.save(result.value.nextState);
       this.#currentState = result.value.nextState;
       this.#emit(result.value.nextState);
+      this.#emitEvent({ type: "checkIn", stampId, state: result.value.nextState });
       return result;
     });
   }
@@ -142,6 +187,10 @@ export class StampRallyClient {
     for (const listener of this.#listeners) {
       listener(state);
     }
+  }
+
+  #emitEvent(event: StampRallyClientEvent): void {
+    for (const listener of this.#eventListeners) listener(event);
   }
 
   #createEmptyState(now: string): StampRallyState {

@@ -81,7 +81,8 @@ export function reconcileRewardStates(
       return { rewardId: reward.id, status: "EXPIRED" };
     }
 
-    if (reward.maxStock !== undefined && (current?.redeemedCount ?? 0) >= reward.maxStock) {
+    const stockLimit = reward.stockLimit ?? reward.maxStock;
+    if (stockLimit !== undefined && (current?.redeemedCount ?? 0) >= stockLimit) {
       return {
         rewardId: reward.id,
         status: "EXPIRED",
@@ -128,12 +129,14 @@ export function consumeReward(params: ConsumeRewardParams): ConsumeResult {
   if (reward.validUntil !== undefined && Date.parse(reward.validUntil) <= Date.parse(params.now)) {
     return { ok: false, error: { code: "EXPIRED", reason: "EXPIRED", rewardId: reward.id } };
   }
-  if (reward.maxStock !== undefined && (currentState.redeemedCount ?? 0) >= reward.maxStock) {
+  const stockLimit = reward.stockLimit ?? reward.maxStock;
+  const userClaimLimit = reward.userClaimLimit ?? reward.limitPerUser;
+  if (stockLimit !== undefined && (currentState.redeemedCount ?? 0) >= stockLimit) {
     return { ok: false, error: { code: "OUT_OF_STOCK", rewardId: reward.id } };
   }
   if (
-    reward.limitPerUser !== undefined &&
-    (params.userRedemptionCount ?? currentState.userRedemptionCount ?? 0) >= reward.limitPerUser
+    userClaimLimit !== undefined &&
+    (params.userRedemptionCount ?? currentState.userRedemptionCount ?? 0) >= userClaimLimit
   ) {
     return {
       ok: false,
@@ -169,7 +172,7 @@ export function consumeReward(params: ConsumeRewardParams): ConsumeResult {
       status: "CONSUMED",
       consumedAt: params.now,
       claimTicketNumber: createUniqueClaimTicketNumber(reward.id, params.now),
-      ...(reward.maxStock !== undefined ||
+      ...(stockLimit !== undefined ||
       params.userId !== undefined ||
       params.userRedemptionCount !== undefined
         ? { redeemedCount: (currentState.redeemedCount ?? 0) + 1 }

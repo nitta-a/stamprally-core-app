@@ -5,6 +5,7 @@ const packageFiles = [
   "packages/react/package.json",
   "packages/ui/package.json",
   "packages/admin-ui/package.json",
+  "packages/server/package.json",
 ];
 
 for (const packageFile of packageFiles) {

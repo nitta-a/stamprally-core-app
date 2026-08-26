@@ -5,6 +5,9 @@ export type LocalizedString<TLocale extends string = SupportedLocale> = Record<T
 export type LocalizedText<TLocale extends string = string> =
   | string
   | Partial<Record<TLocale, string>>;
+export type LocaleDictionary<TLocale extends string = string> = Readonly<
+  Record<TLocale, Readonly<Record<string, string>>>
+>;
 
 export type SlotShape = "circle" | "square" | "rounded";
 export type FontFamily = "system-ui" | "serif" | "rounded-sans" | "monospace" | "handwritten";
@@ -51,6 +54,7 @@ export interface SpotItem<
   readonly description?: LocalizedText<TLocale>;
   readonly hint?: LocalizedText<TLocale>;
   readonly condition: StampCondition;
+  readonly orderIndex?: number;
   readonly order?: number;
   readonly deckId?: string;
   readonly groupId?: string;
@@ -78,7 +82,16 @@ export interface StampRecord {
 
 export type RewardType = "digital" | "in_person";
 
-export type RedemptionMethod = "manual_slide" | "staff_passcode" | "view_only";
+export type RedemptionMethod = "manual_slide" | "staff_passcode" | "view_only" | "server_claim";
+
+export type RewardUnlockCondition =
+  | { readonly type: "stamp_count"; readonly count: number }
+  | { readonly type: "stamps"; readonly stampIds: ReadonlyArray<string> }
+  | { readonly type: "group_complete"; readonly groupId: string }
+  | {
+      readonly type: "all" | "any";
+      readonly conditions: ReadonlyArray<RewardUnlockCondition>;
+    };
 
 export type RewardStatus = "LOCKED" | "AVAILABLE" | "CONSUMED" | "EXPIRED";
 
@@ -89,9 +102,12 @@ export interface RewardItem<TLocale extends string = SupportedLocale> {
   readonly type: RewardType;
   readonly redemptionMethod: RedemptionMethod;
   readonly requiredStampCount: number;
+  readonly conditions?: ReadonlyArray<RewardUnlockCondition>;
   readonly digitalContentUrl?: string;
   readonly staffPasscode?: string;
   readonly validUntil?: string;
+  readonly stockLimit?: number;
+  readonly userClaimLimit?: number;
   readonly maxStock?: number;
   readonly limitPerUser?: number;
   readonly claimTicketNumber?: string;
