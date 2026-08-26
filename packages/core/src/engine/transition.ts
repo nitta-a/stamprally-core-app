@@ -11,6 +11,7 @@ import type {
 } from "../domain/index.js";
 import { evaluateConditionDetailed } from "./evaluate.js";
 import { getOrderedStamps } from "./order.js";
+import { createUniqueClaimTicketNumber } from "./rewards.js";
 
 export type StampRallyEvent =
   | {
@@ -41,9 +42,13 @@ export type RewardConsumeError =
       readonly rewardId: string;
       readonly message: string;
     }
-  | { readonly code: "EXPIRED"; readonly rewardId: string }
+  | { readonly code: "EXPIRED"; readonly reason: "EXPIRED"; readonly rewardId: string }
   | { readonly code: "OUT_OF_STOCK"; readonly rewardId: string }
-  | { readonly code: "USER_LIMIT_REACHED"; readonly rewardId: string }
+  | {
+      readonly code: "USER_LIMIT_REACHED";
+      readonly reason: "LIMIT_EXCEEDED";
+      readonly rewardId: string;
+    }
   | { readonly code: "REWARD_NOT_FOUND"; readonly rewardId: string };
 
 export interface ConsumeRewardParams {
@@ -121,7 +126,7 @@ export function consumeReward(params: ConsumeRewardParams): ConsumeResult {
   }
 
   if (reward.validUntil !== undefined && Date.parse(reward.validUntil) <= Date.parse(params.now)) {
-    return { ok: false, error: { code: "EXPIRED", rewardId: reward.id } };
+    return { ok: false, error: { code: "EXPIRED", reason: "EXPIRED", rewardId: reward.id } };
   }
   if (reward.maxStock !== undefined && (currentState.redeemedCount ?? 0) >= reward.maxStock) {
     return { ok: false, error: { code: "OUT_OF_STOCK", rewardId: reward.id } };
@@ -130,7 +135,10 @@ export function consumeReward(params: ConsumeRewardParams): ConsumeResult {
     reward.limitPerUser !== undefined &&
     (params.userRedemptionCount ?? currentState.userRedemptionCount ?? 0) >= reward.limitPerUser
   ) {
-    return { ok: false, error: { code: "USER_LIMIT_REACHED", rewardId: reward.id } };
+    return {
+      ok: false,
+      error: { code: "USER_LIMIT_REACHED", reason: "LIMIT_EXCEEDED", rewardId: reward.id },
+    };
   }
 
   if (reward.redemptionMethod === "staff_passcode") {
@@ -160,6 +168,7 @@ export function consumeReward(params: ConsumeRewardParams): ConsumeResult {
       ...currentState,
       status: "CONSUMED",
       consumedAt: params.now,
+      claimTicketNumber: createUniqueClaimTicketNumber(reward.id, params.now),
       ...(reward.maxStock !== undefined ||
       params.userId !== undefined ||
       params.userRedemptionCount !== undefined

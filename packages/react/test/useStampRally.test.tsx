@@ -119,6 +119,36 @@ describe("useStampRally", () => {
     expect(client.getState()?.records).toHaveLength(1);
   });
 
+  it("queues server verification network failures and flushes them on online", async () => {
+    const verify = vi
+      .fn()
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValueOnce(true);
+    const onStampClaimed = vi.fn();
+    const client = new StampRallyClient(config, new InMemoryStorage(), () => NOW);
+    const { result } = renderHook(() =>
+      useStampRally(client, {
+        syncAdapter: { isOnline: true, onServerVerify: verify },
+        onStampClaimed,
+      }),
+    );
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    await act(async () => {
+      const queued = await result.current.acquire("first", { type: "instant" }, NOW);
+      expect(queued).toMatchObject({ ok: false, error: { code: "OFFLINE_QUEUED" } });
+    });
+    expect(result.current.offlineQueue).toHaveLength(1);
+    expect(client.getState()?.records).toEqual([{ stampId: "first", acquiredAt: NOW }]);
+
+    await act(async () => {
+      window.dispatchEvent(new Event("online"));
+    });
+    await waitFor(() => expect(result.current.offlineQueue).toHaveLength(0));
+    expect(verify).toHaveBeenCalledTimes(2);
+    expect(onStampClaimed).toHaveBeenCalledWith({ stampId: "first", acquiredAt: NOW });
+  });
+
   it("initializes only a client whose synchronous snapshot is null", async () => {
     const initializedClient = new StampRallyClient(config, new InMemoryStorage(), () => NOW);
     await initializedClient.init();

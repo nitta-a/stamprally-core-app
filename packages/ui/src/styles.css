@@ -54,6 +54,19 @@
   border: 2px solid var(--stamprally-primary, #9e551e);
   cursor: pointer;
 }
+.stamp-slot:focus-visible,
+.stamprally-modal button:focus-visible,
+.stamprally-rewards button:focus-visible,
+.stamprally-rewards input:focus-visible {
+  outline: 3px solid currentColor;
+  outline-offset: 3px;
+}
+.stamp-slot:disabled,
+.stamprally-modal button:disabled,
+.stamprally-rewards button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
 .stamp-slot__number,
 .stamp-slot__state,
 .stamp-slot__condition {
@@ -88,7 +101,11 @@
   cursor: not-allowed;
 }
 .stamp-slot--animating {
-  animation: stamprally-stamp-press 0.5s ease-out;
+  animation: stamp-press 0.6s ease-out;
+}
+.stamp-press {
+  animation: stamp-press 0.6s cubic-bezier(0.2, 1.4, 0.4, 1);
+  transform-origin: center;
 }
 .stamprally-modal {
   position: fixed;
@@ -104,9 +121,83 @@
   padding: 1.5rem;
   background: var(--stamprally-card, #fff);
 }
-@keyframes stamprally-stamp-press {
-  50% {
-    transform: scale(0.96) rotate(-2deg);
+@keyframes stamp-press {
+  0% {
+    transform: scale(1.18) rotate(-8deg);
+  }
+  45% {
+    transform: scale(0.94) rotate(3deg);
+  }
+  72% {
+    transform: scale(1.04) rotate(-1deg);
+  }
+  100% {
+    transform: scale(1) rotate(0);
+  }
+}
+.stamp-sheet__complete-mark {
+  position: relative;
+  padding: 0.75rem 1rem;
+  border: 2px solid var(--stamp-primary, #9e551e);
+  border-radius: 999px;
+  text-align: center;
+  font-weight: 800;
+  animation: achievement-pop 0.65s cubic-bezier(0.2, 1.4, 0.4, 1);
+}
+.stamp-sheet__complete-mark::before,
+.stamp-sheet__complete-mark::after {
+  position: absolute;
+  inset: 50% auto auto 50%;
+  width: 0.45rem;
+  height: 0.45rem;
+  content: "";
+  background: var(--stamp-primary, #9e551e);
+  box-shadow:
+    -4rem -1rem #d64b3c,
+    4rem -0.75rem #e6a23c,
+    -3rem 1rem #4e8f78,
+    3.5rem 1.1rem #6574b8;
+  animation: confetti-burst 0.7s ease-out both;
+}
+.stamp-sheet__complete-mark::after {
+  box-shadow:
+    -2.5rem -1.5rem #e6a23c,
+    2.5rem -1.4rem #4e8f78,
+    -4.5rem 0.4rem #6574b8,
+    4.5rem 0.5rem #d64b3c;
+  animation-delay: 0.08s;
+}
+@keyframes achievement-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.7);
+  }
+  70% {
+    transform: scale(1.06);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+@keyframes confetti-burst {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.5);
+  }
+  100% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto;
+    animation-duration: 0.01ms;
+    animation-iteration-count: 1;
+    transition-duration: 0.01ms;
   }
 }
 @media (max-width: 640px) {

@@ -34,6 +34,11 @@ interface ClientError {
   readonly value: StampError | RewardConsumeError | Error;
 }
 
+interface QueuedRequestMetadata {
+  readonly previousState: StampRallyState | null;
+  readonly result: ProcessStampValue;
+}
+
 export interface CheckInRequest {
   readonly stampId: string;
   readonly context: VerificationContext;
@@ -83,6 +88,7 @@ export interface UseStampRallyReturn {
   readonly redeem: (rewardId: string, options?: RedeemOptions) => Promise<ConsumeResult>;
   readonly exportRecoveryCode: () => string;
   readonly importRecoveryCode: (token: string) => Promise<boolean>;
+  readonly offlineQueue: ReadonlyArray<CheckInRequest>;
   readonly queuedCount: number;
   readonly flushQueue: () => Promise<void>;
 }
@@ -138,13 +144,38 @@ function isRejectedVerification(value: unknown): boolean {
   );
 }
 
+function isNetworkFailure(error: unknown): boolean {
+  if (typeof navigator !== "undefined" && navigator.onLine === false) return true;
+  if (!(error instanceof Error)) return true;
+  return /aborted|connection|fetch|network|offline|timeout/i.test(`${error.name} ${error.message}`);
+}
+
+function notifyAcquisitionEvents(
+  result: ProcessStampValue,
+  events: StampRallyEventHandlers | undefined,
+  onStampClaimed: StampRallyEventHandlers["onStampClaimed"] | undefined,
+  onRewardUnlocked: StampRallyEventHandlers["onRewardUnlocked"] | undefined,
+): void {
+  for (const event of result.events) {
+    if (event.type === "stampAcquired") {
+      (events?.onStampClaimed ?? onStampClaimed)?.(event.record);
+    }
+    if (event.type === "rewardUnlocked") {
+      (events?.onRewardUnlocked ?? onRewardUnlocked)?.(event.rewardId);
+    }
+  }
+}
+
 export function useStampRally(
   client: StampRallyClient,
   options: UseStampRallyOptions = {},
 ): UseStampRallyReturn {
   const syncAdapter = options.syncAdapter;
   const events = options.events;
-  const queuedRequests = useRef<ReadonlyArray<CheckInRequest>>([]);
+  const [offlineQueue, setOfflineQueue] = useState<ReadonlyArray<CheckInRequest>>([]);
+  const queuedMetadata = useRef(new Map<string, QueuedRequestMetadata>());
+  const isFlushingQueue = useRef(false);
+  const activeClient = useRef(client);
   const subscribe = useCallback(
     (onStoreChange: () => void) => client.subscribe(() => onStoreChange()),
     [client],
@@ -163,6 +194,13 @@ export function useStampRally(
   useEffect(() => {
     setOptimisticState(rawState);
   }, [rawState]);
+
+  useEffect(() => {
+    if (activeClient.current === client) return;
+    activeClient.current = client;
+    setOfflineQueue([]);
+    queuedMetadata.current.clear();
+  }, [client]);
 
   useEffect(() => {
     if (syncAdapter?.onStateChange === undefined) return;
@@ -199,6 +237,18 @@ export function useStampRally(
     };
   }, [client, rawState]);
 
+  const queueRequest = useCallback(
+    (request: CheckInRequest, metadata?: QueuedRequestMetadata): void => {
+      if (metadata !== undefined) queuedMetadata.current.set(request.idempotencyKey, metadata);
+      setOfflineQueue((current) =>
+        current.some((item) => item.idempotencyKey === request.idempotencyKey)
+          ? current
+          : [...current, request],
+      );
+    },
+    [],
+  );
+
   const acquire = useCallback(
     (
       stampId: string,
@@ -216,7 +266,7 @@ export function useStampRally(
       setClientError(null);
 
       if (!isOnline(syncAdapter)) {
-        queuedRequests.current = [...queuedRequests.current, request];
+        queueRequest(request);
         const queued: Result<ProcessStampValue, StampError> = {
           ok: false,
           error: { code: "OFFLINE_QUEUED", stampId, idempotencyKey: request.idempotencyKey },
@@ -241,9 +291,29 @@ export function useStampRally(
               resolve(rejected);
               return;
             }
+            const previousState = client.getState();
             const result = await client.acquire(stampId, context, acquiredAt);
             if (result.ok) {
-              const verified = await syncAdapter?.onServerVerify?.(request);
+              let verified: unknown;
+              try {
+                verified = await syncAdapter?.onServerVerify?.(request);
+              } catch (verificationError) {
+                if (!isNetworkFailure(verificationError)) throw verificationError;
+                queueRequest(request, { previousState, result: result.value });
+                const queued: Result<ProcessStampValue, StampError> = {
+                  ok: false,
+                  error: {
+                    code: "OFFLINE_QUEUED",
+                    stampId,
+                    idempotencyKey: request.idempotencyKey,
+                  },
+                };
+                setClientError({ client, value: toError(verificationError) });
+                setOptimisticState(client.getState());
+                setIsOperationPending(false);
+                resolve(queued);
+                return;
+              }
               if (isRejectedVerification(verified)) {
                 await client.restore(rawState ?? client.getState() ?? result.value.nextState);
                 const rejected: Result<ProcessStampValue, StampError> = {
@@ -256,14 +326,12 @@ export function useStampRally(
                 resolve(rejected);
                 return;
               }
-              for (const event of result.value.events) {
-                if (event.type === "stampAcquired") {
-                  (events?.onStampClaimed ?? options.onStampClaimed)?.(event.record);
-                }
-                if (event.type === "rewardUnlocked") {
-                  (events?.onRewardUnlocked ?? options.onRewardUnlocked)?.(event.rewardId);
-                }
-              }
+              notifyAcquisitionEvents(
+                result.value,
+                events,
+                options.onStampClaimed,
+                options.onRewardUnlocked,
+              );
             }
             if (!result.ok) {
               setClientError({ client, value: result.error });
@@ -272,6 +340,18 @@ export function useStampRally(
             setIsOperationPending(false);
             resolve(result);
           } catch (acquireError) {
+            if (isNetworkFailure(acquireError)) {
+              queueRequest(request);
+              const queued: Result<ProcessStampValue, StampError> = {
+                ok: false,
+                error: { code: "OFFLINE_QUEUED", stampId, idempotencyKey: request.idempotencyKey },
+              };
+              setClientError({ client, value: queued.error });
+              setOptimisticState(client.getState());
+              setIsOperationPending(false);
+              resolve(queued);
+              return;
+            }
             const normalizedError = toError(acquireError);
             setClientError({ client, value: normalizedError });
             setOptimisticState(client.getState());
@@ -281,7 +361,15 @@ export function useStampRally(
         })();
       });
     },
-    [client, events, options.onRewardUnlocked, options.onStampClaimed, rawState, syncAdapter],
+    [
+      client,
+      events,
+      options.onRewardUnlocked,
+      options.onStampClaimed,
+      queueRequest,
+      rawState,
+      syncAdapter,
+    ],
   );
 
   const reset = useCallback(
@@ -460,13 +548,90 @@ export function useStampRally(
   const error = clientError?.client === client ? clientError.value : null;
 
   const flushQueue = useCallback(async (): Promise<void> => {
-    if (!isOnline(syncAdapter)) return;
-    const pending = queuedRequests.current;
-    queuedRequests.current = [];
-    for (const request of pending) {
-      await acquire(request.stampId, request.context, request.now, request.idempotencyKey);
+    if (!isOnline(syncAdapter) || isFlushingQueue.current) return;
+    isFlushingQueue.current = true;
+    setIsOperationPending(true);
+    try {
+      for (const request of offlineQueue) {
+        if (!isOnline(syncAdapter)) break;
+        const metadata = queuedMetadata.current.get(request.idempotencyKey);
+        const previousState = metadata?.previousState ?? client.getState();
+        try {
+          const before = await syncAdapter?.onBeforeCheckIn?.(request);
+          if (before === false) {
+            if (metadata !== undefined && previousState !== null)
+              await client.restore(previousState);
+            setClientError({ client, value: { code: "INVALID_PROOF", stampId: request.stampId } });
+            queuedMetadata.current.delete(request.idempotencyKey);
+            setOfflineQueue((current) =>
+              current.filter((item) => item.idempotencyKey !== request.idempotencyKey),
+            );
+            continue;
+          }
+
+          let result = metadata?.result;
+          if (result === undefined) {
+            const localResult = await client.acquire(request.stampId, request.context, request.now);
+            if (!localResult.ok) {
+              setClientError({ client, value: localResult.error });
+              queuedMetadata.current.delete(request.idempotencyKey);
+              setOfflineQueue((current) =>
+                current.filter((item) => item.idempotencyKey !== request.idempotencyKey),
+              );
+              continue;
+            }
+            result = localResult.value;
+            queuedMetadata.current.set(request.idempotencyKey, {
+              previousState,
+              result,
+            });
+          }
+
+          const verified = await syncAdapter?.onServerVerify?.(request);
+          if (isRejectedVerification(verified)) {
+            if (previousState !== null) await client.restore(previousState);
+            setClientError({
+              client,
+              value: { code: "INVALID_PROOF", stampId: request.stampId },
+            });
+          } else {
+            notifyAcquisitionEvents(
+              result,
+              events,
+              options.onStampClaimed,
+              options.onRewardUnlocked,
+            );
+          }
+          queuedMetadata.current.delete(request.idempotencyKey);
+          setOfflineQueue((current) =>
+            current.filter((item) => item.idempotencyKey !== request.idempotencyKey),
+          );
+        } catch (flushError) {
+          if (isNetworkFailure(flushError)) {
+            setClientError({ client, value: toError(flushError) });
+            break;
+          }
+          setClientError({ client, value: toError(flushError) });
+          queuedMetadata.current.delete(request.idempotencyKey);
+          setOfflineQueue((current) =>
+            current.filter((item) => item.idempotencyKey !== request.idempotencyKey),
+          );
+        }
+      }
+    } finally {
+      isFlushingQueue.current = false;
+      setIsOperationPending(false);
     }
-  }, [acquire, syncAdapter]);
+  }, [client, events, offlineQueue, options.onRewardUnlocked, options.onStampClaimed, syncAdapter]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handleOnline = (): void => {
+      void flushQueue();
+    };
+    window.addEventListener("online", handleOnline);
+    return () => window.removeEventListener("online", handleOnline);
+  }, [flushQueue]);
 
   return {
     state: optimisticState,
@@ -479,7 +644,8 @@ export function useStampRally(
     redeem,
     exportRecoveryCode,
     importRecoveryCode,
-    queuedCount: queuedRequests.current.length,
+    offlineQueue,
+    queuedCount: offlineQueue.length,
     flushQueue,
   };
 }

@@ -14,8 +14,61 @@ import {
   type SupportedLocale,
   type VerificationContext,
 } from "@stamprally/core";
-import type { CSSProperties, FormEvent } from "react";
-import { useEffect, useState } from "react";
+import type { CSSProperties, FormEvent, RefObject } from "react";
+import { useEffect, useRef, useState } from "react";
+
+function useFocusTrap(
+  active: boolean,
+  onClose: (() => void) | undefined,
+  closeDisabled = false,
+): RefObject<HTMLDivElement | null> {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!active) return;
+    const container = containerRef.current;
+    if (container === null) return;
+
+    const focusableSelector =
+      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+    const focusable = (): ReadonlyArray<HTMLElement> =>
+      Array.from(container.querySelectorAll<HTMLElement>(focusableSelector));
+    const first = focusable()[0];
+    first?.focus();
+
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") {
+        if (!closeDisabled) {
+          event.preventDefault();
+          onClose?.();
+        }
+        return;
+      }
+      if (event.key !== "Tab") return;
+
+      const elements = focusable();
+      if (elements.length === 0) {
+        event.preventDefault();
+        container.focus();
+        return;
+      }
+      const firstElement = elements[0];
+      const lastElement = elements[elements.length - 1];
+      if (event.shiftKey && document.activeElement === firstElement) {
+        event.preventDefault();
+        lastElement?.focus();
+      } else if (!event.shiftKey && document.activeElement === lastElement) {
+        event.preventDefault();
+        firstElement?.focus();
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [active, closeDisabled, onClose]);
+
+  return containerRef;
+}
 
 export interface StampPresentation {
   readonly label?: string;
@@ -77,6 +130,7 @@ export function StampSlot({
       disabled={disabled}
       onClick={onSelect}
       aria-label={`#${String(slotNumber).padStart(2, "0")} ${name}${statusSeparator}${resolvedStatus}`}
+      aria-disabled={disabled}
       data-status={status}
       data-shape={slotShape}
       className={`stamp-slot stamp-slot--${status} stamp-slot--${presentation.ink ?? "vermilion"} stamp-slot--shape-${slotShape}${isAnimating ? " stamp-slot--animating" : ""}`}
@@ -182,7 +236,7 @@ export function StampSheet({
     >
       <header className="stamp-sheet__header">
         <h2>{resolveLocalizedText(title, locale) || config.id}</h2>
-        <span className="stamp-sheet__score" aria-live="polite">
+        <span className="stamp-sheet__score" role="status" aria-live="polite">
           {count} / {total}
         </span>
       </header>
@@ -232,7 +286,11 @@ export function StampSheet({
           );
         })}
       </div>
-      {percentage >= 100 && <div className="stamp-sheet__complete-mark">COMPLETE!!</div>}
+      {percentage >= 100 && (
+        <div className="stamp-sheet__complete-mark" role="status" aria-live="polite">
+          COMPLETE!!
+        </div>
+      )}
       {percentage >= 100 && (
         <div className="stamp-sheet__complete-message">{messages.completed}</div>
       )}
@@ -279,6 +337,7 @@ export function StampModal({
   onNotify,
 }: StampModalProps) {
   const [token, setToken] = useState("");
+  const modalRef = useFocusTrap(open && stamp !== null, onClose, isPending);
   useEffect(() => {
     if (!open) setToken("");
   }, [open]);
@@ -299,8 +358,14 @@ export function StampModal({
       aria-labelledby="stamprally-modal-title"
       className="stamprally-modal"
     >
-      <div className="stamprally-modal__panel">
-        <button type="button" aria-label="Close" onClick={onClose} disabled={isPending}>
+      <div className="stamprally-modal__panel" ref={modalRef} tabIndex={-1}>
+        <button
+          type="button"
+          aria-label="Close stamp details"
+          aria-disabled={isPending}
+          onClick={onClose}
+          disabled={isPending}
+        >
           ×
         </button>
         <h2 id="stamprally-modal-title">{name}</h2>
@@ -319,13 +384,20 @@ export function StampModal({
             <label>
               Passcode <input value={token} onChange={(event) => setToken(event.target.value)} />
             </label>
-            <button type="submit" disabled={!isAvailable || isPending}>
+            <button
+              type="submit"
+              aria-label="Claim stamp"
+              aria-disabled={!isAvailable || isPending}
+              disabled={!isAvailable || isPending}
+            >
               Claim stamp
             </button>
           </form>
         ) : (
           <button
             type="button"
+            aria-label="Claim stamp"
+            aria-disabled={!isAvailable || isPending}
             onClick={() => void submit({ type: "instant" })}
             disabled={!isAvailable || isPending}
           >
@@ -342,6 +414,8 @@ export interface RewardPanelProps {
   readonly states: ReadonlyArray<RewardState>;
   readonly locale?: SupportedLocale;
   readonly isPending?: boolean;
+  readonly open?: boolean;
+  readonly onClose?: () => void;
   readonly onRedeem: (
     rewardId: string,
     options?: { readonly passcode?: string; readonly staffId?: string },
@@ -354,13 +428,37 @@ export function RewardPanel({
   states,
   locale = "ja",
   isPending = false,
+  open = true,
+  onClose,
   onRedeem,
   onNotify,
 }: RewardPanelProps) {
   const [passcodes, setPasscodes] = useState<Readonly<Record<string, string>>>({});
+  const panelRef = useFocusTrap(open && onClose !== undefined, onClose, isPending);
+  if (!open) return null;
   return (
-    <section aria-labelledby="stamprally-rewards-title" className="stamprally-rewards">
-      <h2 id="stamprally-rewards-title">Rewards</h2>
+    <section
+      ref={panelRef}
+      role="dialog"
+      aria-labelledby="stamprally-rewards-title"
+      aria-modal="true"
+      className="stamprally-rewards"
+      tabIndex={-1}
+    >
+      <header className="stamprally-rewards__header">
+        <h2 id="stamprally-rewards-title">Rewards</h2>
+        {onClose !== undefined && (
+          <button
+            type="button"
+            aria-label="Close rewards"
+            aria-disabled={isPending}
+            disabled={isPending}
+            onClick={onClose}
+          >
+            ×
+          </button>
+        )}
+      </header>
       {rewards.map((reward) => {
         const state = states.find((item) => item.rewardId === reward.id);
         const available = state?.status === "AVAILABLE";
@@ -375,7 +473,9 @@ export function RewardPanel({
           >
             <h3>{resolveLocalizedText(reward.title, locale)}</h3>
             <p>{resolveLocalizedText(reward.description, locale)}</p>
-            <span>{state?.status ?? "LOCKED"}</span>
+            <span role="status" aria-live="polite">
+              {state?.status ?? "LOCKED"}
+            </span>
             {reward.redemptionMethod === "staff_passcode" && (
               <form
                 onSubmit={(event) => {
@@ -393,7 +493,12 @@ export function RewardPanel({
                     }
                   />
                 </label>
-                <button type="submit" disabled={!available || isPending}>
+                <button
+                  type="submit"
+                  aria-label={`Redeem ${resolveLocalizedText(reward.title, locale)}`}
+                  aria-disabled={!available || isPending}
+                  disabled={!available || isPending}
+                >
                   Redeem
                 </button>
               </form>
@@ -401,6 +506,8 @@ export function RewardPanel({
             {reward.redemptionMethod !== "staff_passcode" && (
               <button
                 type="button"
+                aria-label={`Redeem ${resolveLocalizedText(reward.title, locale)}`}
+                aria-disabled={!available || isPending}
                 disabled={!available || isPending}
                 onClick={() => void redeem()}
               >

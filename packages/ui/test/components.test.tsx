@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { StampSheet, StampSlot } from "../src/index.js";
+import { RewardPanel, StampModal, StampSheet, StampSlot } from "../src/index.js";
 
 const stamp = {
   id: "one",
@@ -27,5 +27,90 @@ describe("participant UI", () => {
     render(<StampSheet config={config} title={{ ja: "台紙", en: "Sheet" }} />);
     expect(screen.getByRole("progressbar").getAttribute("aria-valuenow")).toBe("0");
     expect(screen.getByRole("button", { name: /一/i })).toBeTruthy();
+  });
+
+  it("renders live status and disabled ARIA state", () => {
+    render(
+      <StampSheet
+        config={config}
+        state={{
+          rallyId: config.id,
+          records: [{ stampId: "one", acquiredAt: "2026-08-23T12:00:00.000Z" }],
+          updatedAt: "2026-08-23T12:00:00.000Z",
+        }}
+      />,
+    );
+    expect(screen.getAllByRole("status")[0]?.getAttribute("aria-live")).toBe("polite");
+    const button = screen.getByRole("button");
+    expect(button.getAttribute("aria-disabled")).toBe("false");
+
+    render(<StampSlot stamp={stamp} disabled />);
+    expect(screen.getAllByRole("button")[1]?.getAttribute("aria-disabled")).toBe("true");
+  });
+
+  it("closes modal panels with Escape and traps focus", () => {
+    const onClose = vi.fn();
+    render(
+      <StampModal
+        open
+        stamp={stamp}
+        onClose={onClose}
+        onAcquire={async () => ({ ok: true, message: "claimed" })}
+      />,
+    );
+    const closeButton = screen.getByRole("button", { name: "Close stamp details" });
+    expect(document.activeElement).toBe(closeButton);
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(onClose).toHaveBeenCalledTimes(1);
+
+    cleanup();
+    const reward = {
+      id: "reward",
+      title: "Reward",
+      description: "Description",
+      type: "digital" as const,
+      redemptionMethod: "manual_slide" as const,
+      requiredStampCount: 0,
+    };
+    const rewardClose = vi.fn();
+    render(
+      <RewardPanel
+        open
+        rewards={[reward]}
+        states={[{ rewardId: reward.id, status: "AVAILABLE" }]}
+        onClose={rewardClose}
+        onRedeem={async () => ({ ok: true, value: { rewardId: reward.id, status: "CONSUMED" } })}
+      />,
+    );
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(rewardClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("adds the stamp press class and achievement status", () => {
+    const { container } = render(
+      <StampSlot
+        stamp={stamp}
+        record={{ stampId: stamp.id, acquiredAt: "2026-08-23T12:00:00.000Z" }}
+        isAnimating
+      />,
+    );
+    expect(container.querySelector(".stamp-press")).toBeTruthy();
+
+    cleanup();
+    render(
+      <StampSheet
+        config={config}
+        progress={{
+          acquired: 1,
+          total: 1,
+          percentage: 100,
+          isCompleted: true,
+          isComplete: true,
+          nextAvailableStamps: [],
+        }}
+      />,
+    );
+    expect(screen.getByText("COMPLETE!!").className).toContain("stamp-sheet__complete-mark");
+    expect(screen.getAllByRole("status").length).toBeGreaterThan(0);
   });
 });

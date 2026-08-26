@@ -8,7 +8,11 @@ export {
 export type { StampRallyProgress } from "./progress.js";
 export { calculateProgress } from "./progress.js";
 export type { ClaimTicketOptions } from "./rewards.js";
-export { createClaimTicketNumber, issueClaimTicketNumber } from "./rewards.js";
+export {
+  createClaimTicketNumber,
+  createUniqueClaimTicketNumber,
+  issueClaimTicketNumber,
+} from "./rewards.js";
 export type {
   ConsumeResult,
   ConsumeRewardParams,

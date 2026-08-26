@@ -657,7 +657,7 @@ describe("reward lifecycle", () => {
       now: NOW,
     });
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       ok: true,
       value: {
         rewardId: staffReward.id,
@@ -665,9 +665,67 @@ describe("reward lifecycle", () => {
         unlockedAt: NOW,
         consumedAt: NOW,
         consumedByStaffId: "staff-7",
+        claimTicketNumber: expect.stringMatching(/^CLAIM-staff-reward-\d+-[A-Z0-9]+$/u),
       },
     });
     expect(currentState.status).toBe("AVAILABLE");
+  });
+
+  it("rejects expired and per-user-limited rewards without mutating state", () => {
+    const base: RewardItem = {
+      ...staffReward,
+      redemptionMethod: "manual_slide",
+      validUntil: "2026-08-23T11:59:59.999Z",
+      limitPerUser: 1,
+    };
+    const available: RewardState = {
+      rewardId: base.id,
+      status: "AVAILABLE",
+      userRedemptionCount: 0,
+    };
+    expect(
+      consumeReward({ reward: base, currentState: available, now: NOW, userId: "user-1" }),
+    ).toEqual({
+      ok: false,
+      error: { code: "EXPIRED", reason: "EXPIRED", rewardId: base.id },
+    });
+
+    const limitedReward = { ...base, validUntil: "2026-08-24T00:00:00.000Z" };
+    const limitedState = { ...available, userRedemptionCount: 1 };
+    expect(
+      consumeReward({
+        reward: limitedReward,
+        currentState: limitedState,
+        now: NOW,
+        userId: "user-1",
+      }),
+    ).toEqual({
+      ok: false,
+      error: { code: "USER_LIMIT_REACHED", reason: "LIMIT_EXCEEDED", rewardId: base.id },
+    });
+    expect(limitedState).toEqual({
+      rewardId: base.id,
+      status: "AVAILABLE",
+      userRedemptionCount: 1,
+    });
+  });
+
+  it("generates a different claim ticket for each successful consumption", () => {
+    const reward: RewardItem = { ...staffReward, redemptionMethod: "manual_slide" };
+    const first = consumeReward({
+      reward,
+      currentState: { rewardId: reward.id, status: "AVAILABLE" },
+      now: NOW,
+    });
+    const second = consumeReward({
+      reward,
+      currentState: { rewardId: reward.id, status: "AVAILABLE" },
+      now: NOW,
+    });
+    expect(first.ok && second.ok).toBe(true);
+    if (!first.ok || !second.ok) return;
+    expect(first.value.claimTicketNumber).toMatch(/^CLAIM-staff-reward-\d+-[A-Z0-9]+$/u);
+    expect(second.value.claimTicketNumber).not.toBe(first.value.claimTicketNumber);
   });
 
   it("rejects a wrong passcode and prevents double redemption", () => {
