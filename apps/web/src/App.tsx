@@ -1,3 +1,4 @@
+import { RallyEditor as PackageRallyEditor } from "@stamprally/admin-ui";
 import {
   type ConditionMismatch,
   calculateDistanceMeters,
@@ -14,12 +15,12 @@ import {
   type VerificationContext,
 } from "@stamprally/core";
 import { useStampRally } from "@stamprally/react";
+import { StampSheet } from "@stamprally/ui";
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { RallyEditor } from "./components/admin/RallyEditor.js";
 import { LanguageSelector } from "./components/LanguageSelector.js";
 import { RewardPanel } from "./components/RewardPanel.js";
 import { type AcquisitionFeedback, StampModal } from "./components/StampModal.js";
-import { StampSheet } from "./components/StampSheet.js";
 import type { StampPresentation } from "./components/StampSlot.js";
 import { loadStoredRallyConfig, PUBLISHED_CONFIG_KEY } from "./configIO.js";
 import { DEFAULT_PRESENTATIONS, DEFAULT_RALLY_CONFIG } from "./demoConfig.js";
@@ -84,8 +85,22 @@ function ParticipantApp({ locale, onLocaleChange }: ParticipantAppProps) {
     [baseConfig, mode],
   );
   const client = useMemo(() => new StampRallyClient(config, storage), [config]);
-  const { state, rewardsState, isLoading, isPending, error, acquire, reset, redeem } =
-    useStampRally(client);
+  const {
+    state,
+    rewardsState,
+    isLoading,
+    isPending,
+    error,
+    acquire,
+    reset,
+    redeem,
+    importRecoveryCode,
+  } = useStampRally(client);
+  const recoveryCode = useMemo(
+    () => new URLSearchParams(globalThis.location?.search ?? "").get("recovery"),
+    [],
+  );
+  const recoveryAttempted = useRef(false);
   const progress = calculateProgress(
     state ?? { rallyId: config.id, records: [], updatedAt: "" },
     config,
@@ -174,6 +189,14 @@ function ParticipantApp({ locale, onLocaleChange }: ParticipantAppProps) {
   useEffect(() => {
     if (error !== null) setToast({ kind: "error", message: describeError(error) });
   }, [error, describeError]);
+
+  useEffect(() => {
+    if (recoveryCode === null || recoveryAttempted.current || isLoading) return;
+    recoveryAttempted.current = true;
+    void importRecoveryCode(recoveryCode).then((restored) => {
+      if (!restored) setToast({ kind: "error", message: messages.errorStorage });
+    });
+  }, [importRecoveryCode, isLoading, messages.errorStorage, recoveryCode]);
 
   useEffect(
     () => () => {
@@ -500,7 +523,11 @@ export function App() {
     persistLocale(locale);
     document.documentElement.lang = locale;
   }, [locale]);
-  const isAdmin = new URLSearchParams(globalThis.location?.search ?? "").get("view") === "admin";
+  const view = new URLSearchParams(globalThis.location?.search ?? "").get("view");
+  if (view === "admin-package") {
+    return <PackageRallyEditor config={DEFAULT_RALLY_CONFIG} onChange={() => undefined} />;
+  }
+  const isAdmin = view === "admin";
   return isAdmin ? (
     <RallyEditor locale={locale} onLocaleChange={setLocale} />
   ) : (

@@ -21,6 +21,7 @@ export interface StampPresentation {
   readonly label?: string;
   readonly icon?: string;
   readonly ink?: "vermilion" | "indigo";
+  readonly channel?: "instant" | "qr" | "nfc" | "geo";
 }
 
 export interface StampSlotProps {
@@ -33,7 +34,23 @@ export interface StampSlotProps {
   readonly disabled?: boolean;
   readonly slotShape?: SlotShape;
   readonly locale?: SupportedLocale;
+  readonly statusText?: string;
   readonly onSelect?: () => void;
+}
+
+const FONT_STACKS: Readonly<Record<NonNullable<SheetTheme["fontFamily"]>, string>> = {
+  "system-ui": 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+  serif: 'Georgia, "Times New Roman", "Yu Mincho", serif',
+  "rounded-sans": '"Arial Rounded MT Bold", "Hiragino Maru Gothic ProN", "Yu Gothic", sans-serif',
+  monospace: 'ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace',
+  handwritten: '"Segoe Print", "Bradley Hand", "Comic Sans MS", cursive',
+};
+
+function formatStampDate(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  const pad = (part: number) => String(part).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
 export function StampSlot({
@@ -46,9 +63,12 @@ export function StampSlot({
   disabled = false,
   slotShape = "rounded",
   locale = "ja",
+  statusText,
   onSelect,
 }: StampSlotProps) {
   const status = record === undefined ? (isNext ? "available" : "locked") : "stamped";
+  const resolvedStatus = statusText ?? status;
+  const statusSeparator = statusText !== undefined && locale === "ja" ? "、" : ", ";
   const name = resolveLocalizedText(stamp.name, locale);
   const label = presentation.label ?? stamp.condition.type;
   return (
@@ -56,16 +76,36 @@ export function StampSlot({
       type="button"
       disabled={disabled}
       onClick={onSelect}
-      aria-label={`${slotNumber}. ${name} (${status})`}
+      aria-label={`#${String(slotNumber).padStart(2, "0")} ${name}${statusSeparator}${resolvedStatus}`}
       data-status={status}
       data-shape={slotShape}
-      className={`stamp-slot stamp-slot--${status}${isAnimating ? " stamp-slot--animating" : ""}`}
+      className={`stamp-slot stamp-slot--${status} stamp-slot--${presentation.ink ?? "vermilion"} stamp-slot--shape-${slotShape}${isAnimating ? " stamp-slot--animating" : ""}`}
       style={{ "--stamp-primary": "var(--stamprally-primary, #9e551e)" } as CSSProperties}
     >
-      <span aria-hidden="true">{presentation.icon ?? "✦"}</span>
-      <strong>{name}</strong>
-      <small>{label}</small>
-      {record !== undefined && <time dateTime={record.acquiredAt}>{record.acquiredAt}</time>}
+      <span className="stamp-slot__topline">
+        <span className="stamp-slot__number">#{String(slotNumber).padStart(2, "0")}</span>
+        <span className={`stamp-slot__state stamp-slot__state--${status}`}>{resolvedStatus}</span>
+      </span>
+      <span className="stamp-slot__watermark" aria-hidden="true">
+        {presentation.icon ?? "✦"}
+      </span>
+      <span className="stamp-slot__name">{name}</span>
+      <span className="stamp-slot__condition">
+        <span aria-hidden="true">{presentation.icon ?? "✦"}</span>
+        {label}
+      </span>
+      {record !== undefined && (
+        <span
+          className={`stamp-imprint ${isAnimating ? "stamp-press" : ""}`}
+          role="img"
+          aria-label={`Acquired at ${formatStampDate(record.acquiredAt)}`}
+        >
+          <span className="stamp-imprint__inner">
+            <span className="stamp-imprint__word">STAMP</span>
+            <span className="stamp-imprint__date">{formatStampDate(record.acquiredAt)}</span>
+          </span>
+        </span>
+      )}
     </button>
   );
 }
@@ -101,54 +141,101 @@ export function StampSheet({
   const total = progress?.total ?? config.stamps.length;
   const percentage = progress?.percentage ?? (total === 0 ? 0 : (count / total) * 100);
   const style = {
-    "--stamprally-primary": theme.primaryColor,
-    "--stamprally-background": theme.backgroundColor ?? "transparent",
-    "--stamprally-card": theme.cardBackgroundColor,
-    "--stamprally-text": theme.textColor,
+    "--stamp-primary": `var(--stamprally-primary-override, ${theme.primaryColor})`,
+    "--stamp-bg": `var(--stamprally-background-override, ${theme.backgroundColor ?? DEFAULT_SHEET_THEME.backgroundColor ?? "#ffffff"})`,
+    "--stamp-card-bg": `var(--stamprally-card-override, ${theme.cardBackgroundColor})`,
+    "--stamp-text": `var(--stamprally-text-override, ${theme.textColor})`,
+    "--stamp-grid-cols": String(theme.gridColumns),
+    "--stamp-grid-cols-mobile": String(Math.min(theme.gridColumns, 2)),
+    "--stamp-unclaimed-opacity": String(theme.unclaimedOpacity ?? 1),
+    "--stamp-font-family": FONT_STACKS[theme.fontFamily ?? "serif"],
+    ...(theme.completedStampColor === undefined
+      ? {}
+      : { "--stamp-completed-color": theme.completedStampColor }),
+    "--stamprally-primary": `var(--stamprally-primary-override, ${theme.primaryColor})`,
+    "--stamprally-background": `var(--stamprally-background-override, ${theme.backgroundColor ?? "transparent"})`,
+    "--stamprally-card": `var(--stamprally-card-override, ${theme.cardBackgroundColor})`,
+    "--stamprally-text": `var(--stamprally-text-override, ${theme.textColor})`,
     "--stamprally-columns": String(theme.gridColumns),
   } as CSSProperties;
+  const messages =
+    locale === "en"
+      ? {
+          available: "available",
+          locked: "locked",
+          stamped: "stamped",
+          remaining: (value: number) => `${value} spots remaining`,
+          completed: "RALLY COMPLETED",
+        }
+      : {
+          available: "取得可能",
+          locked: "順序待ち",
+          stamped: "取得済み",
+          remaining: (value: number) => `あと${value}箇所`,
+          completed: "ラリー達成",
+        };
   return (
     <section
-      className="stamprally-sheet"
+      className={`stamp-sheet ${percentage >= 100 ? "stamp-sheet--completed" : ""}`}
       style={style}
       aria-label={resolveLocalizedText(title, locale) || config.id}
     >
-      <header>
+      <header className="stamp-sheet__header">
         <h2>{resolveLocalizedText(title, locale) || config.id}</h2>
-        <span aria-live="polite">
+        <span className="stamp-sheet__score" aria-live="polite">
           {count} / {total}
         </span>
       </header>
+      <div className="stamp-sheet__progress-label">
+        <span>{messages.remaining(Math.max(0, total - count))}</span>
+        <strong>{Math.round(percentage)}%</strong>
+      </div>
       <div
+        className="stamp-sheet__progress-track"
         role="progressbar"
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuenow={Math.round(percentage)}
-        aria-label="Rally progress"
+        aria-label={locale === "en" ? "Rally progress" : "スタンプ取得進捗"}
       >
-        <span style={{ display: "block", width: `${percentage}%` }} />
+        <span
+          className="stamp-sheet__progress-fill"
+          style={{ display: "block", width: `${percentage}%` }}
+        />
       </div>
-      <div className="stamprally-sheet__grid">
-        {config.stamps.map((stamp, index) => (
-          <StampSlot
-            key={stamp.id}
-            stamp={stamp}
-            {...(state?.records.find((record) => record.stampId === stamp.id) === undefined
-              ? {}
-              : { record: state?.records.find((record) => record.stampId === stamp.id) })}
-            isNext={next.has(stamp.id)}
-            slotNumber={index + 1}
-            {...(presentations[stamp.id] === undefined
-              ? {}
-              : { presentation: presentations[stamp.id] })}
-            isAnimating={animatedStampId === stamp.id}
-            disabled={disabled}
-            slotShape={theme.slotShape}
-            locale={locale}
-            onSelect={() => onStampSelect?.(stamp.id)}
-          />
-        ))}
+      <div className="stamp-sheet__grid">
+        {config.stamps.map((stamp, index) => {
+          const recordForStamp = state?.records.find((record) => record.stampId === stamp.id);
+          return (
+            <StampSlot
+              key={stamp.id}
+              stamp={stamp}
+              {...(recordForStamp === undefined ? {} : { record: recordForStamp })}
+              isNext={next.has(stamp.id)}
+              slotNumber={index + 1}
+              {...(presentations[stamp.id] === undefined
+                ? {}
+                : { presentation: presentations[stamp.id] })}
+              isAnimating={animatedStampId === stamp.id}
+              disabled={disabled}
+              slotShape={theme.slotShape}
+              locale={locale}
+              statusText={
+                recordForStamp === undefined
+                  ? next.has(stamp.id)
+                    ? messages.available
+                    : messages.locked
+                  : messages.stamped
+              }
+              onSelect={() => onStampSelect?.(stamp.id)}
+            />
+          );
+        })}
       </div>
+      {percentage >= 100 && <div className="stamp-sheet__complete-mark">COMPLETE!!</div>}
+      {percentage >= 100 && (
+        <div className="stamp-sheet__complete-message">{messages.completed}</div>
+      )}
     </section>
   );
 }

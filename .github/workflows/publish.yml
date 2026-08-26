@@ -46,6 +46,7 @@ jobs:
           pnpm typecheck
           pnpm test
           pnpm build
+          pnpm package:check
 
       - name: Check tag matches package versions
         env:

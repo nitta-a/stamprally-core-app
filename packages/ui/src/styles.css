@@ -1,24 +1,90 @@
+.stamp-sheet,
 :where(.stamprally-sheet, .stamprally-rewards) {
   color: var(--stamprally-text, #352f25);
   background: var(--stamprally-background, transparent);
 }
-.stamprally-sheet__grid {
+.stamp-sheet {
   display: grid;
-  grid-template-columns: repeat(var(--stamprally-columns, 3), minmax(0, 1fr));
+  gap: 1rem;
+  padding: 1.5rem;
+  border: 1px solid color-mix(in srgb, var(--stamp-primary, #9e551e) 35%, #fff);
+  border-radius: 1.5rem;
+  color: var(--stamp-text, #352f25);
+  font-family: var(--stamp-font-family, Georgia, "Times New Roman", serif);
+  background: var(--stamp-bg, #fbf4df);
+}
+.stamp-sheet__header,
+.stamp-sheet__progress-label,
+.stamp-slot__topline {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.stamp-sheet__header h2 {
+  margin: 0;
+}
+.stamp-sheet__progress-label {
+  font-size: 0.85rem;
+}
+.stamp-sheet__progress-track {
+  overflow: hidden;
+  height: 0.5rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--stamp-primary, #9e551e) 15%, #fff);
+}
+.stamp-sheet__progress-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--stamp-primary, #9e551e);
+}
+.stamp-sheet__grid {
+  display: grid;
+  grid-template-columns: repeat(var(--stamp-grid-cols, 3), minmax(0, 1fr));
   gap: 1rem;
 }
 .stamp-slot {
+  position: relative;
+  color: var(--stamprally-text, #352f25);
   display: grid;
   gap: 0.35rem;
-  min-height: 8rem;
+  min-height: 10rem;
   padding: 1rem;
-  color: var(--stamprally-text, #352f25);
   background: var(--stamprally-card, #fff);
   border: 2px solid var(--stamprally-primary, #9e551e);
   cursor: pointer;
 }
+.stamp-slot__number,
+.stamp-slot__state,
+.stamp-slot__condition {
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+.stamp-slot__watermark {
+  font-size: 2rem;
+  opacity: 0.35;
+}
+.stamp-slot__name {
+  font-weight: 800;
+}
+.stamp-slot__condition {
+  opacity: 0.75;
+}
+.stamp-imprint {
+  display: grid;
+  place-items: center;
+  padding: 0.35rem;
+  border: 2px solid var(--stamp-completed-color, #b33c2e);
+  color: var(--stamp-completed-color, #b33c2e);
+  transform: rotate(-4deg);
+}
+.stamp-imprint__inner {
+  display: grid;
+  gap: 0.1rem;
+  text-align: center;
+}
 .stamp-slot--locked {
-  opacity: 0.55;
+  opacity: var(--stamp-unclaimed-opacity, 0.55);
   cursor: not-allowed;
 }
 .stamp-slot--animating {
@@ -41,5 +107,10 @@
 @keyframes stamprally-stamp-press {
   50% {
     transform: scale(0.96) rotate(-2deg);
+  }
+}
+@media (max-width: 640px) {
+  .stamp-sheet__grid {
+    grid-template-columns: repeat(var(--stamp-grid-cols-mobile, 2), minmax(0, 1fr));
   }
 }

@@ -13,12 +13,18 @@ const packageFiles = [
   "packages/admin-ui/package.json",
 ];
 
+let expectedVersion;
+
 for (const packageFile of packageFiles) {
   const packageJson = JSON.parse(await readFile(packageFile, "utf8"));
   if (packageJson.version !== releaseVersion) {
     throw new Error(
       `${packageFile} is ${packageJson.version}, but the release tag is ${releaseTag}.`,
     );
+  }
+  if (expectedVersion === undefined) expectedVersion = packageJson.version;
+  if (packageJson.version !== expectedVersion) {
+    throw new Error(`${packageFile} is not synchronized with the other publishable packages.`);
   }
 }
 

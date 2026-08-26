@@ -20,12 +20,18 @@ importers:
 
   apps/web:
     dependencies:
+      '@stamprally/admin-ui':
+        specifier: workspace:*
+        version: link:../../packages/admin-ui
       '@stamprally/core':
         specifier: workspace:*
         version: link:../../packages/core
       '@stamprally/react':
         specifier: workspace:*
         version: link:../../packages/react
+      '@stamprally/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
       qrcode:
         specifier: ^1.5.4
         version: 1.5.4

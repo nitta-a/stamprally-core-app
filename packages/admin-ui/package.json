@@ -1,6 +1,6 @@
 {
   "name": "@stamprally/admin-ui",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Accessible authoring components for stamp rally administrators.",
   "license": "MIT",
   "repository": {
@@ -15,8 +15,7 @@
   "type": "module",
   "sideEffects": false,
   "files": [
-    "dist",
-    "src/styles.css"
+    "dist"
   ],
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -27,10 +26,10 @@
       "import": "./dist/index.js",
       "require": "./dist/index.cjs"
     },
-    "./styles.css": "./src/styles.css"
+    "./styles.css": "./dist/index.css"
   },
   "scripts": {
-    "build": "tsup",
+    "build": "tsup && node ../../scripts/copy-package-css.mjs packages/admin-ui",
     "dev": "tsup --watch",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json"
