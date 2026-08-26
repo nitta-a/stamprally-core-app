@@ -200,25 +200,6 @@
   text-align: center;
 }
 
-.stamp-slot--shape-circle .stamp-slot__topline {
-  justify-content: center;
-  flex-wrap: wrap;
-  gap: 4px 8px;
-}
-
-.stamp-slot--shape-circle .stamp-slot__name {
-  max-width: 100%;
-  overflow-wrap: anywhere;
-  font-size: clamp(0.86rem, 2vw, 1.1rem);
-}
-
-.stamp-slot--shape-circle .stamp-slot__condition {
-  justify-content: center;
-  flex-wrap: wrap;
-  max-width: 100%;
-  overflow-wrap: anywhere;
-}
-
 .stamp-slot__topline {
   display: flex;
   align-items: center;
@@ -291,6 +272,25 @@
   font-weight: 800;
   letter-spacing: 0.06em;
   text-transform: uppercase;
+}
+
+.stamp-slot--shape-circle .stamp-slot__topline {
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+
+.stamp-slot--shape-circle .stamp-slot__name {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  font-size: clamp(0.86rem, 2vw, 1.1rem);
+}
+
+.stamp-slot--shape-circle .stamp-slot__condition {
+  justify-content: center;
+  flex-wrap: wrap;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 .stamp-imprint {

@@ -3,6 +3,15 @@
   "version": "0.1.0",
   "description": "A dependency-free stamp rally domain engine and storage-agnostic client.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nitta-a/stamprally-core-app.git",
+    "directory": "packages/core"
+  },
+  "bugs": {
+    "url": "https://github.com/nitta-a/stamprally-core-app/issues"
+  },
+  "homepage": "https://github.com/nitta-a/stamprally-core-app#readme",
   "type": "module",
   "sideEffects": false,
   "publishConfig": {
