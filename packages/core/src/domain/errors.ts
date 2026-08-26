@@ -76,6 +76,15 @@ export type StampError =
       readonly code: "CONDITION_MISMATCH";
       readonly stampId: string;
       readonly mismatch: ConditionMismatch;
+    }
+  | {
+      readonly code: "OFFLINE_QUEUED";
+      readonly stampId: string;
+      readonly idempotencyKey: string;
+    }
+  | {
+      readonly code: "INVALID_PROOF";
+      readonly stampId: string;
     };
 
 export type Result<T, E> =

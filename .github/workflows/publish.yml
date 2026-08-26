@@ -59,7 +59,7 @@ jobs:
         run: |
           set -euo pipefail
           version="${RELEASE_VERSION#v}"
-          for package_name in @stamprally/core @stamprally/react; do
+          for package_name in @stamprally/core @stamprally/react @stamprally/ui @stamprally/admin-ui; do
             if npm view "${package_name}@${version}" version --registry=https://registry.npmjs.org >/dev/null 2>&1; then
               echo "${package_name}@${version} is already published; skipping."
               continue

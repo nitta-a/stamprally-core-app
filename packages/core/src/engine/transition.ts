@@ -21,6 +21,11 @@ export type StampRallyEvent =
       readonly type: "rallyCompleted";
       readonly rallyId: string;
       readonly completedAt: string;
+    }
+  | {
+      readonly type: "rewardUnlocked";
+      readonly rewardId: string;
+      readonly unlockedAt: string;
     };
 
 export interface ProcessStampValue {
@@ -36,6 +41,9 @@ export type RewardConsumeError =
       readonly rewardId: string;
       readonly message: string;
     }
+  | { readonly code: "EXPIRED"; readonly rewardId: string }
+  | { readonly code: "OUT_OF_STOCK"; readonly rewardId: string }
+  | { readonly code: "USER_LIMIT_REACHED"; readonly rewardId: string }
   | { readonly code: "REWARD_NOT_FOUND"; readonly rewardId: string };
 
 export interface ConsumeRewardParams {
@@ -44,6 +52,8 @@ export interface ConsumeRewardParams {
   readonly inputPasscode?: string;
   readonly staffId?: string;
   readonly now: string;
+  readonly userId?: string;
+  readonly userRedemptionCount?: number;
 }
 
 export type ConsumeResult = Result<RewardState, RewardConsumeError>;
@@ -62,12 +72,29 @@ export function reconcileRewardStates(
       return current;
     }
 
+    if (reward.validUntil !== undefined && Date.parse(reward.validUntil) <= Date.parse(now)) {
+      return { rewardId: reward.id, status: "EXPIRED" };
+    }
+
+    if (reward.maxStock !== undefined && (current?.redeemedCount ?? 0) >= reward.maxStock) {
+      return {
+        rewardId: reward.id,
+        status: "EXPIRED",
+        ...(current?.claimTicketNumber === undefined
+          ? {}
+          : { claimTicketNumber: current.claimTicketNumber }),
+      };
+    }
+
     if (acquiredStampCount >= reward.requiredStampCount) {
       if (current?.status === "AVAILABLE") return current;
       return {
         rewardId: reward.id,
         status: "AVAILABLE",
         unlockedAt: current?.unlockedAt ?? now,
+        ...(current?.claimTicketNumber === undefined
+          ? {}
+          : { claimTicketNumber: current.claimTicketNumber }),
       };
     }
 
@@ -91,6 +118,19 @@ export function consumeReward(params: ConsumeRewardParams): ConsumeResult {
       ok: false,
       error: { code: "NOT_AVAILABLE", rewardId: reward.id },
     };
+  }
+
+  if (reward.validUntil !== undefined && Date.parse(reward.validUntil) <= Date.parse(params.now)) {
+    return { ok: false, error: { code: "EXPIRED", rewardId: reward.id } };
+  }
+  if (reward.maxStock !== undefined && (currentState.redeemedCount ?? 0) >= reward.maxStock) {
+    return { ok: false, error: { code: "OUT_OF_STOCK", rewardId: reward.id } };
+  }
+  if (
+    reward.limitPerUser !== undefined &&
+    (params.userRedemptionCount ?? currentState.userRedemptionCount ?? 0) >= reward.limitPerUser
+  ) {
+    return { ok: false, error: { code: "USER_LIMIT_REACHED", rewardId: reward.id } };
   }
 
   if (reward.redemptionMethod === "staff_passcode") {
@@ -120,6 +160,14 @@ export function consumeReward(params: ConsumeRewardParams): ConsumeResult {
       ...currentState,
       status: "CONSUMED",
       consumedAt: params.now,
+      ...(reward.maxStock !== undefined ||
+      params.userId !== undefined ||
+      params.userRedemptionCount !== undefined
+        ? { redeemedCount: (currentState.redeemedCount ?? 0) + 1 }
+        : {}),
+      ...(params.userId === undefined
+        ? {}
+        : { userRedemptionCount: (currentState.userRedemptionCount ?? 0) + 1 }),
       ...(params.staffId === undefined ? {} : { consumedByStaffId: params.staffId }),
     },
   };
@@ -184,6 +232,14 @@ export function processStamp(
     updatedAt: now,
   };
   const events: StampRallyEvent[] = [{ type: "stampAcquired", record }];
+  if (nextRewards !== undefined) {
+    for (const rewardState of nextRewards) {
+      const previous = state.rewards?.find((item) => item.rewardId === rewardState.rewardId);
+      if (rewardState.status === "AVAILABLE" && previous?.status !== "AVAILABLE") {
+        events.push({ type: "rewardUnlocked", rewardId: rewardState.rewardId, unlockedAt: now });
+      }
+    }
+  }
 
   const completed =
     config.stamps.length > 0 &&

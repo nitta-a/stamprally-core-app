@@ -1,0 +1,45 @@
+:where(.stamprally-sheet, .stamprally-rewards) {
+  color: var(--stamprally-text, #352f25);
+  background: var(--stamprally-background, transparent);
+}
+.stamprally-sheet__grid {
+  display: grid;
+  grid-template-columns: repeat(var(--stamprally-columns, 3), minmax(0, 1fr));
+  gap: 1rem;
+}
+.stamp-slot {
+  display: grid;
+  gap: 0.35rem;
+  min-height: 8rem;
+  padding: 1rem;
+  color: var(--stamprally-text, #352f25);
+  background: var(--stamprally-card, #fff);
+  border: 2px solid var(--stamprally-primary, #9e551e);
+  cursor: pointer;
+}
+.stamp-slot--locked {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.stamp-slot--animating {
+  animation: stamprally-stamp-press 0.5s ease-out;
+}
+.stamprally-modal {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: #0008;
+}
+.stamprally-modal__panel {
+  max-width: 32rem;
+  width: 100%;
+  padding: 1.5rem;
+  background: var(--stamprally-card, #fff);
+}
+@keyframes stamprally-stamp-press {
+  50% {
+    transform: scale(0.96) rotate(-2deg);
+  }
+}

@@ -29,7 +29,7 @@ export function LocalizedFields({
           id={`${id}-ja`}
           value={localized.ja}
           required={requiredJapanese}
-          onChange={(event) => onChange({ ...localized, ja: event.target.value })}
+          onChange={(event) => onChange({ ja: event.target.value, en: localized.en })}
         />
       </label>
       <label htmlFor={`${id}-en`}>
@@ -37,7 +37,7 @@ export function LocalizedFields({
         <Input
           id={`${id}-en`}
           value={localized.en}
-          onChange={(event) => onChange({ ...localized, en: event.target.value })}
+          onChange={(event) => onChange({ ja: localized.ja, en: event.target.value })}
         />
         {localized.en.trim() === "" && <small>{fallbackHelp}</small>}
       </label>

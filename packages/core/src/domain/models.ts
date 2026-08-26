@@ -1,8 +1,10 @@
 import type { StampCondition } from "./conditions.js";
 
 export type SupportedLocale = "ja" | "en";
-export type LocalizedString = Record<SupportedLocale, string>;
-export type LocalizedText = string | LocalizedString;
+export type LocalizedString<TLocale extends string = SupportedLocale> = Record<TLocale, string>;
+export type LocalizedText<TLocale extends string = string> =
+  | string
+  | Partial<Record<TLocale, string>>;
 
 export type SlotShape = "circle" | "square" | "rounded";
 export type FontFamily = "system-ui" | "serif" | "rounded-sans" | "monospace" | "handwritten";
@@ -22,10 +24,10 @@ export interface SheetTheme {
 
 export type ThemePresetId = "default" | "modern_dark" | "pop_candy" | "retro_craft" | "cyber";
 
-export interface ThemePreset {
+export interface ThemePreset<TLocale extends string = SupportedLocale> {
   readonly id: ThemePresetId;
-  readonly name: LocalizedString;
-  readonly description: LocalizedString;
+  readonly name: LocalizedString<TLocale>;
+  readonly description: LocalizedString<TLocale>;
   readonly theme: SheetTheme;
 }
 
@@ -40,17 +42,33 @@ export const DEFAULT_SHEET_THEME: SheetTheme = {
   fontFamily: "serif",
 };
 
-export interface SpotItem {
+export interface SpotItem<
+  TLocale extends string = SupportedLocale,
+  TMeta extends Record<string, unknown> = Record<string, unknown>,
+> {
   readonly id: string;
-  readonly name: LocalizedText;
-  readonly description?: LocalizedText;
-  readonly hint?: LocalizedText;
+  readonly name: LocalizedText<TLocale>;
+  readonly description?: LocalizedText<TLocale>;
+  readonly hint?: LocalizedText<TLocale>;
   readonly condition: StampCondition;
   readonly order?: number;
+  readonly deckId?: string;
+  readonly groupId?: string;
+  readonly guideId?: string;
+  readonly iconUrl?: string;
+  readonly imageUrl?: string;
+  readonly externalUrl?: string;
+  readonly redirectUrlAfterClaim?: string;
+  readonly metadata?: TMeta;
+  readonly dependsOn?: ReadonlyArray<string>;
+  readonly requiresStampIds?: ReadonlyArray<string>;
 }
 
 /** @deprecated Use SpotItem instead. */
-export type StampDefinition = SpotItem;
+export type StampDefinition<
+  TLocale extends string = SupportedLocale,
+  TMeta extends Record<string, unknown> = Record<string, unknown>,
+> = SpotItem<TLocale, TMeta>;
 
 export interface StampRecord {
   readonly stampId: string;
@@ -64,15 +82,19 @@ export type RedemptionMethod = "manual_slide" | "staff_passcode" | "view_only";
 
 export type RewardStatus = "LOCKED" | "AVAILABLE" | "CONSUMED" | "EXPIRED";
 
-export interface RewardItem {
+export interface RewardItem<TLocale extends string = SupportedLocale> {
   readonly id: string;
-  readonly title: LocalizedText;
-  readonly description: LocalizedText;
+  readonly title: LocalizedText<TLocale>;
+  readonly description: LocalizedText<TLocale>;
   readonly type: RewardType;
   readonly redemptionMethod: RedemptionMethod;
   readonly requiredStampCount: number;
   readonly digitalContentUrl?: string;
   readonly staffPasscode?: string;
+  readonly validUntil?: string;
+  readonly maxStock?: number;
+  readonly limitPerUser?: number;
+  readonly claimTicketNumber?: string;
 }
 
 export interface RewardState {
@@ -81,6 +103,9 @@ export interface RewardState {
   readonly unlockedAt?: string;
   readonly consumedAt?: string;
   readonly consumedByStaffId?: string;
+  readonly claimTicketNumber?: string;
+  readonly redeemedCount?: number;
+  readonly userRedemptionCount?: number;
 }
 
 export interface StampRallyState {
@@ -90,12 +115,18 @@ export interface StampRallyState {
   readonly updatedAt: string;
 }
 
-export interface RallyConfig {
+export interface RallyConfig<
+  TLocale extends string = SupportedLocale,
+  TMeta extends Record<string, unknown> = Record<string, unknown>,
+> {
   readonly id: string;
-  readonly title?: LocalizedText;
-  readonly description?: LocalizedText;
-  readonly stamps: ReadonlyArray<StampDefinition>;
-  readonly rewards?: ReadonlyArray<RewardItem>;
+  readonly title?: LocalizedText<TLocale>;
+  readonly description?: LocalizedText<TLocale>;
+  readonly stamps: ReadonlyArray<StampDefinition<TLocale, TMeta>>;
+  readonly rewards?: ReadonlyArray<RewardItem<TLocale>>;
   readonly isSequential?: boolean;
   readonly theme?: SheetTheme;
+  readonly version?: number;
+  readonly startDate?: string;
+  readonly endDate?: string;
 }

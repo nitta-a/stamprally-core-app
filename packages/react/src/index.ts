@@ -1,5 +1,9 @@
 export type {
+  CheckInRequest,
   RedeemOptions,
+  StampRallyEventHandlers,
+  SyncAdapter,
+  UseStampRallyOptions,
   UseStampRallyReturn,
   UseStampRallyValue,
 } from "./useStampRally.js";

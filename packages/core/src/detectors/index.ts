@@ -6,7 +6,6 @@ export { normalizePasscode, verifyPasscode } from "./passcode.js";
 export type { QrDetectorOptions } from "./qr.js";
 export { isQrSupported, readQrContext } from "./qr.js";
 export type {
-  CheckInResult,
   DetectorError,
   DetectorErrorCode,
   DetectorKind,

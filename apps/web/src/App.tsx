@@ -154,6 +154,18 @@ function ParticipantApp({ locale, onLocaleChange }: ParticipantAppProps) {
           return messages.errorPasscode;
         case "REWARD_NOT_FOUND":
           return messages.errorRewardNotFound;
+        case "EXPIRED":
+          return messages.expired;
+        case "OUT_OF_STOCK":
+          return messages.errorNotAvailable;
+        case "USER_LIMIT_REACHED":
+          return messages.errorNotAvailable;
+        case "OFFLINE_QUEUED":
+          return "Check-in queued until you are back online.";
+        case "INVALID_PROOF":
+          return "The check-in proof is invalid.";
+        default:
+          return "Unknown error.";
       }
     },
     [config.stamps, locale, messages],

@@ -82,6 +82,43 @@ class ControlledStorage implements StampStorage {
 afterEach(cleanup);
 
 describe("useStampRally", () => {
+  it("runs sync interceptors, emits claim events, and queues offline check-ins", async () => {
+    let online = false;
+    const before = vi.fn();
+    const verify = vi.fn().mockResolvedValue(true);
+    const onStampClaimed = vi.fn();
+    const onRewardUnlocked = vi.fn();
+    const adapter = {
+      isOnline: () => online,
+      onBeforeCheckIn: before,
+      onServerVerify: verify,
+    };
+    const client = new StampRallyClient(config, new InMemoryStorage(), () => NOW);
+    const { result } = renderHook(() =>
+      useStampRally(client, { syncAdapter: adapter, onStampClaimed, onRewardUnlocked }),
+    );
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    let queued: Awaited<ReturnType<typeof result.current.acquire>> | undefined;
+    await act(async () => {
+      queued = await result.current.acquire("first", { type: "instant" }, NOW);
+    });
+    expect(queued).toMatchObject({ ok: false, error: { code: "OFFLINE_QUEUED" } });
+    expect(result.current.queuedCount).toBe(1);
+
+    online = true;
+    await act(async () => {
+      await result.current.flushQueue();
+    });
+    expect(before).toHaveBeenCalledWith(
+      expect.objectContaining({ idempotencyKey: expect.any(String) }),
+    );
+    expect(verify).toHaveBeenCalledTimes(1);
+    expect(onStampClaimed).toHaveBeenCalledWith({ stampId: "first", acquiredAt: NOW });
+    expect(onRewardUnlocked).toHaveBeenCalledWith("manual-reward");
+    expect(client.getState()?.records).toHaveLength(1);
+  });
+
   it("initializes only a client whose synchronous snapshot is null", async () => {
     const initializedClient = new StampRallyClient(config, new InMemoryStorage(), () => NOW);
     await initializedClient.init();

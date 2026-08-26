@@ -6,7 +6,12 @@ if (releaseTag === undefined || !/^v\d+\.\d+\.\d+$/.test(releaseTag)) {
 }
 
 const releaseVersion = releaseTag.slice(1);
-const packageFiles = ["packages/core/package.json", "packages/react/package.json"];
+const packageFiles = [
+  "packages/core/package.json",
+  "packages/react/package.json",
+  "packages/ui/package.json",
+  "packages/admin-ui/package.json",
+];
 
 for (const packageFile of packageFiles) {
   const packageJson = JSON.parse(await readFile(packageFile, "utf8"));

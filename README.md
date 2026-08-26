@@ -6,6 +6,8 @@ A headless, storage-agnostic stamp rally engine with React integration for TypeS
 
 - `@stamprally/core`: Dependency-free domain types, detailed condition evaluation, immutable state transitions, progress calculation, browser storage adapters, sensor detectors, and a storage-agnostic client.
 - `@stamprally/react`: The `useStampRally` React hook.
+- `@stamprally/ui`: Accessible participant components such as `StampSheet`, `StampModal`, and `RewardPanel`.
+- `@stamprally/admin-ui`: Authoring components for settings, spots, rewards, themes, QR output, and JSON IO.
 - `@stamprally/web`: A Vite field-test UI for instant, QR-token, GPS, sequential, and free-mode acquisition.
 
 ## Requirements
@@ -98,6 +100,7 @@ Geolocation, Web NFC, and camera access require a secure context (HTTPS, or loca
 - The core domain engine remains pure and independent of the DOM, React, browser APIs, and any persistence implementation. Optional adapters and detectors touch browser globals only when called.
 - Conditions use discriminated unions and support recursive token, geo, composite, and time-window evaluation.
 - State transitions never mutate their input and return a `Result` together with events.
+- v0.2 adds generic localized models, runtime validation/migration, signed encrypted snapshot tokens, reward limits, public-config stripping, and the pure `evaluateCheckIn` server API.
 
 ---
 
@@ -109,6 +112,8 @@ TypeScript/JavaScript向けの、ヘッドレスかつストレージ非依存�
 
 - `@stamprally/core`: 実行時依存ゼロのドメイン型、詳細な条件判定、イミュータブルな状態遷移、進捗計算、ブラウザストレージアダプタ、センサーDetector、ストレージ非依存Clientを提供します。
 - `@stamprally/react`: `useStampRally` React Hookを提供します。
+- `@stamprally/ui`: 参加者向けの `StampSheet`、`StampModal`、`RewardPanel` などアクセシブルなUIを提供します。
+- `@stamprally/admin-ui`: 基本設定、スポット、景品、テーマ、QR出力、JSON入出力の編集UIを提供します。
 - `@stamprally/web`: Instant、QRトークン、GPS、Sequential、Freeモードを検証できるViteデモアプリです。
 
 ## 必要環境
@@ -201,3 +206,4 @@ Geolocation、Web NFC、カメラはHTTPS（対応ブラウザではlocalhostも
 - coreのドメイン判定エンジンはDOM、React、ブラウザAPI、特定の永続化層に依存しません。任意のAdapterとDetectorは呼び出し時にのみブラウザglobalへアクセスします。
 - 条件はタグ付きユニオンで表現し、token、geo、composite、time windowを再帰的に評価します。
 - 状態遷移は入力状態を変更せず、`Result` とイベントを返します。
+- v0.2では多言語モデルのジェネリクス、ランタイム検証・移行、署名付き暗号化スナップショット、景品制限、公開用Config変換、純粋なサーバー判定APIを追加しています。
