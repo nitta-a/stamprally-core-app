@@ -31,8 +31,27 @@ export type {
   ThemePresetId,
 } from "./models.js";
 export { DEFAULT_SHEET_THEME } from "./models.js";
-export type { PublicRallyConfig, PublicRewardItem } from "./publicConfig.js";
+export type { LegacyPublicRallyConfig, PublicRewardItem } from "./publicConfig.js";
 export { stripSensitiveConfig } from "./publicConfig.js";
 export { THEME_PRESETS } from "./themePresets.js";
+export type {
+  AdminRallyConfig,
+  AdminReward,
+  ExternalReference,
+  PublicCheckInCondition,
+  PublicRallyConfig,
+  PublicReward,
+  UniversalLocalizedText,
+  UniversalSpotItem,
+  VerificationCondition,
+} from "./universalModel.js";
+export { isPublicRallyConfig, toPublicRallyConfig } from "./universalModel.js";
+export type { UniversalValidationError, UniversalValidationResult } from "./universalValidation.js";
+export {
+  isAdminRallyConfig,
+  isPublicRallyConfigShape,
+  validateAdminRallyConfig,
+  validatePublicRallyConfig,
+} from "./universalValidation.js";
 export type { RallyConfigValidationResult, ValidationError } from "./validation.js";
 export { CURRENT_RALLY_CONFIG_VERSION, validateRallyConfig } from "./validation.js";

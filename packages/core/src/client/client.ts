@@ -1,5 +1,5 @@
 import type {
-  PublicRallyConfig,
+  LegacyPublicRallyConfig,
   RallyConfig,
   Result,
   StampError,
@@ -65,7 +65,7 @@ export class StampRallyClient {
     return () => this.#eventListeners.delete(listener);
   }
 
-  async updateConfig(newConfig: PublicRallyConfig): Promise<StampRallyState> {
+  async updateConfig(newConfig: LegacyPublicRallyConfig): Promise<StampRallyState> {
     return this.#enqueue(async () => {
       const current = await this.initialize();
       this.#config = newConfig;

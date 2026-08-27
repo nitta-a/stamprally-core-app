@@ -1,4 +1,5 @@
 import {
+  type AdminRallyConfig,
   CURRENT_RALLY_CONFIG_VERSION,
   DEFAULT_SHEET_THEME,
   type LocaleDictionary,
@@ -14,12 +15,63 @@ import {
   type SupportedLocale,
   stripSensitiveConfig,
   THEME_PRESETS,
+  toPublicRallyConfig,
+  validateAdminRallyConfig,
   validateRallyConfig,
 } from "@stamprally/core";
 import type { ChangeEvent } from "react";
 import { useState } from "react";
 
 export type { LocaleDictionary } from "@stamprally/core";
+
+export interface AdminRallyEditorProps<
+  TLocale extends string = string,
+  TMeta extends Record<string, unknown> = Record<string, unknown>,
+> {
+  readonly config: AdminRallyConfig<TLocale, TMeta>;
+  readonly locale?: TLocale;
+  readonly onChange: (config: AdminRallyConfig<TLocale, TMeta>) => void;
+}
+
+/** Universal-model editor surface; the existing field editors remain available for legacy demos. */
+export function AdminRallyEditor<
+  TLocale extends string = string,
+  TMeta extends Record<string, unknown> = Record<string, unknown>,
+>({ config, onChange }: AdminRallyEditorProps<TLocale, TMeta>) {
+  const [value, setValue] = useState(() => JSON.stringify(config, null, 2));
+  const [error, setError] = useState<string | null>(null);
+  const apply = (): void => {
+    try {
+      const candidate: unknown = JSON.parse(value);
+      const result = validateAdminRallyConfig(candidate);
+      if (!result.valid) {
+        setError(result.errors.map((item) => `${item.path}: ${item.message}`).join(" "));
+        return;
+      }
+      onChange(candidate as AdminRallyConfig<TLocale, TMeta>);
+      setError(null);
+    } catch {
+      setError("Invalid rally JSON.");
+    }
+  };
+  return (
+    <section aria-label="Universal rally editor" className="stamprally-admin-card">
+      <textarea value={value} onChange={(event) => setValue(event.target.value)} />
+      <button type="button" onClick={apply}>
+        Apply configuration
+      </button>
+      <button
+        type="button"
+        onClick={() =>
+          navigator.clipboard?.writeText(JSON.stringify(toPublicRallyConfig(config), null, 2))
+        }
+      >
+        Copy public configuration
+      </button>
+      {error !== null && <p role="alert">{error}</p>}
+    </section>
+  );
+}
 
 const localePair = (value: LocalizedText | undefined): Record<string, string> => {
   if (typeof value === "string") return { ja: value, en: "" };

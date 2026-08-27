@@ -3,6 +3,7 @@ import {
   DEFAULT_SHEET_THEME,
   type LocaleDictionary,
   type LocalizedText,
+  type PublicRallyConfig,
   type RallyConfig,
   type RewardItem,
   type RewardState,
@@ -19,6 +20,41 @@ import type { CSSProperties, FormEvent, RefObject } from "react";
 import { useEffect, useRef, useState } from "react";
 
 export type { LocaleDictionary } from "@stamprally/core";
+
+export interface RallyViewerProps<TLocale extends string = string> {
+  readonly config: PublicRallyConfig<TLocale>;
+  readonly locale?: TLocale;
+  readonly onSpotSelect?: (spotId: string) => void;
+}
+
+/** Lightweight public-config viewer for applications that do not need the legacy StampSheet state model. */
+export function RallyViewer<TLocale extends string = string>({
+  config,
+  locale,
+  onSpotSelect,
+}: RallyViewerProps<TLocale>) {
+  const activeLocale = locale ?? ("en" as TLocale);
+  return (
+    <section aria-label="Stamp rally viewer" className="stamprally-viewer">
+      <header>
+        <h1>{resolveLocalizedText(config.title, activeLocale)}</h1>
+        {config.description !== undefined && (
+          <p>{resolveLocalizedText(config.description, activeLocale)}</p>
+        )}
+      </header>
+      <ol>
+        {config.spots.map((spot) => (
+          <li key={spot.id}>
+            <button type="button" onClick={() => onSpotSelect?.(spot.id)}>
+              {resolveLocalizedText(spot.name, activeLocale)}
+            </button>
+            <span>{spot.conditions[0]?.type ?? "custom"}</span>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
 
 function useFocusTrap(
   active: boolean,

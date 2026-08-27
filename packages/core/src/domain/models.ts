@@ -1,4 +1,5 @@
 import type { StampCondition } from "./conditions.js";
+import type { ExternalReference, VerificationCondition } from "./universalModel.js";
 
 export type SupportedLocale = "ja" | "en";
 export type LocalizedString<TLocale extends string = SupportedLocale> = Record<TLocale, string>;
@@ -64,6 +65,10 @@ export interface SpotItem<
   readonly externalUrl?: string;
   readonly redirectUrlAfterClaim?: string;
   readonly metadata?: TMeta;
+  /** Canonical universal-model conditions. Legacy `condition` remains for engine internals. */
+  readonly conditions?: ReadonlyArray<VerificationCondition>;
+  readonly externalReferences?: ReadonlyArray<ExternalReference>;
+  readonly prerequisites?: ReadonlyArray<string>;
   readonly dependsOn?: ReadonlyArray<string>;
   readonly requiresStampIds?: ReadonlyArray<string>;
 }

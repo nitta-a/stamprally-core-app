@@ -17,7 +17,6 @@ export type {
   CheckInAttemptAuditEntry,
   ConditionVerifierPlugin,
   EventPublisherAdapter,
-  ExternalReference,
   IdGeneratorAdapter,
   LocalizedText as HeadlessLocalizedText,
   Metadata,

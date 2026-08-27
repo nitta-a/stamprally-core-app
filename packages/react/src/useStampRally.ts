@@ -1,6 +1,7 @@
 import type {
   ConsumeResult,
   ProcessStampValue,
+  PublicRallyConfig,
   Result,
   RewardConsumeError,
   RewardState,
@@ -106,6 +107,14 @@ export interface UseStampRallyReturn {
   readonly offlineQueue: ReadonlyArray<CheckInRequest>;
   readonly queuedCount: number;
   readonly flushQueue: () => Promise<void>;
+}
+
+export interface UsePublicStampRallyOptions extends UseStampRallyOptions {
+  readonly client: StampRallyClient;
+}
+
+export interface UsePublicStampRallyReturn extends UseStampRallyReturn {
+  readonly config: PublicRallyConfig;
 }
 
 /** @deprecated Use UseStampRallyReturn instead. */
@@ -778,4 +787,15 @@ export function useStampRally(
     queuedCount: offlineQueue.length,
     flushQueue,
   };
+}
+
+/**
+ * Public-model entry point. The caller supplies a client backed by a public
+ * config; the config is returned for rendering and server synchronization.
+ */
+export function usePublicStampRally(
+  config: PublicRallyConfig,
+  options: UsePublicStampRallyOptions,
+): UsePublicStampRallyReturn {
+  return { ...useStampRally(options.client, options), config };
 }

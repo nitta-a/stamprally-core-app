@@ -545,4 +545,13 @@ function emptyState(config: RallyConfig, timestamp: string): UserRallyState {
   };
 }
 
+export type { InMemoryServerPersistenceOptions, ServerPersistenceAdapter } from "./persistence.js";
+export { InMemoryServerPersistenceAdapter } from "./persistence.js";
+export type {
+  UniversalCheckInRequest,
+  UniversalCheckInResult,
+  UniversalRallyServerOptions,
+  UniversalVerificationContext,
+} from "./universalServer.js";
+export { UniversalRallyServer } from "./universalServer.js";
 export type { StampError, StampRecord };

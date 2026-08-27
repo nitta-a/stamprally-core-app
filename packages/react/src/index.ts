@@ -3,8 +3,10 @@ export type {
   RedeemOptions,
   StampRallyEventHandlers,
   SyncAdapter,
+  UsePublicStampRallyOptions,
+  UsePublicStampRallyReturn,
   UseStampRallyOptions,
   UseStampRallyReturn,
   UseStampRallyValue,
 } from "./useStampRally.js";
-export { useStampRally } from "./useStampRally.js";
+export { usePublicStampRally, useStampRally } from "./useStampRally.js";
