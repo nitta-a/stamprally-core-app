@@ -14,7 +14,7 @@ npm上で各パッケージを初回公開した後は、npmのTrusted Publisher
 `nitta-a/stamprally-core-app`、workflow filename `publish.yml`を登録し、OIDC方式へ移行できます。
 その場合は`NPM_TOKEN`を削除し、workflowのnpm公開処理をTrusted Publishing対応の方式へ切り替えます。
 
-## v0.5.1の公開
+## v0.6.0の公開
 
 作業ツリーをクリーンにし、ローカルで検証を通してから、mainとタグをpushします。
 
@@ -25,11 +25,11 @@ pnpm typecheck
 pnpm test
 pnpm build
 pnpm package:check
-pnpm release:check v0.5.1
+pnpm release:check v0.6.0
 
-git tag -a v0.5.1 -m "Release v0.5.1"
+git tag -a v0.6.0 -m "Release v0.6.0"
 git push origin main
-git push origin v0.5.1
+git push origin v0.6.0
 ```
 
 タグpush後、workflowは次の順で処理します。
