@@ -1,8 +1,17 @@
 {
   "name": "@stamprally/server",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Web Standard server handlers for stamp rally verification and claims.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nitta-a/stamprally-core-app",
+    "directory": "packages/server"
+  },
+  "bugs": {
+    "url": "https://github.com/nitta-a/stamprally-core-app/issues"
+  },
+  "homepage": "https://github.com/nitta-a/stamprally-core-app#readme",
   "type": "module",
   "sideEffects": false,
   "files": [
