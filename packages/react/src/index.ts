@@ -10,3 +10,8 @@ export type {
   UseStampRallyValue,
 } from "./useStampRally.js";
 export { usePublicStampRally, useStampRally } from "./useStampRally.js";
+export type {
+  UseUniversalStampRallyOptions,
+  UseUniversalStampRallyReturn,
+} from "./useUniversalStampRally.js";
+export { useUniversalStampRally } from "./useUniversalStampRally.js";

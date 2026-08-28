@@ -26,3 +26,25 @@ export {
   LocalStorageAdapter,
   StorageAdapterError,
 } from "./storage.js";
+export type {
+  CheckInOptions,
+  CheckInSuccess,
+  ClaimOptions,
+  ClaimResult,
+  ClaimSuccess,
+  ClientCheckInResult,
+  ClientClaimResult,
+  CustomValidator,
+  UniversalCheckInResult,
+  UniversalClaimRequest,
+  UniversalClaimResult,
+  UniversalClientError,
+  UniversalClientEvent,
+  UniversalClientEventListener,
+  UniversalClientListener,
+  UniversalClientRequest,
+  UniversalClientSyncAdapter,
+  UniversalStampRallyClientOptions,
+  UserRallyState,
+} from "./universalClient.js";
+export { UniversalStampRallyClient } from "./universalClient.js";

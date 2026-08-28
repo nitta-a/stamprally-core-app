@@ -1,4 +1,5 @@
 import {
+  type ClaimOptions,
   type ConsumeResult,
   DEFAULT_SHEET_THEME,
   type LocaleDictionary,
@@ -14,6 +15,10 @@ import {
   type StampRallyProgress,
   type StampRallyState,
   type SupportedLocale,
+  type UniversalCheckInResult,
+  type UniversalClaimResult,
+  type UniversalStampRallyClient,
+  type UserRallyState,
   type VerificationContext,
 } from "@stamprally/core";
 import type { CSSProperties, FormEvent, RefObject } from "react";
@@ -21,8 +26,21 @@ import { useEffect, useRef, useState } from "react";
 
 export type { LocaleDictionary } from "@stamprally/core";
 
-export interface RallyViewerProps<TLocale extends string = string> {
+export interface RallyViewerAdapter<TLocale extends string = string> {
+  readonly state: UserRallyState;
   readonly config: PublicRallyConfig<TLocale>;
+  readonly onCheckIn: (spotId: string, proof: unknown) => Promise<UniversalCheckInResult>;
+  readonly onClaimReward: (
+    rewardId: string,
+    options?: ClaimOptions,
+  ) => Promise<UniversalClaimResult>;
+  readonly onSync?: () => Promise<void>;
+}
+
+export interface RallyViewerProps<TLocale extends string = string> {
+  readonly config?: PublicRallyConfig<TLocale>;
+  readonly adapter?: RallyViewerAdapter<TLocale>;
+  readonly client?: UniversalStampRallyClient;
   readonly locale?: TLocale;
   readonly onSpotSelect?: (spotId: string) => void;
 }
@@ -30,28 +48,140 @@ export interface RallyViewerProps<TLocale extends string = string> {
 /** Lightweight public-config viewer for applications that do not need the legacy StampSheet state model. */
 export function RallyViewer<TLocale extends string = string>({
   config,
+  adapter,
+  client,
   locale,
   onSpotSelect,
 }: RallyViewerProps<TLocale>) {
   const activeLocale = locale ?? ("en" as TLocale);
+  const resolvedConfig = adapter?.config ?? config ?? client?.getConfig();
+  const renderConfig: PublicRallyConfig<TLocale> = resolvedConfig ?? {
+    id: "empty",
+    version: "0.7.0",
+    title: "",
+    spots: [],
+    rewards: [],
+  };
+  const emptyState: UserRallyState = {
+    rallyId: renderConfig.id,
+    records: [],
+    updatedAt: new Date(0).toISOString(),
+  };
+  const resolvedState = adapter?.state ?? client?.getState() ?? emptyState;
+  const [selectedSpotId, setSelectedSpotId] = useState<string | null>(null);
+  const [proof, setProof] = useState("");
+  const [feedback, setFeedback] = useState<string | null>(null);
+  const [, setClientRevision] = useState(0);
+  useEffect(() => {
+    if (client === undefined) return;
+    return client.subscribe(() => setClientRevision((revision) => revision + 1));
+  }, [client]);
+  const selectedSpot = renderConfig.spots.find((spot) => spot.id === selectedSpotId);
+  const checkIn =
+    adapter?.onCheckIn ??
+    (client === undefined
+      ? undefined
+      : (spotId: string, value: unknown) => client.checkIn(spotId, value));
+  const claimReward =
+    adapter?.onClaimReward ??
+    (client === undefined
+      ? undefined
+      : (rewardId: string, options?: ClaimOptions) => client.claimReward(rewardId, options));
+  const claimed = new Set(resolvedState.records.map((record) => record.stampId));
+  const submit = async (): Promise<void> => {
+    if (selectedSpot === undefined || checkIn === undefined) return;
+    const result = await checkIn(selectedSpot.id, proof);
+    setFeedback(result.ok ? "Check-in completed." : result.error.code);
+    if (result.ok) {
+      setProof("");
+      setSelectedSpotId(null);
+    }
+  };
+  if (resolvedConfig === undefined) return null;
   return (
     <section aria-label="Stamp rally viewer" className="stamprally-viewer">
       <header>
-        <h1>{resolveLocalizedText(config.title, activeLocale)}</h1>
-        {config.description !== undefined && (
-          <p>{resolveLocalizedText(config.description, activeLocale)}</p>
+        <h1>{resolveLocalizedText(renderConfig.title, activeLocale)}</h1>
+        {renderConfig.description !== undefined && (
+          <p>{resolveLocalizedText(renderConfig.description, activeLocale)}</p>
+        )}
+        {adapter?.onSync !== undefined && (
+          <button type="button" onClick={() => void adapter.onSync?.()}>
+            Sync
+          </button>
         )}
       </header>
-      <ol>
-        {config.spots.map((spot) => (
-          <li key={spot.id}>
-            <button type="button" onClick={() => onSpotSelect?.(spot.id)}>
+      {/* biome-ignore lint/a11y/useSemanticElements: The viewer exposes the requested ARIA grid contract. */}
+      <div role="grid" aria-label="Stamp rally spots">
+        {renderConfig.spots.map((spot, index) => (
+          <div key={spot.id}>
+            <button
+              type="button"
+              aria-label={`${resolveLocalizedText(spot.name, activeLocale)}${claimed.has(spot.id) ? ", claimed" : ", available"}`}
+              onClick={() => {
+                onSpotSelect?.(spot.id);
+                setSelectedSpotId(spot.id);
+                setFeedback(null);
+              }}
+            >
+              <span aria-hidden="true">#{String(index + 1).padStart(2, "0")}</span>{" "}
               {resolveLocalizedText(spot.name, activeLocale)}
             </button>
             <span>{spot.conditions[0]?.type ?? "custom"}</span>
-          </li>
+          </div>
         ))}
-      </ol>
+      </div>
+      <p role="status" aria-live="polite">
+        {feedback ?? `${claimed.size} / ${renderConfig.spots.length} claimed`}
+      </p>
+      <section aria-label="Rewards">
+        <h2>Rewards</h2>
+        {renderConfig.rewards.map((reward) => {
+          const rewardState = resolvedState.rewards?.find((item) => item.rewardId === reward.id);
+          const available = rewardState?.status === "AVAILABLE";
+          return (
+            <article key={reward.id}>
+              <h3>{resolveLocalizedText(reward.title, activeLocale)}</h3>
+              <span>{rewardState?.status ?? "LOCKED"}</span>
+              {claimReward !== undefined && (
+                <button
+                  type="button"
+                  disabled={!available}
+                  onClick={() =>
+                    void claimReward(reward.id).then((result) => {
+                      setFeedback(result.ok ? "Reward claimed." : result.error.code);
+                    })
+                  }
+                >
+                  Claim reward
+                </button>
+              )}
+            </article>
+          );
+        })}
+      </section>
+      {selectedSpot !== undefined && checkIn !== undefined && (
+        <div role="dialog" aria-modal="true" aria-labelledby="rally-viewer-spot-title">
+          <h2 id="rally-viewer-spot-title">
+            {resolveLocalizedText(selectedSpot.name, activeLocale)}
+          </h2>
+          <p>{resolveLocalizedText(selectedSpot.description, activeLocale)}</p>
+          <label>
+            Proof
+            <input value={proof} onChange={(event) => setProof(event.target.value)} />
+          </label>
+          <button
+            type="button"
+            onClick={() => void submit()}
+            disabled={claimed.has(selectedSpot.id)}
+          >
+            Check in
+          </button>
+          <button type="button" onClick={() => setSelectedSpotId(null)}>
+            Close
+          </button>
+        </div>
+      )}
     </section>
   );
 }
@@ -206,7 +336,7 @@ export function StampSlot<TLocale extends string = SupportedLocale>({
 
 export interface StampSheetProps<TLocale extends string = SupportedLocale> {
   readonly title?: LocalizedText<TLocale>;
-  readonly config: RallyConfig<TLocale>;
+  readonly config: RallyConfig<TLocale> | PublicRallyConfig<TLocale>;
   readonly state?: StampRallyState | null;
   readonly progress?: StampRallyProgress;
   readonly presentations?: Readonly<Record<string, StampPresentation>>;
@@ -216,6 +346,7 @@ export interface StampSheetProps<TLocale extends string = SupportedLocale> {
   readonly dictionary?: LocaleDictionary<TLocale>;
   readonly theme?: SheetTheme;
   readonly onStampSelect?: (stampId: string) => void;
+  readonly adapter?: RallyViewerAdapter<TLocale>;
 }
 
 export function StampSheet<TLocale extends string = SupportedLocale>({
@@ -230,7 +361,26 @@ export function StampSheet<TLocale extends string = SupportedLocale>({
   dictionary,
   theme = config.theme ?? DEFAULT_SHEET_THEME,
   onStampSelect,
+  adapter,
 }: StampSheetProps<TLocale>) {
+  if ("spots" in config) {
+    if (adapter === undefined)
+      return (
+        <RallyViewer
+          config={config}
+          locale={locale}
+          {...(onStampSelect === undefined ? {} : { onSpotSelect: onStampSelect })}
+        />
+      );
+    return (
+      <RallyViewer
+        config={config}
+        adapter={adapter}
+        locale={locale}
+        {...(onStampSelect === undefined ? {} : { onSpotSelect: onStampSelect })}
+      />
+    );
+  }
   const acquired = new Set(state?.records.map((record) => record.stampId) ?? []);
   const next = new Set(progress?.nextAvailableStamps.map((stamp) => stamp.id) ?? []);
   const count = progress?.acquired ?? acquired.size;

@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { GeneralSettingsForm, JsonConfigIO, SpotItemForm } from "../src/index.js";
+import { AdminRallyEditor, GeneralSettingsForm, JsonConfigIO, SpotItemForm } from "../src/index.js";
 
 const spot = {
   id: "one",
@@ -16,6 +16,44 @@ const config = {
 afterEach(cleanup);
 
 describe("admin UI", () => {
+  it("builds universal spots, references, conditions, and rewards through GUI controls", () => {
+    const universal = {
+      id: "universal",
+      version: "0.7.0",
+      title: { ja: "管理", en: "Admin" },
+      spots: [],
+      rewards: [],
+    } as const;
+    const onChange = vi.fn();
+    render(<AdminRallyEditor config={universal} onChange={onChange} />);
+    fireEvent.click(screen.getByRole("button", { name: "Add spot" }));
+    const next = onChange.mock.lastCall?.[0];
+    expect(next.spots).toHaveLength(1);
+    cleanup();
+    render(
+      <AdminRallyEditor
+        config={{ ...universal, spots: next.spots } as typeof universal}
+        onChange={onChange}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Add external reference" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add condition" }));
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        spots: [expect.objectContaining({ externalReferences: [expect.anything()] })],
+      }),
+    );
+    cleanup();
+    render(
+      <AdminRallyEditor
+        config={{ ...universal, spots: next.spots, rewards: [] } as typeof universal}
+        onChange={onChange}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Add reward" }));
+    expect(onChange.mock.lastCall?.[0].rewards).toHaveLength(1);
+  });
+
   it("edits general settings and spot conditions immutably", () => {
     const onChange = vi.fn();
     render(<GeneralSettingsForm config={config} onChange={onChange} />);

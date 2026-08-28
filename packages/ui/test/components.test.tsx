@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { RewardPanel, StampModal, StampSheet, StampSlot } from "../src/index.js";
+import { RallyViewer, RewardPanel, StampModal, StampSheet, StampSlot } from "../src/index.js";
 
 const stamp = {
   id: "one",
@@ -15,6 +15,39 @@ const config = {
 afterEach(cleanup);
 
 describe("participant UI", () => {
+  it("connects a universal viewer to an adapter and exposes a live check-in dialog", async () => {
+    const adapter = {
+      config: {
+        id: "viewer",
+        version: "0.7.0",
+        title: "Viewer",
+        spots: [
+          { id: "one", orderIndex: 0, name: "One", conditions: [{ type: "passcode" as const }] },
+        ],
+        rewards: [],
+      },
+      state: { rallyId: "viewer", records: [], updatedAt: "2026-08-28T00:00:00.000Z" },
+      onCheckIn: vi.fn(async () => ({
+        ok: true as const,
+        value: {
+          state: {
+            rallyId: "viewer",
+            records: [{ stampId: "one", acquiredAt: "2026-08-28T00:00:00.000Z" }],
+            updatedAt: "2026-08-28T00:00:00.000Z",
+          },
+          record: { stampId: "one", acquiredAt: "2026-08-28T00:00:00.000Z" },
+        },
+      })),
+      onClaimReward: vi.fn(),
+    };
+    render(<RallyViewer adapter={adapter} locale="en" />);
+    fireEvent.click(screen.getByRole("button", { name: /One.*available/i }));
+    fireEvent.change(screen.getByLabelText("Proof"), { target: { value: "code" } });
+    fireEvent.click(screen.getByRole("button", { name: "Check in" }));
+    expect(await screen.findByRole("status")).toBeTruthy();
+    expect(adapter.onCheckIn).toHaveBeenCalledWith("one", "code");
+  });
+
   it("renders accessible stamp slots and emits selection", () => {
     const onSelect = vi.fn();
     render(<StampSlot stamp={stamp} isNext={true} slotNumber={1} onSelect={onSelect} />);

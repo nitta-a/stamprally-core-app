@@ -550,6 +550,7 @@ export { InMemoryServerPersistenceAdapter } from "./persistence.js";
 export type {
   UniversalCheckInRequest,
   UniversalCheckInResult,
+  UniversalClaimRewardRequest,
   UniversalRallyServerOptions,
   UniversalVerificationContext,
 } from "./universalServer.js";

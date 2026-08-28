@@ -46,6 +46,7 @@ export const DEFAULT_SHEET_THEME: SheetTheme = {
   fontFamily: "serif",
 };
 
+/** @deprecated Use UniversalSpotItem from the universal model. */
 export interface SpotItem<
   TLocale extends string = SupportedLocale,
   TMeta extends Record<string, unknown> = Record<string, unknown>,
@@ -136,6 +137,7 @@ export interface StampRallyState {
   readonly updatedAt: string;
 }
 
+/** @deprecated Use AdminRallyConfig or PublicRallyConfig from the universal model. */
 export interface RallyConfig<
   TLocale extends string = SupportedLocale,
   TMeta extends Record<string, unknown> = Record<string, unknown>,

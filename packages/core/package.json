@@ -1,6 +1,6 @@
 {
   "name": "@stamprally/core",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "A dependency-free stamp rally domain engine and storage-agnostic client.",
   "license": "MIT",
   "repository": {

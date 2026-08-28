@@ -68,6 +68,7 @@ export interface StampRallyEventHandlers {
   readonly onRewardConsumed?: (rewardId: string) => void;
 }
 
+/** @deprecated Use useUniversalStampRally with UniversalStampRallyClient. */
 export interface UseStampRallyOptions {
   readonly syncAdapter?: SyncAdapter;
   readonly events?: StampRallyEventHandlers;
@@ -194,6 +195,7 @@ function notifyAcquisitionEvents(
   }
 }
 
+/** @deprecated Use useUniversalStampRally for the universal model. */
 export function useStampRally(
   client: StampRallyClient,
   options: UseStampRallyOptions = {},
