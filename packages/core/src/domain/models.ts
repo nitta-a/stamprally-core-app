@@ -104,6 +104,7 @@ export type RewardUnlockCondition =
   | { readonly type: "all" | "any"; readonly conditions: ReadonlyArray<RewardUnlockCondition> };
 export type RewardType = "digital" | "in_person";
 export type RedemptionMethod = "manual_slide" | "staff_passcode" | "view_only" | "server_claim";
+export type InventoryAggregationMode = "shared" | "per_reward";
 export interface Reward<TLocale extends string = string> {
   readonly id: string;
   readonly title: LocalizedText<TLocale>;
@@ -136,6 +137,8 @@ export interface AdminRallyConfig<
   readonly rewards: ReadonlyArray<Reward<TLocale>>;
   readonly staffPasscode?: string;
   readonly inventory?: Readonly<Record<string, number>>;
+  /** How the optional top-level inventory limit is aggregated. */
+  readonly inventoryMode?: InventoryAggregationMode;
   readonly serverMetadata?: Readonly<Record<string, unknown>>;
   readonly metadata?: TMeta;
   /** Explicit public metadata name. `metadata` remains supported for compatibility. */

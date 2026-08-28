@@ -42,6 +42,8 @@ export interface OfflineQueueOptions {
   readonly onSyncConflict?:
     | SyncConflictPolicy
     | ((context: OfflineConflict) => SyncConflictPolicy | Promise<SyncConflictPolicy>);
+  /** Enables storage-event/BroadcastChannel synchronization when browser APIs exist. */
+  readonly synchronizeInstances?: boolean;
 }
 
 export interface OfflineConflict {
@@ -213,6 +215,15 @@ function errorValue(value: unknown, fallbackCode: string): OfflineOperationError
   return { code: fallbackCode, message: "Offline operation was rejected." };
 }
 
+const syncLocks = new Map<string, { readonly owner: string; readonly expiresAt: number }>();
+const SYNC_LOCK_TTL_MS = 30_000;
+
+function randomId(): string {
+  return (
+    globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`
+  );
+}
+
 /** Durable, sequential retry queue for operations created while disconnected. */
 export class OfflineQueue {
   readonly #storage: OfflineQueueStorage;
@@ -228,6 +239,11 @@ export class OfflineQueue {
   #sender: OfflineSender | undefined;
   #syncPromise: Promise<void> | null = null;
   #syncResultListener: OfflineSyncResultListener | undefined;
+  readonly #synchronizeInstances: boolean;
+  readonly #instanceId = randomId();
+  readonly #lockStorage: NonNullable<OfflineQueueOptions["storageLike"]> | null;
+  #storageListener: ((event: StorageEvent) => void) | undefined;
+  #channel: BroadcastChannel | null = null;
 
   constructor(options: OfflineQueueOptions = {}) {
     if (options.storage !== undefined) this.#storage = options.storage;
@@ -239,6 +255,12 @@ export class OfflineQueue {
     this.#userId = options.userId ?? null;
     this.#conflictPolicy = options.conflictPolicy ?? "server_wins";
     this.#onSyncConflict = options.onSyncConflict;
+    this.#synchronizeInstances = options.synchronizeInstances ?? true;
+    this.#lockStorage =
+      options.storageLike ??
+      (globalThis as { readonly localStorage?: OfflineQueueOptions["storageLike"] }).localStorage ??
+      null;
+    if (this.#synchronizeInstances) this.#subscribeToExternalChanges();
   }
 
   get syncState(): SyncState {
@@ -279,6 +301,17 @@ export class OfflineQueue {
     this.#loaded = true;
   }
 
+  /** Releases browser listeners when the queue is no longer used. */
+  dispose(): void {
+    const windowLike = (globalThis as { readonly window?: Window }).window;
+    if (windowLike !== undefined && this.#storageListener !== undefined)
+      windowLike.removeEventListener("storage", this.#storageListener);
+    this.#storageListener = undefined;
+    this.#channel?.close();
+    this.#channel = null;
+    this.#releaseSyncLock();
+  }
+
   /** Selects a rally/user queue scope and loads its pending operations. */
   async setScope(rallyId: string, userId: string | null): Promise<void> {
     if (this.#configuredKey !== undefined) {
@@ -316,6 +349,7 @@ export class OfflineQueue {
     if (this.#operations.some((item) => operationId(item) === id)) return;
     this.#operations = [...this.#operations, operation];
     await this.#storage.save(this.#storageKey(), this.#operations);
+    this.#announceChange();
   }
 
   async enqueueCheckIn(request: CheckInRequest): Promise<void> {
@@ -330,6 +364,7 @@ export class OfflineQueue {
     await this.initialize();
     this.#operations = [];
     await this.#storage.save(this.#storageKey(), this.#operations);
+    this.#announceChange();
   }
 
   async sync(sender = this.#sender): Promise<void> {
@@ -350,6 +385,11 @@ export class OfflineQueue {
   async #run(sender: OfflineSender): Promise<void> {
     this.#state = "syncing";
     this.#error = null;
+    if (!this.#acquireSyncLock()) {
+      await this.#reloadFromStorage();
+      this.#state = "idle";
+      return;
+    }
     try {
       while (this.#operations.length > 0) {
         const operation = this.#operations[0];
@@ -380,6 +420,7 @@ export class OfflineQueue {
             : undefined;
         this.#operations = this.#operations.slice(1);
         await this.#storage.save(this.#storageKey(), this.#operations);
+        this.#announceChange();
         await this.#syncResultListener?.({
           operation,
           ...(result === undefined ? {} : { result }),
@@ -393,6 +434,104 @@ export class OfflineQueue {
       this.#state = "error";
       this.#error = cause instanceof Error ? cause : new Error(String(cause));
       throw this.#error;
+    } finally {
+      this.#releaseSyncLock();
+    }
+  }
+
+  #subscribeToExternalChanges(): void {
+    const windowLike = (globalThis as { readonly window?: Window }).window;
+    if (windowLike !== undefined) {
+      this.#storageListener = (event) => {
+        if (event.key === this.#storageKey()) void this.#reloadFromStorage();
+      };
+      windowLike.addEventListener("storage", this.#storageListener);
+    }
+    const Channel = (globalThis as { readonly BroadcastChannel?: typeof BroadcastChannel })
+      .BroadcastChannel;
+    if (Channel !== undefined) {
+      try {
+        this.#channel = new Channel("stamprally:queue-sync");
+        this.#channel.addEventListener("message", (event: MessageEvent<unknown>) => {
+          if (
+            typeof event.data === "object" &&
+            event.data !== null &&
+            "key" in event.data &&
+            (event.data as { readonly key?: unknown }).key === this.#storageKey()
+          )
+            void this.#reloadFromStorage();
+        });
+      } catch {
+        this.#channel = null;
+      }
+    }
+  }
+
+  #announceChange(): void {
+    this.#channel?.postMessage({ key: this.#storageKey(), owner: this.#instanceId });
+  }
+
+  async #reloadFromStorage(): Promise<void> {
+    if (this.#state === "syncing") return;
+    try {
+      this.#operations = [...(await this.#storage.load(this.#storageKey()))];
+      this.#loaded = true;
+    } catch {
+      // A transient storage failure must not destroy the in-memory queue.
+    }
+  }
+
+  #lockKey(): string {
+    return `${this.#storageKey()}:sync-lock`;
+  }
+
+  #acquireSyncLock(): boolean {
+    const key = this.#lockKey();
+    const now = Date.now();
+    const local = syncLocks.get(key);
+    if (local !== undefined && local.expiresAt > now && local.owner !== this.#instanceId)
+      return false;
+    if (this.#lockStorage !== null) {
+      try {
+        const existing = this.#lockStorage.getItem(key);
+        if (existing !== null) {
+          const parsed: unknown = JSON.parse(existing);
+          if (
+            typeof parsed === "object" &&
+            parsed !== null &&
+            typeof (parsed as { readonly expiresAt?: unknown }).expiresAt === "number" &&
+            (parsed as { readonly expiresAt: number }).expiresAt > now &&
+            (parsed as { readonly owner?: unknown }).owner !== this.#instanceId
+          )
+            return false;
+        }
+        this.#lockStorage.setItem(
+          key,
+          JSON.stringify({ owner: this.#instanceId, expiresAt: now + SYNC_LOCK_TTL_MS }),
+        );
+      } catch {
+        // The in-process lock remains useful when persistent storage is unavailable.
+      }
+    }
+    syncLocks.set(key, { owner: this.#instanceId, expiresAt: now + SYNC_LOCK_TTL_MS });
+    return true;
+  }
+
+  #releaseSyncLock(): void {
+    const key = this.#lockKey();
+    const current = syncLocks.get(key);
+    if (current?.owner === this.#instanceId) syncLocks.delete(key);
+    if (this.#lockStorage !== null) {
+      try {
+        const value = this.#lockStorage.getItem(key);
+        if (
+          value !== null &&
+          (JSON.parse(value) as { readonly owner?: unknown }).owner === this.#instanceId
+        )
+          this.#lockStorage.removeItem?.(key);
+      } catch {
+        // Lock expiry protects against an unreadable lock record.
+      }
     }
   }
 

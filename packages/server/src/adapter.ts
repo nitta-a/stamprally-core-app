@@ -1,4 +1,6 @@
 export type {
+  CheckInTransactionMutation,
+  CheckInTransactionParams,
   ClaimRewardTransactionMutation,
   ClaimRewardTransactionParams,
   InMemoryServerPersistenceOptions,

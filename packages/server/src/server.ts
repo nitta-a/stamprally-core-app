@@ -17,6 +17,11 @@ import type {
   SyncOperationStatus,
 } from "./index.js";
 import type { ServerPersistenceAdapter } from "./persistence.js";
+import {
+  validateCheckInRequest,
+  validateClaimRewardRequest,
+  validateSyncRequest,
+} from "./security.js";
 
 type ErrorResponse = { readonly ok: false; readonly code: string; readonly message: string };
 type ClaimResponse =
@@ -34,8 +39,12 @@ function isObject(value: unknown): value is Record<string, unknown> {
 function requestId(prefix: string): string {
   return `${prefix}-${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`}`;
 }
-function now(options: ServerOptions, requested?: string): string {
-  return requested ?? options.now?.() ?? new Date().toISOString();
+function now(options: ServerOptions): string {
+  return options.now?.() ?? new Date().toISOString();
+}
+function timestampMillis(timestamp: string): number {
+  const value = Date.parse(timestamp);
+  return Number.isFinite(value) ? value : Date.now();
 }
 function initialState(config: AdminRallyConfig, userId: string, timestamp: string): UserRallyState {
   return {
@@ -133,60 +142,51 @@ export class StampRallyServer {
     return json({ ok: false, code: "NOT_FOUND", message: "Route not found." }, 404);
   }
   async handleCheckIn(request: Request): Promise<Response> {
-    const body = await this.#body<CheckInRequest>(request);
-    const userId = await this.#user(request, body?.userId);
-    if (
-      body === null ||
-      userId === null ||
-      body.rallyId !== this.#config.id ||
-      body.spotId === "" ||
-      body.idempotencyKey === "" ||
-      body.context === undefined
-    )
+    const body = validateCheckInRequest(await this.#body(request));
+    if (!body.success || body.data.rallyId !== this.#config.id)
       return json(
-        {
-          ok: false,
-          code: "INVALID_REQUEST",
-          message: "rallyId, spotId, context, and idempotencyKey are required.",
-        },
+        { ok: false, code: "INVALID_REQUEST", message: "Invalid check-in request." },
         400,
       );
-    const result = await this.checkIn({ ...body, userId });
+    const userId = await this.#user(request);
+    if (userId === null)
+      return json(
+        { ok: false, code: "UNAUTHENTICATED", message: "Authentication is required." },
+        401,
+      );
+    const result = await this.checkIn({ ...body.data, userId });
     return json(
       { ...result, status: operationStatus(result) },
       result.ok ? 200 : result.code === "SPOT_NOT_FOUND" ? 404 : 422,
     );
   }
   async handleClaimReward(request: Request): Promise<Response> {
-    const body = await this.#body<ClaimRewardRequest>(request);
-    const userId = await this.#user(request, body?.userId);
-    if (
-      body === null ||
-      userId === null ||
-      body.rallyId !== this.#config.id ||
-      body.rewardId === "" ||
-      body.idempotencyKey === ""
-    )
+    const body = validateClaimRewardRequest(await this.#body(request));
+    if (!body.success || body.data.rallyId !== this.#config.id)
+      return json({ ok: false, code: "INVALID_REQUEST", message: "Invalid reward request." }, 400);
+    const userId = await this.#user(request);
+    if (userId === null)
       return json(
-        {
-          ok: false,
-          code: "INVALID_REQUEST",
-          message: "rallyId, rewardId, and idempotencyKey are required.",
-        },
-        400,
+        { ok: false, code: "UNAUTHENTICATED", message: "Authentication is required." },
+        401,
       );
-    const result = await this.claimReward({ ...body, userId });
+    const result = await this.claimReward({ ...body.data, userId });
     return json(
       { ...result, status: operationStatus(result) },
       result.ok ? 200 : result.code === "REWARD_NOT_FOUND" ? 404 : 422,
     );
   }
   async handleSync(request: Request): Promise<Response> {
-    const body = await this.#body<{ readonly rallyId: string; readonly userId?: string }>(request);
-    const userId = await this.#user(request, body?.userId);
-    if (body === null || userId === null || body.rallyId !== this.#config.id)
-      return json({ ok: false, code: "INVALID_REQUEST", message: "rallyId is required." }, 400);
-    return json({ ok: true, state: await this.sync(body.rallyId, userId) });
+    const body = validateSyncRequest(await this.#body(request));
+    if (!body.success || body.data.rallyId !== this.#config.id)
+      return json({ ok: false, code: "INVALID_REQUEST", message: "Invalid sync request." }, 400);
+    const userId = await this.#user(request);
+    if (userId === null)
+      return json(
+        { ok: false, code: "UNAUTHENTICATED", message: "Authentication is required." },
+        401,
+      );
+    return json({ ok: true, state: await this.sync(body.data.rallyId, userId) });
   }
   async checkIn(request: CheckInRequest & { readonly userId: string }): Promise<CheckInResponse> {
     const key = `check-in:${request.rallyId}:${request.userId}:${request.idempotencyKey}`;
@@ -204,49 +204,71 @@ export class StampRallyServer {
       ))
     )
       return { ok: false, code: "CONFLICT", message: "The user state is being updated." };
-    const timestamp = now(this.#options, request.now);
+    const timestamp = now(this.#options);
     try {
-      const spot = this.#config.spots.find((item) => item.id === request.spotId);
-      if (spot === undefined)
-        return this.#remember(
-          key,
-          { ok: false, code: "SPOT_NOT_FOUND", message: "Spot was not found." },
-          request.rallyId,
-          request.userId,
-          "CHECK_IN",
-          request.spotId,
-          request.idempotencyKey,
-          timestamp,
-        );
       const current =
         (await this.#persistence.getUserState(request.rallyId, request.userId)) ??
         initialState(this.#config, request.userId, timestamp);
-      if (current.records.some((record) => record.stampId === request.spotId))
-        return this.#remember(
-          key,
-          { ok: false, code: "STAMP_ALREADY_ACQUIRED", message: "Spot was already claimed." },
+      const responseHolder: { value: CheckInResponse | null } = { value: null };
+      const makeAudit = (status: "SUCCESS" | "REJECTED", code?: string): AuditLog =>
+        audit(
           request.rallyId,
           request.userId,
           "CHECK_IN",
           request.spotId,
           request.idempotencyKey,
+          status,
           timestamp,
+          code,
+        );
+      const spot = this.#config.spots.find((item) => item.id === request.spotId);
+      if (spot === undefined) {
+        responseHolder.value = {
+          ok: false,
+          code: "SPOT_NOT_FOUND",
+          message: "Spot was not found.",
+        };
+        return await this.#rememberCheckInTransaction(
+          request,
+          timestamp,
+          key,
+          current,
+          {
+            nextUserState: current,
+            auditLog: makeAudit("REJECTED", "SPOT_NOT_FOUND"),
+            result: responseHolder.value,
+            error: "SPOT_NOT_FOUND",
+          },
+          responseHolder,
+        );
+      }
+      const rejected = (code: string, message: string) => {
+        responseHolder.value = { ok: false, code, message };
+        return {
+          nextUserState: current,
+          auditLog: makeAudit("REJECTED", code),
+          result: responseHolder.value,
+          error: code,
+        };
+      };
+      if (current.records.some((record) => record.stampId === request.spotId))
+        return await this.#rememberCheckInTransaction(
+          request,
+          timestamp,
+          key,
+          current,
+          rejected("STAMP_ALREADY_ACQUIRED", "Spot was already claimed."),
+          responseHolder,
         );
       const acquired = new Set(current.records.map((record) => record.stampId));
       if (spot.prerequisites?.some((id) => !acquired.has(id)))
-        return this.#remember(
-          key,
-          {
-            ok: false,
-            code: "PREREQUISITES_NOT_MET",
-            message: "Prerequisite spots are not complete.",
-          },
-          request.rallyId,
-          request.userId,
-          "CHECK_IN",
-          request.spotId,
-          request.idempotencyKey,
+        return await this.#rememberCheckInTransaction(
+          request,
           timestamp,
+          key,
+          current,
+          rejected("PREREQUISITES_NOT_MET", "Prerequisite spots are not complete."),
+          responseHolder,
         );
       for (const condition of spot.conditions)
         if (
@@ -259,15 +281,13 @@ export class StampRallyServer {
             { rallyId: request.rallyId, spotId: request.spotId, state: current },
           ))
         )
-          return this.#remember(
-            key,
-            { ok: false, code: "INVALID_PROOF", message: "Verification failed." },
-            request.rallyId,
-            request.userId,
-            "CHECK_IN",
-            request.spotId,
-            request.idempotencyKey,
+          return await this.#rememberCheckInTransaction(
+            request,
             timestamp,
+            key,
+            current,
+            rejected("INVALID_PROOF", "Verification failed."),
+            responseHolder,
           );
       const next: UserRallyState = {
         ...current,
@@ -280,17 +300,32 @@ export class StampRallyServer {
         ),
         updatedAt: timestamp,
       };
-      await this.#persistence.saveUserState(request.rallyId, request.userId, next);
-      return this.#remember(
-        key,
-        { ok: true, state: next },
-        request.rallyId,
-        request.userId,
-        "CHECK_IN",
-        request.spotId,
-        request.idempotencyKey,
-        timestamp,
+      responseHolder.value = { ok: true, state: next };
+      const transaction = await this.#persistence.executeCheckInTransaction(
+        {
+          rallyId: request.rallyId,
+          userId: request.userId,
+          spotId: request.spotId,
+          timestamp: timestampMillis(timestamp),
+          idempotencyKey: key,
+          proofData: request.context,
+          ...(this.#options.idempotencyTtlMs === undefined
+            ? {}
+            : { idempotencyTtlMs: this.#options.idempotencyTtlMs }),
+          initialUserState: current,
+        },
+        () => ({
+          nextUserState: next,
+          auditLog: makeAudit("SUCCESS"),
+          result: responseHolder.value,
+        }),
       );
+      if (transaction.success && responseHolder.value !== null) return responseHolder.value;
+      return {
+        ok: false,
+        code: "PERSISTENCE_FAILED",
+        message: transaction.error ?? "Check-in failed.",
+      };
     } finally {
       await this.#persistence.releaseLock(request.rallyId, lockKey);
     }
@@ -310,7 +345,7 @@ export class StampRallyServer {
         key,
         { ok: false, code: "REWARD_NOT_FOUND", message: "Reward was not found." },
         request,
-        now(this.#options, request.now),
+        now(this.#options),
       );
     const lockKey = `reward:${request.rallyId}:${reward.id}`;
     if (
@@ -321,7 +356,7 @@ export class StampRallyServer {
       ))
     )
       return { ok: false, code: "CONFLICT", message: "The reward is being claimed." };
-    const timestamp = now(this.#options, request.now);
+    const timestamp = now(this.#options);
     try {
       const checked = await this.#persistence.getIdempotentResult<ClaimResponse>(
         request.rallyId,
@@ -379,8 +414,12 @@ export class StampRallyServer {
               error: "OUT_OF_STOCK",
             };
           }
+          const effectiveReward =
+            reward.staffPasscode === undefined && this.#config.staffPasscode !== undefined
+              ? { ...reward, staffPasscode: this.#config.staffPasscode }
+              : reward;
           const local = consumeReward({
-            reward,
+            reward: effectiveReward,
             currentState: currentReward,
             now: timestamp,
             userRedemptionCount: claimCount,
@@ -454,48 +493,62 @@ export class StampRallyServer {
       initialState(this.#config, userId, now(this.#options))
     );
   }
-  async #body<T>(request: Request): Promise<T | null> {
+  async #body(request: Request): Promise<unknown> {
     try {
       const value: unknown = await request.json();
-      return isObject(value) ? (value as T) : null;
+      return isObject(value) ? value : null;
     } catch {
       return null;
     }
   }
-  async #user(request: Request, requested: string | undefined): Promise<string | null> {
-    if (this.#options.authenticate !== undefined)
-      return (await this.#options.authenticate(request)) ?? null;
-    return requested ?? null;
+  async #user(request: Request): Promise<string | null> {
+    if (this.#options.authenticate !== undefined) {
+      const identity = await this.#options.authenticate(request);
+      if (typeof identity === "string") return identity.length > 0 ? identity : null;
+      if (identity === null) return null;
+      const authenticatedUserId = identity.authenticatedUserId;
+      return authenticatedUserId.length > 0 ? authenticatedUserId : null;
+    }
+    return "anonymous";
   }
-  async #remember(
-    key: string,
-    result: CheckInResponse,
-    rallyId: string,
-    userId: string,
-    action: AuditLog["action"],
-    resourceId: string,
-    idempotencyKey: string,
+
+  async #rememberCheckInTransaction(
+    request: CheckInRequest & { readonly userId: string },
     timestamp: string,
+    key: string,
+    current: UserRallyState,
+    mutation: {
+      readonly nextUserState: UserRallyState;
+      readonly auditLog: AuditLog;
+      readonly result?: unknown;
+      readonly error?: string;
+    },
+    responseHolder: { value: CheckInResponse | null },
   ): Promise<CheckInResponse> {
-    await this.#persistence.recordAuditLog(
-      audit(
-        rallyId,
-        userId,
-        action,
-        resourceId,
-        idempotencyKey,
-        result.ok ? "SUCCESS" : "REJECTED",
-        timestamp,
-        result.ok ? undefined : result.code,
-      ),
+    const transaction = await this.#persistence.executeCheckInTransaction(
+      {
+        rallyId: request.rallyId,
+        userId: request.userId,
+        spotId: request.spotId,
+        timestamp: timestampMillis(timestamp),
+        idempotencyKey: key,
+        ...(this.#options.idempotencyTtlMs === undefined
+          ? {}
+          : { idempotencyTtlMs: this.#options.idempotencyTtlMs }),
+        initialUserState: current,
+      },
+      () => mutation,
     );
-    await this.#persistence.saveIdempotentResult(
-      rallyId,
-      key,
-      result,
-      this.#options.idempotencyTtlMs ?? 86_400_000,
-    );
-    return result;
+    if (
+      responseHolder.value !== null &&
+      (transaction.success || transaction.error === mutation.error)
+    )
+      return responseHolder.value;
+    return {
+      ok: false,
+      code: "PERSISTENCE_FAILED",
+      message: transaction.error ?? "Check-in failed.",
+    };
   }
   async #rememberClaim(
     key: string,

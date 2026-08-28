@@ -4,6 +4,7 @@ import {
   safeParseAdminConfig,
   safeParsePublicConfig,
   updateLocalizedField,
+  validateRallyConfigRelations,
 } from "../src/index.js";
 
 const validAdmin = {
@@ -54,5 +55,54 @@ describe("localized updates", () => {
     const next = updateLocalizedField(current, "ja", "更新");
     expect(next).toEqual({ ja: "更新", en: "English" });
     expect(current).toEqual({ ja: "日本語", en: "English" });
+  });
+});
+
+describe("configuration relationships", () => {
+  it("filters duplicate IDs, missing prerequisites, duplicate order indexes, and reward references", () => {
+    const errors = validateRallyConfigRelations({
+      ...validAdmin,
+      spots: [
+        { ...validAdmin.spots[0], id: "duplicate", orderIndex: 0, prerequisites: ["missing"] },
+        { ...validAdmin.spots[0], id: "duplicate", orderIndex: 0 },
+      ],
+      rewards: [
+        {
+          id: "reward",
+          title: "Reward",
+          type: "digital",
+          redemptionMethod: "view_only",
+          requiredStampCount: 0,
+          conditions: [{ type: "stamps", stampIds: ["missing"] }],
+        },
+        {
+          id: "reward",
+          title: "Reward 2",
+          type: "digital",
+          redemptionMethod: "view_only",
+          requiredStampCount: 0,
+        },
+      ],
+    });
+    expect(errors.map((error) => error.code)).toEqual(
+      expect.arrayContaining([
+        "duplicate_spot_id",
+        "missing_prerequisite",
+        "duplicate_order_index",
+        "missing_reward_spot",
+        "duplicate_reward_id",
+      ]),
+    );
+  });
+
+  it("detects prerequisite cycles", () => {
+    const errors = validateRallyConfigRelations({
+      ...validAdmin,
+      spots: [
+        { ...validAdmin.spots[0], id: "a", prerequisites: ["b"] },
+        { ...validAdmin.spots[0], id: "b", prerequisites: ["a"], orderIndex: 1 },
+      ],
+    });
+    expect(errors.some((error) => error.code === "cyclic_prerequisites")).toBe(true);
   });
 });

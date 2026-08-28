@@ -32,7 +32,30 @@ export interface ClaimRewardTransactionMutation {
   readonly error?: string;
 }
 
+export interface CheckInTransactionParams {
+  readonly rallyId: string;
+  readonly userId: string;
+  readonly spotId: string;
+  readonly timestamp: number;
+  readonly idempotencyKey?: string;
+  readonly proofData?: unknown;
+  readonly idempotencyTtlMs?: number;
+  readonly initialUserState?: UserRallyState;
+}
+
+export interface CheckInTransactionMutation {
+  readonly nextUserState: UserRallyState;
+  readonly auditLog: AuditLog;
+  readonly result?: unknown;
+  readonly error?: string;
+}
+
 export interface ServerPersistenceAdapter {
+  /** Atomically commits user state, audit log, and idempotency data. */
+  executeCheckInTransaction(
+    params: CheckInTransactionParams,
+    mutation: (current: { readonly userState: UserRallyState }) => CheckInTransactionMutation,
+  ): Promise<{ readonly success: boolean; readonly error?: string }>;
   /**
    * Atomically commits stock, user state, claim count, audit log, and idempotency data.
    * Adapters must roll back every write when the callback or any commit operation fails.
@@ -192,6 +215,44 @@ export class InMemoryServerPersistenceAdapter implements ServerPersistenceAdapte
           await this.saveIdempotentResult(
             params.rallyId,
             idempotencyKey,
+            mutationResult.result,
+            params.idempotencyTtlMs ?? 86_400_000,
+          );
+        return { success: true };
+      });
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
+  async executeCheckInTransaction(
+    params: CheckInTransactionParams,
+    mutation: (current: { readonly userState: UserRallyState }) => CheckInTransactionMutation,
+  ): Promise<{ readonly success: boolean; readonly error?: string }> {
+    try {
+      return await this.runTransaction(params.rallyId, async () => {
+        const userState =
+          (await this.getUserState(params.rallyId, params.userId)) ?? params.initialUserState;
+        if (userState === undefined)
+          return { success: false, error: "A user state is required for this transaction." };
+        const mutationResult = mutation({ userState });
+        if (mutationResult.error !== undefined) {
+          await this.recordAuditLog(mutationResult.auditLog);
+          if (params.idempotencyKey !== undefined && mutationResult.result !== undefined)
+            await this.saveIdempotentResult(
+              params.rallyId,
+              params.idempotencyKey,
+              mutationResult.result,
+              params.idempotencyTtlMs ?? 86_400_000,
+            );
+          return { success: false, error: mutationResult.error };
+        }
+        await this.saveUserState(params.rallyId, params.userId, mutationResult.nextUserState);
+        await this.recordAuditLog(mutationResult.auditLog);
+        if (params.idempotencyKey !== undefined && mutationResult.result !== undefined)
+          await this.saveIdempotentResult(
+            params.rallyId,
+            params.idempotencyKey,
             mutationResult.result,
             params.idempotencyTtlMs ?? 86_400_000,
           );

@@ -39,9 +39,14 @@ export type CheckInResponse =
 export interface ServerOptions {
   readonly lockTtlMs?: number;
   readonly idempotencyTtlMs?: number;
-  readonly authenticate?: (request: Request) => Promise<string | null> | string | null;
+  readonly authenticate?: (
+    request: Request,
+  ) => Promise<string | AuthenticationContext | null> | string | AuthenticationContext | null;
   readonly customValidators?: Readonly<Record<string, import("@stamprally/core").Validator>>;
   readonly now?: () => string;
+}
+export interface AuthenticationContext {
+  readonly authenticatedUserId: string;
 }
 export type { UserRallyState } from "@stamprally/core";
 export {
@@ -50,6 +55,8 @@ export {
   type SqlTransactionDatabase,
 } from "./examples/transaction.js";
 export type {
+  CheckInTransactionMutation,
+  CheckInTransactionParams,
   ClaimRewardTransactionMutation,
   ClaimRewardTransactionParams,
   InMemoryServerPersistenceOptions,
@@ -57,4 +64,11 @@ export type {
   UserClaimRecord,
 } from "./persistence.js";
 export { InMemoryServerPersistenceAdapter } from "./persistence.js";
+export {
+  type RequestValidationError,
+  type RequestValidationResult,
+  validateCheckInRequest,
+  validateClaimRewardRequest,
+  validateSyncRequest,
+} from "./security.js";
 export { StampRallyServer } from "./server.js";

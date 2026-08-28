@@ -1,3 +1,5 @@
+"use client";
+
 import type {
   CheckInOptions,
   CheckInResult,
@@ -16,6 +18,10 @@ import type {
   StampRallyState,
   UserRallyState,
 } from "@stamprally/core";
+import { DEFAULT_UI_DICTIONARY } from "./locales/index.js";
+
+export { DEFAULT_UI_DICTIONARY, UI_DICTIONARIES } from "./locales/index.js";
+
 import {
   calculateProgress,
   evaluateSpotStatus,
@@ -135,7 +141,8 @@ const label = <TLocale extends string>(
   locale: TLocale,
   key: string,
   fallback: string,
-): string => dictionary?.[locale]?.[key] ?? fallback;
+): string =>
+  dictionary?.[locale]?.[key] ?? DEFAULT_UI_DICTIONARY[locale as "ja" | "en"]?.[key] ?? fallback;
 const join = (...names: ReadonlyArray<string | undefined>): string | undefined => {
   const value = names.filter((name): name is string => name !== undefined && name !== "").join(" ");
   return value === "" ? undefined : value;
@@ -535,7 +542,7 @@ export function RallyViewer<TLocale extends string = string>({
                   )}
                   {renderStatusBadge?.({ status }) ?? (
                     <span className={classNames.badge} style={styles.badge}>
-                      {status === "LOCKED" ? "🔒 LOCKED" : status}
+                      {label(dictionary, locale, `status.${status.toLowerCase()}`, status)}
                     </span>
                   )}
                   {locked && (
@@ -630,7 +637,6 @@ export function StampSheet<TLocale extends string = string>({
       <div>
         {config.spots.map((spot) => {
           const status: SpotStatus = evaluateSpotStatus(spot, currentState);
-          const claimed = status === "CLAIMED";
           const props: SpotCardProps<TLocale> = {
             spot,
             state: currentState,
@@ -639,7 +645,11 @@ export function StampSheet<TLocale extends string = string>({
             ...(dictionary === undefined ? {} : { dictionary }),
             children: (
               <span className={classNames.slot} style={styles.slot}>
-                {status === "LOCKED" ? "🔒" : claimed ? "✓" : "○"}
+                {status === "LOCKED"
+                  ? label(dictionary, locale, "status.locked", "🔒 LOCKED")
+                  : status === "CLAIMED"
+                    ? label(dictionary, locale, "status.claimed", "CLAIMED")
+                    : label(dictionary, locale, "status.unclaimed", "UNCLAIMED")}
               </span>
             ),
           };
@@ -661,7 +671,7 @@ export function StampSheet<TLocale extends string = string>({
                     <small>{resolveLocalizedText(spot.description, locale)}</small>
                   )}{" "}
                   {renderStatusBadge?.({ status }) ??
-                    (status === "LOCKED" ? "🔒" : claimed ? "✓" : "○")}
+                    label(dictionary, locale, `status.${status.toLowerCase()}`, status)}
                 </span>
               )}
             </div>

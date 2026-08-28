@@ -1,4 +1,4 @@
-import { type AdminRallyConfig, toPublicConfig } from "@stamprally/core";
+import { type AdminRallyConfig, toPublicConfig, type UserRallyState } from "@stamprally/core";
 import { describe, expect, it } from "vitest";
 import { InMemoryServerPersistenceAdapter, StampRallyServer } from "../src/index.js";
 
@@ -23,6 +23,78 @@ const config: AdminRallyConfig = {
   ],
 };
 describe("StampRallyServer", () => {
+  it("keeps check-in state, audit, and idempotency atomic", async () => {
+    class FailingAuditPersistence extends InMemoryServerPersistenceAdapter {
+      override async recordAuditLog(): Promise<void> {
+        throw new Error("audit unavailable");
+      }
+    }
+    const persistence = new FailingAuditPersistence();
+    const server = new StampRallyServer(config, persistence);
+    const result = await server.checkIn({
+      rallyId: "rally",
+      userId: "alice",
+      spotId: "s1",
+      context: { type: "passcode", code: "OPEN" },
+      idempotencyKey: "check-atomic",
+    });
+    expect(result).toMatchObject({ ok: false, code: "PERSISTENCE_FAILED" });
+    expect(await persistence.getUserState("rally", "alice")).toBeNull();
+    expect(persistence.getAuditLogs()).toHaveLength(0);
+    expect(
+      await persistence.getIdempotentResult("rally", "check-in:rally:alice:check-atomic"),
+    ).toBeNull();
+  });
+
+  it("ignores body identity and client time at the HTTP boundary", async () => {
+    const persistence = new InMemoryServerPersistenceAdapter();
+    const server = new StampRallyServer(config, persistence, {
+      now: () => "2026-02-03T04:05:06.000Z",
+    });
+    const response = await server.handle(
+      new Request("https://example.test/rally/check-in", {
+        method: "POST",
+        body: JSON.stringify({
+          rallyId: "rally",
+          userId: "attacker",
+          spotId: "s1",
+          context: { type: "passcode", code: "OPEN" },
+          idempotencyKey: "http-check",
+          now: "1999-01-01T00:00:00.000Z",
+        }),
+      }),
+    );
+    const body = (await response.json()) as {
+      readonly ok: boolean;
+      readonly state?: UserRallyState;
+    };
+    expect(response.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.state?.userId).toBe("anonymous");
+    expect(body.state?.records[0]?.acquiredAt).toBe("2026-02-03T04:05:06.000Z");
+  });
+
+  it("uses the authenticated identity instead of the body identity", async () => {
+    const persistence = new InMemoryServerPersistenceAdapter();
+    const server = new StampRallyServer(config, persistence, {
+      authenticate: () => "trusted-user",
+    });
+    const response = await server.handle(
+      new Request("https://example.test/rally/check-in", {
+        method: "POST",
+        body: JSON.stringify({
+          rallyId: "rally",
+          userId: "attacker",
+          spotId: "s1",
+          context: { type: "passcode", code: "OPEN" },
+          idempotencyKey: "auth-check",
+        }),
+      }),
+    );
+    const body = (await response.json()) as { readonly state?: UserRallyState };
+    expect(body.state?.userId).toBe("trusted-user");
+  });
+
   it("compensates stock and user state when the success audit write fails", async () => {
     class FailingAuditPersistence extends InMemoryServerPersistenceAdapter {
       #auditCalls = 0;

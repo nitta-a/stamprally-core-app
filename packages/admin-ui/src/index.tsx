@@ -1,3 +1,5 @@
+"use client";
+
 import type {
   AdminRallyConfig,
   CheckInCondition,
@@ -1462,18 +1464,93 @@ export function GeneralSettingsForm<
 }: GeneralSettingsFormProps<TLocale, TMeta>): ReactElement {
   const activeLocale = locale ?? ("en" as TLocale);
   return (
-    <label>
-      {text(dictionary, activeLocale, "title", "Rally title")}
-      <input
-        value={resolveLocalizedText(config.title, activeLocale)}
-        onChange={(event) =>
-          onChange({
-            ...config,
-            title: updateLocalizedField(config.title, activeLocale, event.target.value),
-          })
-        }
-      />
-    </label>
+    <section aria-label={text(dictionary, activeLocale, "generalSettings", "General settings")}>
+      <label>
+        {text(dictionary, activeLocale, "title", "Rally title")}
+        <input
+          value={resolveLocalizedText(config.title, activeLocale)}
+          onChange={(event) =>
+            onChange({
+              ...config,
+              title: updateLocalizedField(config.title, activeLocale, event.target.value),
+            })
+          }
+        />
+      </label>
+      <label>
+        {text(dictionary, activeLocale, "inventoryLimit", "Global inventory limit")}
+        <input
+          type="number"
+          min={0}
+          placeholder={text(dictionary, activeLocale, "inventoryLimitPlaceholder", "Unlimited")}
+          title={text(
+            dictionary,
+            activeLocale,
+            "inventoryOverrideHelp",
+            "Individual reward limits override this global limit.",
+          )}
+          value={config.inventory?.global ?? ""}
+          onChange={(event) => {
+            const value = event.target.value;
+            const inventory = { ...(config.inventory ?? {}) };
+            if (value === "") delete inventory.global;
+            else inventory.global = Number(value);
+            onChange({ ...config, inventory });
+          }}
+        />
+      </label>
+      <label>
+        {text(dictionary, activeLocale, "inventoryMode", "Inventory aggregation")}
+        <select
+          value={config.inventoryMode ?? "shared"}
+          title={text(
+            dictionary,
+            activeLocale,
+            "inventoryModeHelp",
+            "Individual reward limits override this setting.",
+          )}
+          onChange={(event) =>
+            onChange({
+              ...config,
+              inventoryMode: event.target.value as NonNullable<AdminRallyConfig["inventoryMode"]>,
+            })
+          }
+        >
+          <option value="shared">
+            {text(dictionary, activeLocale, "inventoryShared", "Shared")}
+          </option>
+          <option value="per_reward">
+            {text(dictionary, activeLocale, "inventoryPerReward", "Per reward")}
+          </option>
+        </select>
+      </label>
+      <label>
+        {text(dictionary, activeLocale, "staffPasscode", "Global staff passcode")}
+        <input
+          type="password"
+          placeholder={text(
+            dictionary,
+            activeLocale,
+            "staffPasscodePlaceholder",
+            "Used unless a reward has its own passcode",
+          )}
+          title={text(
+            dictionary,
+            activeLocale,
+            "staffPasscodeHelp",
+            "Individual spot or reward settings override this global passcode.",
+          )}
+          value={config.staffPasscode ?? ""}
+          onChange={(event) => {
+            const value = event.target.value;
+            if (value === "") {
+              const { staffPasscode: _staffPasscode, ...withoutPasscode } = config;
+              onChange(withoutPasscode);
+            } else onChange({ ...config, staffPasscode: value });
+          }}
+        />
+      </label>
+    </section>
   );
 }
 

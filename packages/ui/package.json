@@ -1,6 +1,6 @@
 {
   "name": "@stamprally/ui",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "description": "Accessible participant UI components for stamp rallies.",
   "license": "MIT",
   "repository": {
@@ -13,6 +13,9 @@
   },
   "homepage": "https://github.com/nitta-a/stamprally-core-app#readme",
   "type": "module",
+  "engines": {
+    "node": ">=22.0.0"
+  },
   "sideEffects": false,
   "files": [
     "dist"
@@ -29,7 +32,7 @@
     "./styles.css": "./dist/index.css"
   },
   "scripts": {
-    "build": "tsup && node ../../scripts/copy-package-css.mjs packages/ui",
+    "build": "tsup && node ../../scripts/copy-package-css.mjs packages/ui && node ../../scripts/ensure-client-directive.mjs .",
     "dev": "tsup --watch",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json"

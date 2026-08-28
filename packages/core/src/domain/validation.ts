@@ -348,6 +348,13 @@ function validate(value: unknown, isPublic: boolean): ReadonlyArray<ValidationEr
     if (hasOwn(value, "inventory") && value.inventory !== undefined && !isRecord(value.inventory))
       add(errors, "$.inventory", "Expected an object.", "invalid_type");
     if (
+      hasOwn(value, "inventoryMode") &&
+      value.inventoryMode !== undefined &&
+      value.inventoryMode !== "shared" &&
+      value.inventoryMode !== "per_reward"
+    )
+      add(errors, "$.inventoryMode", "Expected shared or per_reward.", "invalid_enum");
+    if (
       hasOwn(value, "serverMetadata") &&
       value.serverMetadata !== undefined &&
       !isRecord(value.serverMetadata)
@@ -361,7 +368,7 @@ function validate(value: unknown, isPublic: boolean): ReadonlyArray<ValidationEr
       add(errors, "$.publicMetadata", "Expected an object.", "invalid_type");
     optionalString(value, "serverEndpoint", "$", errors);
   } else {
-    for (const key of ["staffPasscode", "serverMetadata", "inventory"])
+    for (const key of ["staffPasscode", "serverMetadata", "inventory", "inventoryMode"])
       if (hasOwn(value, key))
         add(errors, `$.${key}`, "Private field is not allowed.", "private_field");
     optionalString(value, "serverEndpoint", "$", errors);
@@ -369,8 +376,107 @@ function validate(value: unknown, isPublic: boolean): ReadonlyArray<ValidationEr
   return errors;
 }
 
+/** Validates relationships that can only be checked after all entities exist. */
+export function validateRallyConfigRelations(
+  config: AdminRallyConfig | PublicRallyConfig,
+): ReadonlyArray<ValidationError> {
+  const errors: ValidationError[] = [];
+  const spotIds = new Set<string>();
+  const rewardIds = new Set<string>();
+  const orderIndexes = new Map<number, number>();
+
+  config.spots.forEach((spot, index) => {
+    if (spotIds.has(spot.id))
+      add(errors, `spots[${index}].id`, "Spot ID must be unique.", "duplicate_spot_id");
+    spotIds.add(spot.id);
+    const previousIndex = orderIndexes.get(spot.orderIndex);
+    if (previousIndex !== undefined)
+      add(
+        errors,
+        `spots[${index}].orderIndex`,
+        `orderIndex duplicates spots[${previousIndex}].`,
+        "duplicate_order_index",
+      );
+    else orderIndexes.set(spot.orderIndex, index);
+    if (spot.orderIndex < 0)
+      add(
+        errors,
+        `spots[${index}].orderIndex`,
+        "orderIndex must not be negative.",
+        "negative_order_index",
+      );
+    spot.prerequisites?.forEach((prerequisite, prerequisiteIndex) => {
+      if (
+        !spotIds.has(prerequisite) &&
+        !config.spots.some((candidate) => candidate.id === prerequisite)
+      )
+        add(
+          errors,
+          `spots[${index}].prerequisites[${prerequisiteIndex}]`,
+          "Prerequisite spot does not exist.",
+          "missing_prerequisite",
+        );
+    });
+  });
+
+  config.rewards.forEach((reward, index) => {
+    if (rewardIds.has(reward.id))
+      add(errors, `rewards[${index}].id`, "Reward ID must be unique.", "duplicate_reward_id");
+    rewardIds.add(reward.id);
+    const visit = (condition: RewardUnlockCondition, path: string): void => {
+      if (condition.type === "stamps")
+        condition.stampIds.forEach((stampId, stampIndex) => {
+          if (!spotIds.has(stampId))
+            add(
+              errors,
+              `${path}.stampIds[${stampIndex}]`,
+              "Referenced spot does not exist.",
+              "missing_reward_spot",
+            );
+        });
+      else if (condition.type === "all" || condition.type === "any")
+        condition.conditions.forEach((nested, nestedIndex) => {
+          visit(nested, `${path}.conditions[${nestedIndex}]`);
+        });
+    };
+    reward.conditions?.forEach((condition, conditionIndex) => {
+      visit(condition, `rewards[${index}].conditions[${conditionIndex}]`);
+    });
+  });
+
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+  const cycleNodes = new Set<string>();
+  const visitSpot = (spotId: string): void => {
+    if (visiting.has(spotId)) {
+      cycleNodes.add(spotId);
+      return;
+    }
+    if (visited.has(spotId)) return;
+    visiting.add(spotId);
+    const spot = config.spots.find((candidate) => candidate.id === spotId);
+    spot?.prerequisites?.forEach(visitSpot);
+    visiting.delete(spotId);
+    visited.add(spotId);
+  };
+  config.spots.forEach((spot) => {
+    visitSpot(spot.id);
+  });
+  cycleNodes.forEach((spotId) => {
+    const index = config.spots.findIndex((spot) => spot.id === spotId);
+    add(
+      errors,
+      `spots[${index}].prerequisites`,
+      "Prerequisites must form a DAG.",
+      "cyclic_prerequisites",
+    );
+  });
+  return errors;
+}
+
 export function safeParseAdminConfig(input: unknown): ParseResult<AdminRallyConfig> {
-  const errors = validate(input, false);
+  const errors: ValidationError[] = [...validate(input, false)];
+  if (errors.length === 0) errors.push(...validateRallyConfigRelations(input as AdminRallyConfig));
   return errors.length === 0
     ? { success: true, data: input as AdminRallyConfig }
     : { success: false, errors };
@@ -383,7 +489,8 @@ export function parseAdminConfig(input: unknown): AdminRallyConfig {
 }
 
 export function safeParsePublicConfig(input: unknown): ParseResult<PublicRallyConfig> {
-  const errors = validate(input, true);
+  const errors: ValidationError[] = [...validate(input, true)];
+  if (errors.length === 0) errors.push(...validateRallyConfigRelations(input as PublicRallyConfig));
   return errors.length === 0
     ? { success: true, data: input as PublicRallyConfig }
     : { success: false, errors };

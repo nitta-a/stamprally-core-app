@@ -11,7 +11,11 @@ export function calculateProgress(state: StampRallyState, config: RallyConfig): 
   const acquired = new Set(
     state.records.map((record) => record.stampId).filter((id) => ids.has(id)),
   );
-  const remaining = config.spots.filter((spot) => !acquired.has(spot.id));
+  const remaining = config.spots.filter(
+    (spot) =>
+      !acquired.has(spot.id) &&
+      (spot.prerequisites === undefined || spot.prerequisites.every((id) => acquired.has(id))),
+  );
   return {
     acquired: acquired.size,
     total: config.spots.length,

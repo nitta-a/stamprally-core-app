@@ -74,4 +74,42 @@ describe("OfflineQueue", () => {
     expect(restored.pendingCount).toBe(0);
     expect(restored.syncState).toBe("idle");
   });
+
+  it("prevents two instances from draining the same queue concurrently", async () => {
+    const storage = new InMemoryOfflineQueueStorage();
+    const first = new OfflineQueue({ storage, key: "shared" });
+    const second = new OfflineQueue({ storage, key: "shared" });
+    await first.enqueueCheckIn({
+      rallyId: "r",
+      userId: "u",
+      spotId: "s",
+      proofData: "proof",
+      idempotencyKey: "shared-op",
+      now: "",
+      state: { rallyId: "r", userId: "u", records: [], rewards: [], updatedAt: "" },
+    });
+    await second.initialize();
+    let sends = 0;
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const sender = async () => {
+      sends += 1;
+      await gate;
+      return {
+        ok: true as const,
+        value: {
+          state: { rallyId: "r", userId: "u", records: [], rewards: [], updatedAt: "" },
+          record: { stampId: "s", acquiredAt: "" },
+        },
+      };
+    };
+    const running = first.sync(sender);
+    await Promise.resolve();
+    await second.sync(sender);
+    release?.();
+    await running;
+    expect(sends).toBe(1);
+  });
 });

@@ -17,6 +17,7 @@ export type {
   CheckInCondition,
   ExternalReference,
   FontFamily,
+  InventoryAggregationMode,
   LocaleDictionary,
   LocalizedString,
   LocalizedText,
@@ -56,4 +57,5 @@ export {
   parsePublicConfig,
   safeParseAdminConfig,
   safeParsePublicConfig,
+  validateRallyConfigRelations,
 } from "./validation.js";
