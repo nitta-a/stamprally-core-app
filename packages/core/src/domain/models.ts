@@ -310,6 +310,7 @@ export interface StampRecord {
   readonly acquiredAt: string;
   readonly metadata?: Readonly<Record<string, unknown>>;
 }
+export type SpotStatus = "UNCLAIMED" | "CLAIMED" | "LOCKED" | "VERIFYING";
 export type RewardStatus = "LOCKED" | "AVAILABLE" | "CONSUMED" | "EXPIRED";
 export interface RewardState {
   readonly rewardId: string;

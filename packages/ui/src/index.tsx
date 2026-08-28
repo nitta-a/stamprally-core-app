@@ -3,6 +3,7 @@ import type {
   CheckInResult,
   ClaimOptions,
   ClaimResult,
+  SpotStatus as CoreSpotStatus,
   LocaleDictionary,
   PublicCheckInCondition,
   PublicRallyConfig,
@@ -17,6 +18,7 @@ import type {
 } from "@stamprally/core";
 import {
   calculateProgress,
+  evaluateSpotStatus,
   getCurrentGeoContext,
   isNfcSupported,
   isQrSupported,
@@ -54,7 +56,7 @@ export type ViewerStyle = CSSProperties & {
 };
 export type ViewerStyles = Partial<Record<ViewerClassName, ViewerStyle>>;
 export type ViewerClassNames = Partial<Record<ViewerClassName, string>>;
-export type SpotStatus = "locked" | "available" | "claimed" | "verifying" | "error";
+export type SpotStatus = CoreSpotStatus;
 
 export interface ConditionRendererProps<TLocale extends string = string> {
   readonly spot: PublicSpotItem<TLocale>;
@@ -315,19 +317,42 @@ function DefaultRewardCard<TLocale extends string>({
   readonly styles?: ViewerStyles;
 }): ReactElement {
   const status = state?.status ?? "LOCKED";
+  const remaining =
+    reward.stockLimit === undefined
+      ? undefined
+      : Math.max(0, reward.stockLimit - (state?.redeemedCount ?? 0));
+  const expiry = reward.validUntil === undefined ? undefined : new Date(reward.validUntil);
   return (
-    <button
-      type="button"
-      className={join(classNames?.reward, classNames?.button)}
-      style={styles?.reward ?? styles?.button}
-      disabled={status !== "AVAILABLE" || onClaim === undefined}
-      onClick={() => {
-        if (onClaim !== undefined) void onClaim(reward.id);
-      }}
-    >
-      {resolveLocalizedText(reward.title, locale)} (
-      {label(dictionary, locale, `status.${status.toLowerCase()}`, status)})
-    </button>
+    <article className={classNames?.reward} style={styles?.reward}>
+      <h3>{resolveLocalizedText(reward.title, locale)}</h3>
+      {reward.description !== undefined && (
+        <p>{resolveLocalizedText(reward.description, locale)}</p>
+      )}
+      {remaining !== undefined && (
+        <span>
+          {remaining <= 3
+            ? label(dictionary, locale, "reward.lowStock", "Only a few left")
+            : `${remaining} ${label(dictionary, locale, "reward.remaining", "remaining")}`}
+        </span>
+      )}
+      {expiry !== undefined && !Number.isNaN(expiry.getTime()) && (
+        <time dateTime={reward.validUntil}>
+          {label(dictionary, locale, "reward.validUntil", "Valid until")}:{" "}
+          {expiry.toLocaleString(locale)}
+        </time>
+      )}
+      <button
+        type="button"
+        className={join(classNames?.reward, classNames?.button)}
+        style={styles?.button}
+        disabled={status !== "AVAILABLE" || onClaim === undefined}
+        onClick={() => {
+          if (onClaim !== undefined) void onClaim(reward.id);
+        }}
+      >
+        {label(dictionary, locale, `status.${status.toLowerCase()}`, status)}
+      </button>
+    </article>
   );
 }
 
@@ -386,12 +411,25 @@ export function RallyViewer<TLocale extends string = string>({
   const submit = useCallback(
     async (spotId: string, proof: unknown): Promise<CheckInResult | undefined> => {
       if (checkIn === undefined) return undefined;
+      const target = config.spots.find((spot) => spot.id === spotId);
+      if (target !== undefined && evaluateSpotStatus(target, currentState) === "LOCKED") {
+        const result: CheckInResult = {
+          ok: false,
+          error: {
+            code: "PREREQUISITES_NOT_MET",
+            spotId,
+            message: "Complete the prerequisite spots before checking in.",
+          },
+        };
+        setFeedback(result);
+        return result;
+      }
       setBusy(spotId);
       const result = await checkIn(spotId, proof).finally(() => setBusy(null));
       setFeedback(result);
       return result;
     },
-    [checkIn],
+    [checkIn, config.spots, currentState],
   );
   return (
     <section
@@ -415,17 +453,32 @@ export function RallyViewer<TLocale extends string = string>({
           {progress.acquired}/{progress.total}
         </span>
       </header>
-      {busy !== null && renderVerifyingState?.()}
-      {feedback?.ok === true && renderSuccessFeedback?.(feedback)}
+      {busy !== null &&
+        (renderVerifyingState?.() ?? (
+          <div className={classNames.feedback} style={styles.feedback} role="status">
+            {label(dictionary, locale, "verifying", "Verifying…")}
+          </div>
+        ))}
+      {feedback?.ok === true &&
+        (renderSuccessFeedback?.(feedback) ?? (
+          <div className={classNames.feedback} style={styles.feedback} role="status">
+            {label(dictionary, locale, "verified", "Verified")}
+          </div>
+        ))}
       {feedback?.ok === false &&
-        renderErrorFeedback?.(
+        (renderErrorFeedback?.(
           "message" in feedback.error ? feedback.error.message : feedback.error.code,
-        )}
+        ) ?? (
+          <div className={classNames.feedback} style={styles.feedback} role="alert">
+            {"message" in feedback.error ? feedback.error.message : feedback.error.code}
+          </div>
+        ))}
       <div>
         {config.spots.map((spot) => {
-          const claimed = currentState.records.some((record) => record.stampId === spot.id);
           const status: SpotStatus =
-            busy === spot.id ? "verifying" : claimed ? "claimed" : "available";
+            busy === spot.id ? "VERIFYING" : evaluateSpotStatus(spot, currentState);
+          const claimed = status === "CLAIMED";
+          const locked = status === "LOCKED";
           const children = spot.conditions.map((condition) => {
             const Renderer = customConditionRenderers[condition.type] ?? DefaultCondition;
             return (
@@ -439,7 +492,7 @@ export function RallyViewer<TLocale extends string = string>({
                   condition={condition}
                   locale={locale}
                   {...(dictionary === undefined ? {} : { dictionary })}
-                  disabled={busy !== null || claimed}
+                  disabled={busy !== null || claimed || locked}
                   {...(Object.keys(classNames).length === 0 ? {} : { classNames })}
                   {...(Object.keys(styles).length === 0 ? {} : { styles })}
                   onSubmit={(proof) => submit(spot.id, proof)}
@@ -456,14 +509,44 @@ export function RallyViewer<TLocale extends string = string>({
             children,
           };
           return (
-            <div key={spot.id} className={classNames.card} style={styles.card}>
+            <div
+              key={spot.id}
+              className={classNames.card}
+              style={styles.card}
+              data-status={status}
+              aria-disabled={locked}
+            >
               {renderSpotCard?.(props) ?? (
                 <article>
+                  {spot.iconUrl !== undefined && (
+                    <img src={spot.iconUrl} alt="" width={32} height={32} />
+                  )}
                   <h2>{resolveLocalizedText(spot.name, locale)}</h2>
+                  {spot.imageUrl !== undefined && <img src={spot.imageUrl} alt="" loading="lazy" />}
+                  {spot.description !== undefined && (
+                    <p>{resolveLocalizedText(spot.description, locale)}</p>
+                  )}
+                  {spot.hint !== undefined && <p>{resolveLocalizedText(spot.hint, locale)}</p>}
+                  {spot.externalReferences !== undefined && spot.externalReferences.length > 0 && (
+                    <span className={classNames.badge} style={styles.badge}>
+                      {label(dictionary, locale, "externalReferences", "External references")} (
+                      {spot.externalReferences.length})
+                    </span>
+                  )}
                   {renderStatusBadge?.({ status }) ?? (
                     <span className={classNames.badge} style={styles.badge}>
-                      {status}
+                      {status === "LOCKED" ? "🔒 LOCKED" : status}
                     </span>
+                  )}
+                  {locked && (
+                    <p role="status">
+                      {label(
+                        dictionary,
+                        locale,
+                        "prerequisitesNotMet",
+                        "Complete the prerequisite spots before checking in.",
+                      )}
+                    </p>
                   )}
                   {children}
                 </article>
@@ -546,8 +629,8 @@ export function StampSheet<TLocale extends string = string>({
       </header>
       <div>
         {config.spots.map((spot) => {
-          const claimed = currentState.records.some((record) => record.stampId === spot.id);
-          const status: SpotStatus = claimed ? "claimed" : "available";
+          const status: SpotStatus = evaluateSpotStatus(spot, currentState);
+          const claimed = status === "CLAIMED";
           const props: SpotCardProps<TLocale> = {
             spot,
             state: currentState,
@@ -556,16 +639,29 @@ export function StampSheet<TLocale extends string = string>({
             ...(dictionary === undefined ? {} : { dictionary }),
             children: (
               <span className={classNames.slot} style={styles.slot}>
-                {claimed ? "✓" : "○"}
+                {status === "LOCKED" ? "🔒" : claimed ? "✓" : "○"}
               </span>
             ),
           };
           return (
-            <div key={spot.id} className={classNames.card} style={styles.card}>
+            <div
+              key={spot.id}
+              className={classNames.card}
+              style={styles.card}
+              data-status={status}
+              aria-disabled={status === "LOCKED"}
+            >
               {renderSpotCard?.(props) ?? (
                 <span className={classNames.slot} style={styles.slot}>
+                  {spot.iconUrl !== undefined && (
+                    <img src={spot.iconUrl} alt="" width={24} height={24} />
+                  )}
                   {resolveLocalizedText(spot.name, locale)}{" "}
-                  {renderStatusBadge?.({ status }) ?? (claimed ? "✓" : "○")}
+                  {spot.description !== undefined && (
+                    <small>{resolveLocalizedText(spot.description, locale)}</small>
+                  )}{" "}
+                  {renderStatusBadge?.({ status }) ??
+                    (status === "LOCKED" ? "🔒" : claimed ? "✓" : "○")}
                 </span>
               )}
             </div>

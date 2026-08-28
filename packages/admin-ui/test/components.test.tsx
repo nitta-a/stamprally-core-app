@@ -69,7 +69,22 @@ describe("AdminRallyEditor", () => {
           conditions: [{ type: "passcode" as const, code: "2" }],
         },
       ],
-      rewards: [],
+      rewards: [
+        {
+          id: "r1",
+          title: "First",
+          type: "digital" as const,
+          redemptionMethod: "server_claim" as const,
+          requiredStampCount: 1,
+        },
+        {
+          id: "r2",
+          title: "Second",
+          type: "digital" as const,
+          redemptionMethod: "server_claim" as const,
+          requiredStampCount: 2,
+        },
+      ],
     };
     const { result } = renderHook(() => useAdminRallyEditor(initial));
     act(() => result.current.duplicateSpot("s1"));
@@ -82,5 +97,24 @@ describe("AdminRallyEditor", () => {
     expect(result.current.config.spots).toHaveLength(3);
     act(() => result.current.reorderSpots(0, 2));
     expect(result.current.config.spots[2]?.orderIndex).toBe(2);
+    act(() => {
+      result.current.update({ title: "Updated" });
+      result.current.update({ description: "Description" });
+      result.current.reorderRewards(0, 1);
+    });
+    expect(result.current.config.title).toBe("Updated");
+    expect(result.current.config.description).toBe("Description");
+    expect(result.current.config.rewards.map((reward) => reward.id)).toEqual(["r2", "r1"]);
+  });
+
+  it("accepts a new external config when the draft is clean", () => {
+    const initial = { id: "r", version: "1", title: "Initial", spots: [], rewards: [] };
+    const { result, rerender } = renderHook(
+      ({ config }: { config: typeof initial }) => useAdminRallyEditor(config),
+      { initialProps: { config: initial } },
+    );
+    const next = { ...initial, title: "External" };
+    rerender({ config: next });
+    expect(result.current.config.title).toBe("External");
   });
 });

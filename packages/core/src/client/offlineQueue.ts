@@ -1,6 +1,12 @@
 import type { UserRallyState } from "../domain/index.js";
 import { resolveRallyStateConflict } from "../engine/sync.js";
-import type { CheckInRequest, CheckInResult, ClaimRequest, ClaimResult } from "./client.js";
+import type {
+  CheckInRequest,
+  CheckInResult,
+  ClaimRequest,
+  ClaimResult,
+  ClientError,
+} from "./client.js";
 
 export type OfflineOperation =
   | { readonly kind: "checkIn"; readonly request: CheckInRequest }
@@ -27,6 +33,10 @@ export interface OfflineQueueOptions {
     removeItem?(key: string): void;
   } | null;
   readonly key?: string;
+  /** Rally scope used by the default durable key. */
+  readonly rallyId?: string;
+  /** User scope used by the default durable key. */
+  readonly userId?: string | null;
   readonly databaseName?: string;
   readonly conflictPolicy?: SyncConflictPolicy;
   readonly onSyncConflict?:
@@ -42,10 +52,35 @@ export interface OfflineConflict {
 
 export type OfflineSender = (
   operation: OfflineOperation,
-) => Promise<OfflineResult | OfflineConflictResult>;
+) => Promise<OfflineResult | OfflineConflictResult | OfflineOperationResponse>;
+export type OfflineOperationStatus = "ACCEPTED" | "REJECTED_PERMANENT" | "RETRYABLE_ERROR";
+export interface OfflineOperationError {
+  readonly code: string;
+  readonly message: string;
+  readonly [key: string]: unknown;
+}
+export type OfflineOperationResponse =
+  | {
+      readonly status: "ACCEPTED";
+      readonly result?: OfflineResult | OfflineConflictResult;
+      readonly state?: UserRallyState;
+    }
+  | {
+      readonly status: "REJECTED_PERMANENT";
+      readonly error?: ClientError | OfflineOperationError;
+      readonly reason?: ClientError | OfflineOperationError;
+      readonly state?: UserRallyState;
+    }
+  | {
+      readonly status: "RETRYABLE_ERROR";
+      readonly error?: ClientError | OfflineOperationError;
+      readonly reason?: ClientError | OfflineOperationError;
+    };
 export interface OfflineSyncResultEvent {
   readonly operation: OfflineOperation;
-  readonly result: OfflineResult | OfflineConflictResult;
+  readonly result?: OfflineResult | OfflineConflictResult;
+  readonly status?: OfflineOperationStatus;
+  readonly error?: ClientError | OfflineOperationError;
   readonly state?: UserRallyState;
 }
 export type OfflineSyncResultListener = (event: OfflineSyncResultEvent) => void | Promise<void>;
@@ -160,10 +195,30 @@ function operationId(operation: OfflineOperation): string {
     : `claimReward:${operation.request.rallyId}:${operation.request.userId ?? "anonymous"}:${operation.request.idempotencyKey}`;
 }
 
+function requestScope(operation: OfflineOperation): { rallyId: string; userId: string | null } {
+  return {
+    rallyId: operation.request.rallyId,
+    userId: operation.request.userId,
+  };
+}
+
+function errorValue(value: unknown, fallbackCode: string): OfflineOperationError {
+  if (typeof value === "object" && value !== null) {
+    const candidate = value as Record<string, unknown>;
+    if (typeof candidate.code === "string" && typeof candidate.message === "string")
+      return { ...candidate, code: candidate.code, message: candidate.message };
+  }
+  if (value instanceof Error) return { code: fallbackCode, message: value.message };
+  if (typeof value === "string") return { code: fallbackCode, message: value };
+  return { code: fallbackCode, message: "Offline operation was rejected." };
+}
+
 /** Durable, sequential retry queue for operations created while disconnected. */
 export class OfflineQueue {
   readonly #storage: OfflineQueueStorage;
-  readonly #key: string;
+  readonly #configuredKey: string | undefined;
+  #rallyId: string | undefined;
+  #userId: string | null;
   readonly #conflictPolicy: SyncConflictPolicy;
   readonly #onSyncConflict: OfflineQueueOptions["onSyncConflict"];
   #operations: OfflineOperation[] = [];
@@ -179,7 +234,9 @@ export class OfflineQueue {
     else if (options.storageLike !== undefined && options.storageLike !== null)
       this.#storage = new LocalStorageQueueStorage(options.storageLike);
     else this.#storage = defaultStorage(options.databaseName);
-    this.#key = options.key ?? "stamprally:offline-queue";
+    this.#configuredKey = options.key;
+    this.#rallyId = options.rallyId;
+    this.#userId = options.userId ?? null;
     this.#conflictPolicy = options.conflictPolicy ?? "server_wins";
     this.#onSyncConflict = options.onSyncConflict;
   }
@@ -200,14 +257,47 @@ export class OfflineQueue {
     return this.#conflictPolicy;
   }
 
+  get storageKey(): string {
+    return this.#storageKey();
+  }
+
+  get rallyId(): string | undefined {
+    return this.#rallyId;
+  }
+
+  get userId(): string | null {
+    return this.#userId;
+  }
+
   setSyncResultListener(listener: OfflineSyncResultListener | undefined): void {
     this.#syncResultListener = listener;
   }
 
   async initialize(): Promise<void> {
     if (this.#loaded) return;
-    this.#operations = [...(await this.#storage.load(this.#key))];
+    this.#operations = [...(await this.#storage.load(this.#storageKey()))];
     this.#loaded = true;
+  }
+
+  /** Selects a rally/user queue scope and loads its pending operations. */
+  async setScope(rallyId: string, userId: string | null): Promise<void> {
+    if (this.#configuredKey !== undefined) {
+      this.#rallyId = rallyId;
+      this.#userId = userId;
+      return this.initialize();
+    }
+    if (this.#rallyId === rallyId && this.#userId === userId && this.#loaded) return;
+    this.#rallyId = rallyId;
+    this.#userId = userId;
+    this.#operations = [];
+    this.#loaded = false;
+    await this.initialize();
+  }
+
+  async switchUser(newUserId: string | null): Promise<void> {
+    if (this.#rallyId === undefined)
+      throw new Error("OfflineQueue.switchUser requires a rally scope.");
+    await this.setScope(this.#rallyId, newUserId);
   }
 
   setSender(sender: OfflineSender): void {
@@ -215,11 +305,17 @@ export class OfflineQueue {
   }
 
   async enqueue(operation: OfflineOperation): Promise<void> {
+    if (this.#configuredKey === undefined) {
+      const scope = requestScope(operation);
+      if (this.#rallyId === undefined) await this.setScope(scope.rallyId, scope.userId);
+      if (this.#rallyId !== scope.rallyId || this.#userId !== scope.userId)
+        throw new Error("Offline operation belongs to another rally or user queue.");
+    }
     await this.initialize();
     const id = operationId(operation);
     if (this.#operations.some((item) => operationId(item) === id)) return;
     this.#operations = [...this.#operations, operation];
-    await this.#storage.save(this.#key, this.#operations);
+    await this.#storage.save(this.#storageKey(), this.#operations);
   }
 
   async enqueueCheckIn(request: CheckInRequest): Promise<void> {
@@ -233,7 +329,7 @@ export class OfflineQueue {
   async clear(): Promise<void> {
     await this.initialize();
     this.#operations = [];
-    await this.#storage.save(this.#key, this.#operations);
+    await this.#storage.save(this.#storageKey(), this.#operations);
   }
 
   async sync(sender = this.#sender): Promise<void> {
@@ -258,25 +354,39 @@ export class OfflineQueue {
       while (this.#operations.length > 0) {
         const operation = this.#operations[0];
         if (operation === undefined) break;
-        let result: OfflineResult | OfflineConflictResult;
+        let rawResult: OfflineResult | OfflineConflictResult | OfflineOperationResponse;
         try {
-          result = await sender(operation);
+          rawResult = await sender(operation);
         } catch (cause) {
-          throw cause instanceof Error ? cause : new Error(String(cause));
+          throw new Error(errorValue(cause, "RETRYABLE_ERROR").message);
         }
+        const response = this.#normalizeResponse(rawResult);
+        if (response.status === "RETRYABLE_ERROR") {
+          const error = errorValue(response.error ?? response.reason, "RETRYABLE_ERROR");
+          await this.#syncResultListener?.({ operation, status: response.status, error });
+          throw new Error(error.message);
+        }
+        const result = response.result;
         const state =
-          "conflict" in result && result.conflict === true
+          response.state ??
+          (result !== undefined && "conflict" in result && result.conflict === true
             ? await this.resolveConflict(operation, result.localState, result.serverState)
-            : "ok" in result && result.ok
+            : result !== undefined && "ok" in result && result.ok
               ? result.value.state
-              : undefined;
+              : undefined);
+        const error =
+          response.status === "REJECTED_PERMANENT"
+            ? errorValue(response.error ?? response.reason, "REJECTED_PERMANENT")
+            : undefined;
+        this.#operations = this.#operations.slice(1);
+        await this.#storage.save(this.#storageKey(), this.#operations);
         await this.#syncResultListener?.({
           operation,
-          result,
+          ...(result === undefined ? {} : { result }),
+          status: response.status,
+          ...(error === undefined ? {} : { error }),
           ...(state === undefined ? {} : { state }),
         });
-        this.#operations = this.#operations.slice(1);
-        await this.#storage.save(this.#key, this.#operations);
       }
       this.#state = "idle";
     } catch (cause) {
@@ -284,6 +394,33 @@ export class OfflineQueue {
       this.#error = cause instanceof Error ? cause : new Error(String(cause));
       throw this.#error;
     }
+  }
+
+  #storageKey(): string {
+    if (this.#configuredKey !== undefined) return this.#configuredKey;
+    return `stamprally:queue:${this.#rallyId ?? "unscoped"}:${this.#userId ?? "anonymous"}`;
+  }
+
+  #normalizeResponse(value: OfflineResult | OfflineConflictResult | OfflineOperationResponse): {
+    readonly status: OfflineOperationStatus;
+    readonly result?: OfflineResult | OfflineConflictResult;
+    readonly state?: UserRallyState;
+    readonly error?: ClientError | OfflineOperationError;
+    readonly reason?: ClientError | OfflineOperationError;
+  } {
+    if ("ok" in value) {
+      if (value.ok === false) {
+        if ("status" in value && value.status === "RETRYABLE_ERROR")
+          return { status: "RETRYABLE_ERROR", error: errorValue(value.error, "RETRYABLE_ERROR") };
+        return { status: "REJECTED_PERMANENT", result: value };
+      }
+      return { status: "ACCEPTED", result: value };
+    }
+    if ("status" in value) {
+      if (value.status === "ACCEPTED") return value;
+      return value;
+    }
+    return { status: "ACCEPTED", result: value };
   }
 
   async resolveConflict(

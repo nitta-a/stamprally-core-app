@@ -25,8 +25,73 @@ function mergeRewardStates(
       merged.set(localReward.rewardId, localReward);
       continue;
     }
-    if (localReward.status === "CONSUMED" && serverReward.status !== "CONSUMED")
-      merged.set(localReward.rewardId, localReward);
+    const winner =
+      localReward.status === "CONSUMED" && serverReward.status !== "CONSUMED"
+        ? localReward
+        : serverReward;
+    merged.set(localReward.rewardId, {
+      ...winner,
+      ...(serverReward.unlockedAt === undefined && localReward.unlockedAt === undefined
+        ? {}
+        : {
+            unlockedAt:
+              serverReward.unlockedAt === undefined
+                ? localReward.unlockedAt
+                : localReward.unlockedAt === undefined
+                  ? serverReward.unlockedAt
+                  : latestTimestamp(serverReward.unlockedAt, localReward.unlockedAt),
+          }),
+      ...(serverReward.consumedAt === undefined && localReward.consumedAt === undefined
+        ? {}
+        : {
+            consumedAt:
+              serverReward.consumedAt === undefined
+                ? localReward.consumedAt
+                : localReward.consumedAt === undefined
+                  ? serverReward.consumedAt
+                  : latestTimestamp(serverReward.consumedAt, localReward.consumedAt),
+          }),
+      ...(serverReward.redeemedCount === undefined && localReward.redeemedCount === undefined
+        ? {}
+        : {
+            redeemedCount: Math.max(
+              serverReward.redeemedCount ?? 0,
+              localReward.redeemedCount ?? 0,
+            ),
+          }),
+      ...(serverReward.userRedemptionCount === undefined &&
+      localReward.userRedemptionCount === undefined
+        ? {}
+        : {
+            userRedemptionCount: Math.max(
+              serverReward.userRedemptionCount ?? 0,
+              localReward.userRedemptionCount ?? 0,
+            ),
+          }),
+    });
+  }
+  return [...merged.values()];
+}
+
+function mergeStampRecords(
+  serverRecords: ReadonlyArray<UserRallyState["records"][number]>,
+  localRecords: ReadonlyArray<UserRallyState["records"][number]>,
+): ReadonlyArray<UserRallyState["records"][number]> {
+  const merged = new Map<string, UserRallyState["records"][number]>();
+  for (const record of [...serverRecords, ...localRecords]) {
+    const current = merged.get(record.stampId);
+    if (current === undefined) {
+      merged.set(record.stampId, record);
+      continue;
+    }
+    const acquiredAt = latestTimestamp(current.acquiredAt, record.acquiredAt);
+    merged.set(record.stampId, {
+      ...current,
+      ...(acquiredAt === current.acquiredAt ? {} : { acquiredAt }),
+      ...(current.metadata === undefined && record.metadata !== undefined
+        ? { metadata: record.metadata }
+        : {}),
+    });
   }
   return [...merged.values()];
 }
@@ -38,17 +103,9 @@ export function resolveRallyStateConflict(
   options: MergeConflictOptions = { policy: "merge" },
 ): UserRallyState {
   if (options.policy === "server_wins") return serverState;
-  const records = [...serverState.records];
-  const knownStamps = new Set(records.map((record) => record.stampId));
-  for (const record of localState.records) {
-    if (!knownStamps.has(record.stampId)) {
-      records.push(record);
-      knownStamps.add(record.stampId);
-    }
-  }
   return {
     ...serverState,
-    records,
+    records: mergeStampRecords(serverState.records, localState.records),
     rewards: mergeRewardStates(serverState.rewards, localState.rewards),
     updatedAt: latestTimestamp(serverState.updatedAt, localState.updatedAt),
   };

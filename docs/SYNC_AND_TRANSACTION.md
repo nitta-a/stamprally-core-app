@@ -1,6 +1,6 @@
 # Synchronization and reward transactions
 
-Version 0.12.0 makes reward persistence atomic. A `ServerPersistenceAdapter` must
+Version 0.13.0 makes reward persistence atomic. A `ServerPersistenceAdapter` must
 implement `executeClaimRewardTransaction`; there is no non-transactional fallback.
 The adapter commits stock, user state, claim count, audit log, and idempotency data
 as one unit and rolls all of them back if any write fails.
@@ -61,9 +61,29 @@ sequenceDiagram
   end
 ```
 
-Rejected operations are removed after the server response is durably handled;
-transport failures remain queued for retry. `useStampRally` observes the client
-state and error events, so accepted and merged results are visible immediately.
+Each replay response is classified as `ACCEPTED`, `REJECTED_PERMANENT`, or
+`RETRYABLE_ERROR`. Accepted and permanent responses are removed after the response
+is durably handled; permanent reasons are emitted as client error events.
+Transport or explicitly retryable failures remain queued for `retrySync`.
+`useStampRally` observes the client state and error events, so accepted and merged
+results are visible immediately.
+
+The default queue key is `stamprally:queue:<rallyId>:<userId-or-anonymous>`. A
+queue can switch users with `switchUser(userId)`; every operation is checked against
+the active rally/user scope. Pass an explicit `key` only when an application owns
+an equivalent isolation scheme.
+
+## Custom adapter checklist
+
+Implement `OfflineQueueStorage.load` and `save` as durable operations, preserving
+the order of the array. A sync sender should return the operation result wrapped as
+`{ status: "ACCEPTED", result }`, return `{ status: "REJECTED_PERMANENT", error }`
+for a condition that cannot succeed later, and use `{ status: "RETRYABLE_ERROR",
+error }` for a temporary failure. Never include proof secrets in rejection metadata.
+
+For reward claims, `packages/server/src/examples/transaction.ts` contains a SQL
+adapter contract. Read stock, claim count, and user state with row locks, then write
+stock, state, claim record, audit, and idempotency data through one transaction.
 
 ## Metadata security boundary
 

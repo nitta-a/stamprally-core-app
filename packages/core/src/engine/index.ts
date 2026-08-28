@@ -2,6 +2,8 @@ export {
   calculateDistanceMeters,
   evaluateCondition,
   evaluateConditionDetailed,
+  evaluateSpotStatus,
+  getSpotStatus,
 } from "./evaluate.js";
 export { getOrderedSpots } from "./order.js";
 export type { StampRallyProgress } from "./progress.js";

@@ -34,3 +34,8 @@ verification control. A custom renderer calls `onSubmit(proof)` when it has a pr
 Keep private condition secrets, staff passcodes, digital content URLs, and
 `serverMetadata` in the server-side `AdminRallyConfig`; publish only the result of
 `toPublicConfig`.
+
+Standard cards render localized descriptions and hints, spot imagery and external
+reference badges, plus reward descriptions, stock, expiry, and status. Spot cards
+with incomplete prerequisites show a lock and disable verification controls.
+The status badge values are `UNCLAIMED`, `CLAIMED`, `LOCKED`, and `VERIFYING`.

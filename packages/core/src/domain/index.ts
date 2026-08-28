@@ -34,6 +34,7 @@ export type {
   SheetTheme,
   SlotShape,
   SpotItem,
+  SpotStatus,
   StampRallyState,
   StampRecord,
   SupportedLocale,

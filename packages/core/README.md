@@ -23,6 +23,19 @@ The browser detectors `getCurrentGeoContext`, `readNfcContext`, and `readQrConte
 
 `InMemoryStorage`, `LocalStorageAdapter`, and `IndexedDBAdapter` implement `StampStorage`. `updateLocalizedField` updates one locale without dropping existing translations.
 
+## v0.13 offline synchronization
+
+Configure `OfflineQueue` with `rallyId` and `userId` to persist pending work under
+`stamprally:queue:<rallyId>:<userId-or-anonymous>`. `switchUser` loads the other
+user's queue. Conflict policy `merge` unions stamp records, keeps the latest
+timestamps, and gives `CONSUMED` reward states priority; `server_wins` uses the
+server state unchanged. Sync adapters may return `ACCEPTED`, `REJECTED_PERMANENT`,
+or `RETRYABLE_ERROR`; only the first two remove an operation.
+
+`evaluateSpotStatus` derives `UNCLAIMED`, `CLAIMED`, `LOCKED`, or `VERIFYING`
+without mutating state. A spot with incomplete `prerequisites` is `LOCKED` and
+must not be verified by a client or viewer.
+
 ## License
 
 MIT

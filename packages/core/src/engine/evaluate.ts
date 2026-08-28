@@ -3,6 +3,9 @@ import type {
   ConditionMatch,
   ConditionMismatch,
   Result,
+  SpotItem,
+  SpotStatus,
+  UserRallyState,
   VerificationContext,
 } from "../domain/index.js";
 
@@ -82,3 +85,18 @@ export function evaluateCondition(
 ): boolean {
   return evaluateConditionDetailed(condition, context).ok;
 }
+
+/** Derives a viewer-safe spot status without changing the supplied state. */
+export function evaluateSpotStatus(
+  spot: Pick<SpotItem, "id" | "prerequisites">,
+  state: Pick<UserRallyState, "records">,
+  options: { readonly verifying?: boolean } = {},
+): SpotStatus {
+  if (options.verifying === true) return "VERIFYING";
+  if (state.records.some((record) => record.stampId === spot.id)) return "CLAIMED";
+  const acquired = new Set(state.records.map((record) => record.stampId));
+  if (spot.prerequisites?.some((prerequisite) => !acquired.has(prerequisite))) return "LOCKED";
+  return "UNCLAIMED";
+}
+
+export const getSpotStatus = evaluateSpotStatus;

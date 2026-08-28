@@ -21,6 +21,7 @@ import {
   type ReactElement,
   type SetStateAction,
   useCallback,
+  useEffect,
   useRef,
   useState,
 } from "react";
@@ -53,6 +54,7 @@ export interface UseAdminRallyEditorReturn<
   readonly addSpot: (spotData?: Partial<SpotItem<TLocale, TMeta>>) => void;
   readonly removeSpot: (spotId: string) => void;
   readonly reorderSpots: (fromIndex: number, toIndex: number) => void;
+  readonly reorderRewards: (fromIndex: number, toIndex: number) => void;
   readonly duplicateSpot: (spotId: string) => void;
   readonly addReward: (rewardData?: Partial<Reward<TLocale>>) => void;
   readonly removeReward: (rewardId: string) => void;
@@ -116,12 +118,22 @@ export function useAdminRallyEditor<
   options: UseAdminRallyEditorOptions<TLocale, TMeta> = {},
 ): UseAdminRallyEditorReturn<TLocale, TMeta> {
   const initialRef = useRef(initialConfig);
+  const previousInitialRef = useRef(initialConfig);
   const [history, setHistory] = useState<EditorHistory<AdminRallyConfig<TLocale, TMeta>>>({
     past: [],
     present: initialConfig,
     future: [],
   });
   const config = history.present;
+  useEffect(() => {
+    if (previousInitialRef.current === initialConfig) return;
+    previousInitialRef.current = initialConfig;
+    const isDirty = JSON.stringify(history.present) !== JSON.stringify(initialRef.current);
+    if (!isDirty) {
+      initialRef.current = initialConfig;
+      setHistory({ past: [], present: initialConfig, future: [] });
+    }
+  }, [history.present, initialConfig]);
   const commit = useCallback(
     (value: SetStateAction<AdminRallyConfig<TLocale, TMeta>>): void => {
       setHistory((current) => {
@@ -166,6 +178,8 @@ export function useAdminRallyEditor<
     }));
   const reorderSpots = (fromIndex: number, toIndex: number): void =>
     commit((current) => ({ ...current, spots: moveTo(current.spots, fromIndex, toIndex) }));
+  const reorderRewards = (fromIndex: number, toIndex: number): void =>
+    commit((current) => ({ ...current, rewards: moveTo(current.rewards, fromIndex, toIndex) }));
   const duplicateSpot = (spotId: string): void =>
     commit((current) => {
       const source = current.spots.find((spot) => spot.id === spotId);
@@ -288,6 +302,7 @@ export function useAdminRallyEditor<
     });
   const resetConfig = (newConfig: AdminRallyConfig<TLocale, TMeta>): void => {
     initialRef.current = newConfig;
+    previousInitialRef.current = newConfig;
     setHistory({ past: [], present: newConfig, future: [] });
     options.onChange?.(newConfig);
   };
@@ -300,6 +315,7 @@ export function useAdminRallyEditor<
     addSpot,
     removeSpot,
     reorderSpots: (fromIndex, toIndex) => reorderSpots(fromIndex, toIndex),
+    reorderRewards,
     duplicateSpot,
     addReward,
     removeReward,
@@ -345,9 +361,15 @@ export function useSpotEditor<
   const [config, setConfig] = useState<AdminRallyConfig<TLocale, TMeta> | undefined>(
     options.config ?? options.initialConfig,
   );
-  const commit = (next: AdminRallyConfig<TLocale, TMeta>): void => {
-    setConfig(next);
-    options.onChange?.(next);
+  const commit = (
+    updateConfig: (current: AdminRallyConfig<TLocale, TMeta>) => AdminRallyConfig<TLocale, TMeta>,
+  ): void => {
+    setConfig((current) => {
+      if (current === undefined) return current;
+      const next = updateConfig(current);
+      options.onChange?.(next);
+      return next;
+    });
   };
   const spot = config?.spots.find((item) => item.id === spotId);
   return {
@@ -356,14 +378,17 @@ export function useSpotEditor<
     setConfig,
     update: (patch) => {
       if (config === undefined || spot === undefined) return;
-      commit({
-        ...config,
-        spots: config.spots.map((item) => (item.id === spotId ? { ...item, ...patch } : item)),
-      });
+      commit((current) => ({
+        ...current,
+        spots: current.spots.map((item) => (item.id === spotId ? { ...item, ...patch } : item)),
+      }));
     },
     remove: () => {
       if (config === undefined || spot === undefined) return;
-      commit({ ...config, spots: config.spots.filter((item) => item.id !== spotId) });
+      commit((current) => ({
+        ...current,
+        spots: current.spots.filter((item) => item.id !== spotId),
+      }));
     },
   };
 }
@@ -385,9 +410,15 @@ export function useRewardEditor<
     options.config ?? options.initialConfig,
   );
   const reward = config?.rewards.find((item) => item.id === rewardId);
-  const commit = (next: AdminRallyConfig<TLocale, TMeta>): void => {
-    setConfig(next);
-    options.onChange?.(next);
+  const commit = (
+    updateConfig: (current: AdminRallyConfig<TLocale, TMeta>) => AdminRallyConfig<TLocale, TMeta>,
+  ): void => {
+    setConfig((current) => {
+      if (current === undefined) return current;
+      const next = updateConfig(current);
+      options.onChange?.(next);
+      return next;
+    });
   };
   return {
     config,
@@ -395,16 +426,19 @@ export function useRewardEditor<
     setConfig,
     update: (patch) => {
       if (config === undefined || reward === undefined) return;
-      commit({
-        ...config,
-        rewards: config.rewards.map((item) =>
+      commit((current) => ({
+        ...current,
+        rewards: current.rewards.map((item) =>
           item.id === rewardId ? { ...item, ...patch } : item,
         ),
-      });
+      }));
     },
     remove: () => {
       if (config === undefined || reward === undefined) return;
-      commit({ ...config, rewards: config.rewards.filter((item) => item.id !== rewardId) });
+      commit((current) => ({
+        ...current,
+        rewards: current.rewards.filter((item) => item.id !== rewardId),
+      }));
     },
   };
 }
@@ -1370,23 +1404,38 @@ export function AdminRallyEditor<
         {field("addReward", "Add reward")}
       </button>
       <div>
-        {config.rewards.map((reward) => (
-          <RewardItemForm
-            key={reward.id}
-            reward={reward}
-            locale={activeLocale}
-            {...(dictionary === undefined ? {} : { dictionary })}
-            onChange={(next) =>
-              update({
-                rewards: config.rewards.map((current) =>
-                  current.id === reward.id ? next : current,
-                ),
-              })
-            }
-            onRemove={() =>
-              update({ rewards: config.rewards.filter((current) => current.id !== reward.id) })
-            }
-          />
+        {config.rewards.map((reward, index) => (
+          <div key={reward.id}>
+            <RewardItemForm
+              reward={reward}
+              locale={activeLocale}
+              {...(dictionary === undefined ? {} : { dictionary })}
+              onChange={(next) =>
+                update({
+                  rewards: config.rewards.map((current) =>
+                    current.id === reward.id ? next : current,
+                  ),
+                })
+              }
+              onRemove={() =>
+                update({ rewards: config.rewards.filter((current) => current.id !== reward.id) })
+              }
+            />
+            <button
+              type="button"
+              disabled={index === 0}
+              onClick={() => update({ rewards: move(config.rewards, index, -1) })}
+            >
+              {field("moveUp", "Move up")}
+            </button>
+            <button
+              type="button"
+              disabled={index === config.rewards.length - 1}
+              onClick={() => update({ rewards: move(config.rewards, index, 1) })}
+            >
+              {field("moveDown", "Move down")}
+            </button>
+          </div>
         ))}
       </div>
     </section>

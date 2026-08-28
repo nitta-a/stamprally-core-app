@@ -10,6 +10,7 @@ export interface AuditLog {
   readonly idempotencyKey: string;
   readonly metadata?: Readonly<Record<string, unknown>>;
 }
+export type SyncOperationStatus = "ACCEPTED" | "REJECTED_PERMANENT" | "RETRYABLE_ERROR";
 export interface CheckInRequest {
   readonly rallyId: string;
   readonly userId?: string;
@@ -28,8 +29,13 @@ export interface ClaimRewardRequest {
   readonly now?: string;
 }
 export type CheckInResponse =
-  | { readonly ok: true; readonly state: UserRallyState }
-  | { readonly ok: false; readonly code: string; readonly message: string };
+  | { readonly ok: true; readonly state: UserRallyState; readonly status?: "ACCEPTED" }
+  | {
+      readonly ok: false;
+      readonly code: string;
+      readonly message: string;
+      readonly status?: "REJECTED_PERMANENT" | "RETRYABLE_ERROR";
+    };
 export interface ServerOptions {
   readonly lockTtlMs?: number;
   readonly idempotencyTtlMs?: number;
@@ -38,6 +44,11 @@ export interface ServerOptions {
   readonly now?: () => string;
 }
 export type { UserRallyState } from "@stamprally/core";
+export {
+  executeClaimRewardTransaction,
+  type SqlClaimRewardStore,
+  type SqlTransactionDatabase,
+} from "./examples/transaction.js";
 export type {
   ClaimRewardTransactionMutation,
   ClaimRewardTransactionParams,

@@ -25,6 +25,10 @@ export function Rally() {
 
 The hook return value includes `state`, `isLoading`, `error`, `onCheckIn`, `onClaimReward`, `onSync`, `switchUser`, and `clearUserState`.
 
+Offline queue responses are reflected immediately in `state`. Permanent server
+rejections are delivered through `error`, while retryable transport failures
+remain pending for `retrySync`.
+
 ## License
 
 MIT

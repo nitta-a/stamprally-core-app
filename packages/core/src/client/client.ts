@@ -12,7 +12,7 @@ import type {
 } from "../domain/index.js";
 import { consumeReward, type RewardConsumeError, reconcileRewardStates } from "../engine/index.js";
 import { resolveRallyStateConflict } from "../engine/sync.js";
-import type { OfflineQueue, SyncState } from "./offlineQueue.js";
+import type { OfflineOperationError, OfflineQueue, SyncState } from "./offlineQueue.js";
 import { cloneState, InMemoryStorage, type StampStorage, storageKey } from "./storage.js";
 
 export type CheckInOptions = {
@@ -55,7 +55,7 @@ export type ClientEvent =
   | { readonly type: "checkIn"; readonly result: CheckInResult }
   | { readonly type: "rewardClaimed"; readonly result: ClaimResult }
   | { readonly type: "sync"; readonly state: UserRallyState }
-  | { readonly type: "error"; readonly error: ClientError };
+  | { readonly type: "error"; readonly error: ClientError | OfflineOperationError };
 export type ClientListener = (state: UserRallyState) => void;
 export type ClientEventListener = (event: ClientEvent) => void;
 
@@ -186,8 +186,10 @@ export class StampRallyClient {
   initialize(): Promise<UserRallyState> {
     if (this.#state !== null) return Promise.resolve(this.#state);
     if (this.#initialization === null) {
-      this.#initialization = this.#storage
-        .load(this.#config.id, this.#userId)
+      this.#initialization = (async () => {
+        await this.#offlineQueue?.setScope(this.#config.id, this.#userId);
+        return this.#storage.load(this.#config.id, this.#userId);
+      })()
         .then((state) => {
           const next =
             state === null
@@ -210,6 +212,7 @@ export class StampRallyClient {
       this.#userId = newUserId;
       this.#state = null;
       this.#initialization = null;
+      await this.#offlineQueue?.switchUser(newUserId);
       return this.initialize();
     });
   }
@@ -477,7 +480,8 @@ export class StampRallyClient {
       this.#state = next;
       this.#emit(next);
     }
-    if ("ok" in event.result && !event.result.ok)
+    if (event.error !== undefined) this.#emitEvent({ type: "error", error: event.error });
+    else if (event.result !== undefined && "ok" in event.result && !event.result.ok)
       this.#emitEvent({ type: "error", error: event.result.error });
   }
   #now(): string {

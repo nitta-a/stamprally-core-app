@@ -92,6 +92,11 @@ app.all("/api/*", async (context) => {
 
 Implement `ServerPersistenceAdapter` with rallyId-scoped locks, reward stock, idempotency, user state, claim records, and audit logs. Production deployments should use a transactional database or Redis primitives with equivalent atomicity.
 
+For v0.13 offline clients, use the scoped `OfflineQueue` key and return explicit
+operation outcomes (`ACCEPTED`, `REJECTED_PERMANENT`, or `RETRYABLE_ERROR`). The
+SQL transaction reference in `packages/server/src/examples/transaction.ts` shows
+the required all-or-nothing reward claim writes.
+
 ## Browser detectors
 
 `getCurrentGeoContext`, `readNfcContext`, and `readQrContext` return typed `Result` values for unsupported browsers, permission failures, timeouts, and device errors. Check `isGeolocationSupported()`, `isNfcSupported()`, and `isQrSupported()` and retain manual input fallbacks.

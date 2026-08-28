@@ -25,9 +25,13 @@ const editor = useAdminRallyEditor(config, { onChange: saveDraft });
 editor.addSpot({ name: { en: "Museum" }, conditions: [{ type: "qr", secretToken: "" }] });
 editor.duplicateReward("reward-1");
 editor.reorderSpots(2, 0);
+editor.reorderRewards(1, 0);
 editor.undo();
 ```
 
 Use `canUndo`/`canRedo` to control history buttons. `resetConfig(newConfig)` replaces
 the current draft when an external CMS update arrives. `updateLocalizedField` accepts
 paths such as `title`, `description`, `spots.0.name`, or `spots.spot-1.name`.
+Updates use functional React state transitions, so consecutive updates are not
+lost. External configuration changes replace a clean draft automatically; call
+`resetConfig(newConfig)` to explicitly accept a conflicting external draft.

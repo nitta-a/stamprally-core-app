@@ -14,6 +14,7 @@ import type {
   CheckInResponse,
   ClaimRewardRequest,
   ServerOptions,
+  SyncOperationStatus,
 } from "./index.js";
 import type { ServerPersistenceAdapter } from "./persistence.js";
 
@@ -99,6 +100,15 @@ function audit(
     ...(code === undefined ? {} : { metadata: { errorCode: code } }),
   };
 }
+function operationStatus(result: {
+  readonly ok: boolean;
+  readonly code?: string;
+}): SyncOperationStatus {
+  if (result.ok) return "ACCEPTED";
+  return result.code === "CONFLICT" || result.code === "PERSISTENCE_FAILED"
+    ? "RETRYABLE_ERROR"
+    : "REJECTED_PERMANENT";
+}
 
 export class StampRallyServer {
   readonly #config: AdminRallyConfig;
@@ -142,7 +152,10 @@ export class StampRallyServer {
         400,
       );
     const result = await this.checkIn({ ...body, userId });
-    return json(result, result.ok ? 200 : result.code === "SPOT_NOT_FOUND" ? 404 : 422);
+    return json(
+      { ...result, status: operationStatus(result) },
+      result.ok ? 200 : result.code === "SPOT_NOT_FOUND" ? 404 : 422,
+    );
   }
   async handleClaimReward(request: Request): Promise<Response> {
     const body = await this.#body<ClaimRewardRequest>(request);
@@ -163,7 +176,10 @@ export class StampRallyServer {
         400,
       );
     const result = await this.claimReward({ ...body, userId });
-    return json(result, result.ok ? 200 : result.code === "REWARD_NOT_FOUND" ? 404 : 422);
+    return json(
+      { ...result, status: operationStatus(result) },
+      result.ok ? 200 : result.code === "REWARD_NOT_FOUND" ? 404 : 422,
+    );
   }
   async handleSync(request: Request): Promise<Response> {
     const body = await this.#body<{ readonly rallyId: string; readonly userId?: string }>(request);
