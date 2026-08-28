@@ -17,7 +17,7 @@ export interface CheckInRequest {
   readonly spotId: string;
   readonly context: import("@stamprally/core").VerificationContext;
   readonly idempotencyKey: string;
-  readonly now?: string;
+  readonly now?: string | number;
 }
 export interface ClaimRewardRequest {
   readonly rallyId: string;
@@ -26,7 +26,7 @@ export interface ClaimRewardRequest {
   readonly idempotencyKey: string;
   readonly staffPasscode?: string;
   readonly staffId?: string;
-  readonly now?: string;
+  readonly now?: string | number;
 }
 export type CheckInResponse =
   | { readonly ok: true; readonly state: UserRallyState; readonly status?: "ACCEPTED" }
@@ -44,13 +44,18 @@ export interface ServerOptions {
   ) => Promise<string | AuthenticationContext | null> | string | AuthenticationContext | null;
   readonly customValidators?: Readonly<Record<string, import("@stamprally/core").Validator>>;
   readonly now?: () => string;
+  readonly anonymousPolicy?: "session_scoped" | "reject";
 }
 export interface AuthenticationContext {
   readonly authenticatedUserId: string;
 }
 export type { UserRallyState } from "@stamprally/core";
 export {
+  executeCheckInTransaction,
   executeClaimRewardTransaction,
+  executeRedisTransaction,
+  type RedisMultiExecutor,
+  type SqlCheckInStore,
   type SqlClaimRewardStore,
   type SqlTransactionDatabase,
 } from "./examples/transaction.js";

@@ -27,6 +27,7 @@ export interface UseStampRallyReturn {
   readonly retrySync: () => Promise<void>;
   readonly syncState: SyncState;
   readonly pendingCount: number;
+  readonly anonymousSessionId: string;
   readonly switchUser: (userId: string | null) => Promise<UserRallyState>;
   readonly clearUserState: (userId?: string) => Promise<void>;
 }
@@ -98,6 +99,7 @@ export function useStampRally(
     retrySync: onSync,
     syncState: client.syncState,
     pendingCount: client.pendingCount,
+    anonymousSessionId: client.getAnonymousSessionId(),
     switchUser: client.switchUser.bind(client),
     clearUserState: client.clearUserState.bind(client),
   };

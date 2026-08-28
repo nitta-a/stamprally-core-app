@@ -25,8 +25,17 @@ import {
 
 type ErrorResponse = { readonly ok: false; readonly code: string; readonly message: string };
 type ClaimResponse =
-  | { readonly ok: true; readonly state: UserRallyState; readonly claimTicketNumber?: string }
+  | {
+      readonly ok: true;
+      readonly state: UserRallyState;
+      readonly claimTicketNumber?: string;
+      readonly inventory?: InventoryStatus;
+    }
   | ErrorResponse;
+interface InventoryStatus {
+  readonly sharedRemaining?: number;
+  readonly rewardRemaining?: number;
+}
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -35,6 +44,9 @@ function json(body: unknown, status = 200): Response {
 }
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function isUuidV4(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 function requestId(prefix: string): string {
   return `${prefix}-${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`}`;
@@ -46,6 +58,17 @@ function timestampMillis(timestamp: string): number {
   const value = Date.parse(timestamp);
   return Number.isFinite(value) ? value : Date.now();
 }
+function validationResponse(
+  errors: ReadonlyArray<{ readonly path: string; readonly message: string; readonly code: string }>,
+): Response {
+  return json(
+    {
+      error: "VALIDATION_FAILED",
+      details: errors.map(({ path, message, code }) => ({ path, message, code })),
+    },
+    400,
+  );
+}
 function initialState(config: AdminRallyConfig, userId: string, timestamp: string): UserRallyState {
   return {
     rallyId: config.id,
@@ -54,6 +77,41 @@ function initialState(config: AdminRallyConfig, userId: string, timestamp: strin
     rewards: reconcileRewardStates(config.rewards, [], 0, timestamp),
     updatedAt: timestamp,
   };
+}
+interface InventoryPlan {
+  readonly primaryKey: string;
+  readonly primaryInitial: number | null;
+  readonly secondaryKey?: string;
+  readonly secondaryInitial?: number | null;
+}
+function rewardStock(
+  config: AdminRallyConfig,
+  rewardId: string,
+  stockLimit: number | undefined,
+): number | null {
+  const configured = config.inventory?.[rewardId];
+  if (stockLimit === undefined) return configured ?? null;
+  if (configured === undefined) return stockLimit;
+  return Math.min(stockLimit, configured);
+}
+function sharedStock(config: AdminRallyConfig): number | null {
+  return config.inventory?.sharedStock ?? config.inventory?.global ?? null;
+}
+function inventoryPlan(
+  config: AdminRallyConfig,
+  rewardId: string,
+  stockLimit: number | undefined,
+): InventoryPlan {
+  const individual = rewardStock(config, rewardId, stockLimit);
+  const shared = sharedStock(config);
+  if (config.inventoryMode === "shared" && shared !== null) {
+    return {
+      primaryKey: "__shared__",
+      primaryInitial: shared,
+      ...(individual === null ? {} : { secondaryKey: rewardId, secondaryInitial: individual }),
+    };
+  }
+  return { primaryKey: rewardId, primaryInitial: individual };
 }
 function getProof(context: VerificationContext): unknown {
   return context.type === "qr"
@@ -143,11 +201,15 @@ export class StampRallyServer {
   }
   async handleCheckIn(request: Request): Promise<Response> {
     const body = validateCheckInRequest(await this.#body(request));
-    if (!body.success || body.data.rallyId !== this.#config.id)
-      return json(
-        { ok: false, code: "INVALID_REQUEST", message: "Invalid check-in request." },
-        400,
-      );
+    if (!body.success) return validationResponse(body.errors);
+    if (body.data.rallyId !== this.#config.id)
+      return validationResponse([
+        {
+          path: "rallyId",
+          message: "The rally does not match this server.",
+          code: "INVALID_VALUE",
+        },
+      ]);
     const userId = await this.#user(request);
     if (userId === null)
       return json(
@@ -162,8 +224,15 @@ export class StampRallyServer {
   }
   async handleClaimReward(request: Request): Promise<Response> {
     const body = validateClaimRewardRequest(await this.#body(request));
-    if (!body.success || body.data.rallyId !== this.#config.id)
-      return json({ ok: false, code: "INVALID_REQUEST", message: "Invalid reward request." }, 400);
+    if (!body.success) return validationResponse(body.errors);
+    if (body.data.rallyId !== this.#config.id)
+      return validationResponse([
+        {
+          path: "rallyId",
+          message: "The rally does not match this server.",
+          code: "INVALID_VALUE",
+        },
+      ]);
     const userId = await this.#user(request);
     if (userId === null)
       return json(
@@ -178,8 +247,15 @@ export class StampRallyServer {
   }
   async handleSync(request: Request): Promise<Response> {
     const body = validateSyncRequest(await this.#body(request));
-    if (!body.success || body.data.rallyId !== this.#config.id)
-      return json({ ok: false, code: "INVALID_REQUEST", message: "Invalid sync request." }, 400);
+    if (!body.success) return validationResponse(body.errors);
+    if (body.data.rallyId !== this.#config.id)
+      return validationResponse([
+        {
+          path: "rallyId",
+          message: "The rally does not match this server.",
+          code: "INVALID_VALUE",
+        },
+      ]);
     const userId = await this.#user(request);
     if (userId === null)
       return json(
@@ -347,7 +423,10 @@ export class StampRallyServer {
         request,
         now(this.#options),
       );
-    const lockKey = `reward:${request.rallyId}:${reward.id}`;
+    const lockKey =
+      this.#config.inventoryMode === "shared"
+        ? "inventory:shared"
+        : `reward:${request.rallyId}:${reward.id}`;
     if (
       !(await this.#persistence.acquireLock(
         request.rallyId,
@@ -357,6 +436,7 @@ export class StampRallyServer {
     )
       return { ok: false, code: "CONFLICT", message: "The reward is being claimed." };
     const timestamp = now(this.#options);
+    const plan = inventoryPlan(this.#config, reward.id, reward.stockLimit);
     try {
       const checked = await this.#persistence.getIdempotentResult<ClaimResponse>(
         request.rallyId,
@@ -369,6 +449,12 @@ export class StampRallyServer {
           rallyId: request.rallyId,
           userId: request.userId,
           rewardId: reward.id,
+          stockKey: plan.primaryKey,
+          ...(plan.secondaryKey === undefined ? {} : { secondaryStockKey: plan.secondaryKey }),
+          initialStock: plan.primaryInitial,
+          ...(plan.secondaryInitial === undefined
+            ? {}
+            : { initialSecondaryStock: plan.secondaryInitial }),
           ticketNumber: request.idempotencyKey,
           timestamp: Number.isNaN(Date.parse(timestamp)) ? Date.now() : Date.parse(timestamp),
           idempotencyKey: key,
@@ -378,7 +464,7 @@ export class StampRallyServer {
             : { idempotencyTtlMs: this.#options.idempotencyTtlMs }),
           initialUserState: initialState(this.#config, request.userId, timestamp),
         },
-        ({ stock, claimCount, userState }) => {
+        ({ stock, secondaryStock, claimCount, userState }) => {
           const storedReward = userState.rewards.find((item) => item.rewardId === reward.id) ?? {
             rewardId: reward.id,
             status: "LOCKED" as const,
@@ -400,7 +486,7 @@ export class StampRallyServer {
               timestamp,
               code,
             );
-          if (stock !== null && stock <= 0) {
+          if ((stock !== null && stock <= 0) || (secondaryStock !== null && secondaryStock <= 0)) {
             responseHolder.value = {
               ok: false,
               code: "OUT_OF_STOCK",
@@ -408,6 +494,7 @@ export class StampRallyServer {
             };
             return {
               nextStock: stock,
+              ...(plan.secondaryKey === undefined ? {} : { nextSecondaryStock: secondaryStock }),
               nextUserState: userState,
               auditLog: makeAudit("REJECTED", "OUT_OF_STOCK"),
               result: responseHolder.value,
@@ -445,17 +532,51 @@ export class StampRallyServer {
           const nextRewards = userState.rewards.some((item) => item.rewardId === reward.id)
             ? userState.rewards.map((item) => (item.rewardId === reward.id ? local.value : item))
             : [...userState.rewards, local.value];
+          const consumed = local.value.claimTicketNumber !== undefined;
+          const nextStock = consumed && stock !== null ? Math.max(0, stock - 1) : stock;
+          const nextSecondaryStock =
+            consumed && secondaryStock !== null ? Math.max(0, secondaryStock - 1) : secondaryStock;
           const next: UserRallyState = {
             ...userState,
             rewards: nextRewards,
             updatedAt: timestamp,
+            inventory: {
+              ...(plan.primaryKey === "__shared__" && nextStock !== null
+                ? { sharedRemaining: nextStock }
+                : {}),
+              ...(plan.secondaryKey !== undefined && nextSecondaryStock !== null
+                ? { rewardRemaining: { [reward.id]: nextSecondaryStock } }
+                : plan.primaryKey === reward.id && nextStock !== null
+                  ? { rewardRemaining: { [reward.id]: nextStock } }
+                  : {}),
+            },
+          };
+          const inventory: InventoryStatus = {
+            ...(plan.primaryKey === "__shared__" && nextStock !== null
+              ? { sharedRemaining: nextStock }
+              : {}),
+            ...(plan.secondaryKey !== undefined && nextSecondaryStock !== null
+              ? { rewardRemaining: nextSecondaryStock }
+              : plan.primaryKey === reward.id && nextStock !== null
+                ? { rewardRemaining: nextStock }
+                : {}),
           };
           responseHolder.value =
             local.value.claimTicketNumber === undefined
-              ? { ok: true, state: next }
-              : { ok: true, state: next, claimTicketNumber: local.value.claimTicketNumber };
+              ? {
+                  ok: true,
+                  state: next,
+                  ...(Object.keys(inventory).length === 0 ? {} : { inventory }),
+                }
+              : {
+                  ok: true,
+                  state: next,
+                  claimTicketNumber: local.value.claimTicketNumber,
+                  ...(Object.keys(inventory).length === 0 ? {} : { inventory }),
+                };
           return {
-            nextStock: stock === null ? null : stock - 1,
+            nextStock,
+            ...(plan.secondaryKey === undefined ? {} : { nextSecondaryStock }),
             nextUserState: next,
             auditLog: makeAudit("SUCCESS"),
             result: responseHolder.value,
@@ -488,10 +609,42 @@ export class StampRallyServer {
     }
   }
   async sync(rallyId: string, userId: string): Promise<UserRallyState> {
-    return (
+    const state =
       (await this.#persistence.getUserState(rallyId, userId)) ??
-      initialState(this.#config, userId, now(this.#options))
-    );
+      initialState(this.#config, userId, now(this.#options));
+    return this.#attachInventory(state);
+  }
+  async #attachInventory(state: UserRallyState): Promise<UserRallyState> {
+    const rewardRemaining: Record<string, number> = {};
+    for (const reward of this.#config.rewards) {
+      const plan = inventoryPlan(this.#config, reward.id, reward.stockLimit);
+      if (plan.secondaryKey !== undefined) {
+        const stock = await this.#persistence.getRewardStock(state.rallyId, plan.secondaryKey);
+        const remaining = stock ?? plan.secondaryInitial ?? null;
+        if (remaining !== null) rewardRemaining[reward.id] = Math.max(0, remaining);
+      } else if (plan.primaryKey !== "__shared__") {
+        const stock = await this.#persistence.getRewardStock(state.rallyId, plan.primaryKey);
+        const remaining = stock ?? plan.primaryInitial;
+        if (remaining !== null) rewardRemaining[reward.id] = Math.max(0, remaining);
+      }
+    }
+    const shared = sharedStock(this.#config);
+    const storedShared = await this.#persistence.getRewardStock(state.rallyId, "__shared__");
+    const sharedRemaining =
+      this.#config.inventoryMode === "shared" && shared !== null
+        ? Math.max(0, storedShared ?? shared)
+        : undefined;
+    return {
+      ...state,
+      ...(Object.keys(rewardRemaining).length === 0 && sharedRemaining === undefined
+        ? {}
+        : {
+            inventory: {
+              ...(sharedRemaining === undefined ? {} : { sharedRemaining }),
+              ...(Object.keys(rewardRemaining).length === 0 ? {} : { rewardRemaining }),
+            },
+          }),
+    };
   }
   async #body(request: Request): Promise<unknown> {
     try {
@@ -509,6 +662,10 @@ export class StampRallyServer {
       const authenticatedUserId = identity.authenticatedUserId;
       return authenticatedUserId.length > 0 ? authenticatedUserId : null;
     }
+    if (this.#options.anonymousPolicy === "reject") return null;
+    const sessionId = request.headers.get("X-Anonymous-Session-Id");
+    if (sessionId !== null && isUuidV4(sessionId)) return sessionId;
+    if (this.#options.anonymousPolicy === "session_scoped") return null;
     return "anonymous";
   }
 

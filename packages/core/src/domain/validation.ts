@@ -174,6 +174,8 @@ function condition(
     finiteNumber(value, "latitude", path, errors);
     finiteNumber(value, "longitude", path, errors);
     finiteNumber(value, "radiusMeters", path, errors, 0);
+    if (typeof value.radiusMeters === "number" && value.radiusMeters <= 0)
+      add(errors, `${path}.radiusMeters`, "Expected a radius greater than 0.", "out_of_range");
     if (typeof value.latitude === "number" && (value.latitude < -90 || value.latitude > 90))
       add(errors, `${path}.latitude`, "Expected a latitude between -90 and 90.", "out_of_range");
     if (typeof value.longitude === "number" && (value.longitude < -180 || value.longitude > 180))

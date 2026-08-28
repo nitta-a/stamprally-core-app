@@ -105,6 +105,13 @@ export type RewardUnlockCondition =
 export type RewardType = "digital" | "in_person";
 export type RedemptionMethod = "manual_slide" | "staff_passcode" | "view_only" | "server_claim";
 export type InventoryAggregationMode = "shared" | "per_reward";
+export type RallyInventory = Readonly<Record<string, number>> & {
+  readonly sharedStock?: number;
+};
+export interface RallyInventoryState {
+  readonly sharedRemaining?: number;
+  readonly rewardRemaining?: Readonly<Record<string, number>>;
+}
 export interface Reward<TLocale extends string = string> {
   readonly id: string;
   readonly title: LocalizedText<TLocale>;
@@ -136,7 +143,7 @@ export interface AdminRallyConfig<
   readonly spots: ReadonlyArray<SpotItem<TLocale, TMeta>>;
   readonly rewards: ReadonlyArray<Reward<TLocale>>;
   readonly staffPasscode?: string;
-  readonly inventory?: Readonly<Record<string, number>>;
+  readonly inventory?: RallyInventory;
   /** How the optional top-level inventory limit is aggregated. */
   readonly inventoryMode?: InventoryAggregationMode;
   readonly serverMetadata?: Readonly<Record<string, unknown>>;
@@ -330,6 +337,7 @@ export interface StampRallyState {
   readonly userId: string | null;
   readonly records: ReadonlyArray<StampRecord>;
   readonly rewards: ReadonlyArray<RewardState>;
+  readonly inventory?: RallyInventoryState;
   readonly updatedAt: string;
 }
 export type UserRallyState = StampRallyState;

@@ -12,6 +12,7 @@ import type {
   PublicReward,
   PublicSpotItem,
   RallyConfig,
+  RallyInventoryState,
   RewardState,
   StampRallyClient,
   StampRallyProgress,
@@ -90,6 +91,7 @@ export interface SpotCardProps<TLocale extends string = string> {
 export interface RewardCardProps<TLocale extends string = string> {
   readonly reward: PublicReward<TLocale>;
   readonly state: RewardState | undefined;
+  readonly inventory?: RallyInventoryState;
   readonly locale: TLocale;
   readonly dictionary?: LocaleDictionary<TLocale>;
   readonly onClaim:
@@ -314,6 +316,7 @@ function DefaultCondition<TLocale extends string>({
 function DefaultRewardCard<TLocale extends string>({
   reward,
   state,
+  inventory,
   locale,
   dictionary,
   onClaim,
@@ -324,10 +327,17 @@ function DefaultRewardCard<TLocale extends string>({
   readonly styles?: ViewerStyles;
 }): ReactElement {
   const status = state?.status ?? "LOCKED";
-  const remaining =
-    reward.stockLimit === undefined
+  const configuredRemaining =
+    inventory?.rewardRemaining?.[reward.id] ??
+    (reward.stockLimit === undefined
       ? undefined
-      : Math.max(0, reward.stockLimit - (state?.redeemedCount ?? 0));
+      : Math.max(0, reward.stockLimit - (state?.redeemedCount ?? 0)));
+  const sharedRemaining = inventory?.sharedRemaining;
+  const unavailable =
+    status !== "AVAILABLE" ||
+    onClaim === undefined ||
+    sharedRemaining === 0 ||
+    configuredRemaining === 0;
   const expiry = reward.validUntil === undefined ? undefined : new Date(reward.validUntil);
   return (
     <article className={classNames?.reward} style={styles?.reward}>
@@ -335,12 +345,21 @@ function DefaultRewardCard<TLocale extends string>({
       {reward.description !== undefined && (
         <p>{resolveLocalizedText(reward.description, locale)}</p>
       )}
-      {remaining !== undefined && (
+      {sharedRemaining !== undefined && (
         <span>
-          {remaining <= 3
-            ? label(dictionary, locale, "reward.lowStock", "Only a few left")
-            : `${remaining} ${label(dictionary, locale, "reward.remaining", "remaining")}`}
+          {label(dictionary, locale, "reward.sharedRemaining", "Overall remaining")}:{" "}
+          {sharedRemaining}
         </span>
+      )}
+      {configuredRemaining !== undefined && (
+        <>
+          {configuredRemaining <= 3 && (
+            <span>{label(dictionary, locale, "reward.lowStock", "Only a few left")}</span>
+          )}
+          <span>
+            {`${configuredRemaining} ${label(dictionary, locale, "reward.remaining", "remaining")}`}
+          </span>
+        </>
       )}
       {expiry !== undefined && !Number.isNaN(expiry.getTime()) && (
         <time dateTime={reward.validUntil}>
@@ -352,7 +371,7 @@ function DefaultRewardCard<TLocale extends string>({
         type="button"
         className={join(classNames?.reward, classNames?.button)}
         style={styles?.button}
-        disabled={status !== "AVAILABLE" || onClaim === undefined}
+        disabled={unavailable}
         onClick={() => {
           if (onClaim !== undefined) void onClaim(reward.id);
         }}
@@ -567,6 +586,7 @@ export function RallyViewer<TLocale extends string = string>({
           const props: RewardCardProps<TLocale> = {
             reward,
             state: currentState.rewards.find((item) => item.rewardId === reward.id),
+            ...(currentState.inventory === undefined ? {} : { inventory: currentState.inventory }),
             locale,
             ...(dictionary === undefined ? {} : { dictionary }),
             onClaim: claim,

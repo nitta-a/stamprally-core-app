@@ -31,6 +31,7 @@ export const DEFAULT_UI_DICTIONARY: LocaleDictionary<"ja" | "en"> = {
     "status.onlyAFewLeft": "Only a few left",
     "reward.lowStock": "Only a few left",
     "reward.remaining": "remaining",
+    "reward.sharedRemaining": "Overall remaining",
     "reward.validUntil": "Valid until",
   },
   ja: {
@@ -62,6 +63,7 @@ export const DEFAULT_UI_DICTIONARY: LocaleDictionary<"ja" | "en"> = {
     "status.onlyAFewLeft": "残りわずか",
     "reward.lowStock": "残りわずか",
     "reward.remaining": "残り",
+    "reward.sharedRemaining": "全体で残り",
     "reward.validUntil": "有効期限",
   },
 };

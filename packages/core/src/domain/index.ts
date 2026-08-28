@@ -26,6 +26,8 @@ export type {
   PublicReward,
   PublicSpotItem,
   RallyConfig,
+  RallyInventory,
+  RallyInventoryState,
   RedemptionMethod,
   Reward,
   RewardState,

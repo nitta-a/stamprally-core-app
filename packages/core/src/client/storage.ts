@@ -55,6 +55,16 @@ export function cloneState(state: StampRallyState): StampRallyState {
     ...state,
     records: state.records.map(cloneRecord),
     ...(state.rewards === undefined ? {} : { rewards: state.rewards.map(cloneRewardState) }),
+    ...(state.inventory === undefined
+      ? {}
+      : {
+          inventory: {
+            ...state.inventory,
+            ...(state.inventory.rewardRemaining === undefined
+              ? {}
+              : { rewardRemaining: { ...state.inventory.rewardRemaining } }),
+          },
+        }),
   };
 }
 
@@ -100,7 +110,19 @@ export function isStampRallyState(value: unknown): value is StampRallyState {
     Array.isArray(state.records) &&
     state.records.every(isRecord) &&
     (state.rewards === undefined ||
-      (Array.isArray(state.rewards) && state.rewards.every(isRewardState)))
+      (Array.isArray(state.rewards) && state.rewards.every(isRewardState))) &&
+    (state.inventory === undefined ||
+      (typeof state.inventory === "object" &&
+        state.inventory !== null &&
+        !Array.isArray(state.inventory) &&
+        (state.inventory.sharedRemaining === undefined ||
+          (typeof state.inventory.sharedRemaining === "number" &&
+            Number.isInteger(state.inventory.sharedRemaining) &&
+            state.inventory.sharedRemaining >= 0)) &&
+        (state.inventory.rewardRemaining === undefined ||
+          (typeof state.inventory.rewardRemaining === "object" &&
+            state.inventory.rewardRemaining !== null &&
+            !Array.isArray(state.inventory.rewardRemaining)))))
   );
 }
 
@@ -173,6 +195,40 @@ export class InMemoryStorage implements StampStorage {
 
 export function storageKey(rallyId: string, userId: string | null): string {
   return `stamprally:${rallyId}:${userId ?? "anonymous"}`;
+}
+
+export function createAnonymousSessionId(storage?: StorageLike | null): string {
+  const key = "stamprally:anonymous-session-id";
+  try {
+    const browserStorage = typeof window === "undefined" ? null : window.localStorage;
+    const value = storage?.getItem(key) ?? browserStorage?.getItem(key);
+    if (value !== null && value !== undefined && isUuidV4(value)) return value;
+    const generated = randomUuidV4();
+    (storage ?? browserStorage)?.setItem(key, generated);
+    return generated;
+  } catch {
+    return randomUuidV4();
+  }
+}
+
+function isUuidV4(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function randomUuidV4(): string {
+  const cryptoApi = globalThis.crypto;
+  if (cryptoApi?.randomUUID !== undefined) return cryptoApi.randomUUID();
+  if (cryptoApi?.getRandomValues !== undefined) {
+    const bytes = cryptoApi.getRandomValues(new Uint8Array(16));
+    bytes[6] = ((bytes[6] ?? 0) & 0x0f) | 0x40;
+    bytes[8] = ((bytes[8] ?? 0) & 0x3f) | 0x80;
+    const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  }
+  const random = `${Date.now().toString(16)}${Math.random().toString(16).slice(2)}`
+    .padEnd(32, "0")
+    .slice(0, 32);
+  return `${random.slice(0, 8)}-${random.slice(8, 12)}-4${random.slice(13, 16)}-8${random.slice(17, 20)}-${random.slice(20)}`;
 }
 
 export interface LocalStorageAdapterOptions {

@@ -21,6 +21,7 @@ export type {
   OfflineConflictResult,
   OfflineOperation,
   OfflineOperationError,
+  OfflineOperationLifecycleStatus,
   OfflineOperationResponse,
   OfflineOperationStatus,
   OfflineQueueOptions,
@@ -30,6 +31,7 @@ export type {
   OfflineSyncResultEvent,
   OfflineSyncResultListener,
   SyncConflictPolicy,
+  SyncRetryOptions,
   SyncState,
 } from "./offlineQueue.js";
 export {
@@ -49,6 +51,7 @@ export type {
   StorageWarningHandler,
 } from "./storage.js";
 export {
+  createAnonymousSessionId,
   exportProgressToken,
   IndexedDBAdapter,
   InMemoryStorage,

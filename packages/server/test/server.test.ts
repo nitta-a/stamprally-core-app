@@ -23,6 +23,104 @@ const config: AdminRallyConfig = {
   ],
 };
 describe("StampRallyServer", () => {
+  it("atomically decrements shared and per-reward inventory", async () => {
+    const sharedConfig = {
+      ...config,
+      inventoryMode: "shared" as const,
+      inventory: { sharedStock: 1 },
+    };
+    const persistence = new InMemoryServerPersistenceAdapter();
+    const server = new StampRallyServer(sharedConfig, persistence);
+    await server.checkIn({
+      rallyId: "rally",
+      userId: "alice",
+      spotId: "s1",
+      context: { type: "passcode", code: "OPEN" },
+      idempotencyKey: "shared-check-a",
+    });
+    await server.checkIn({
+      rallyId: "rally",
+      userId: "bob",
+      spotId: "s1",
+      context: { type: "passcode", code: "OPEN" },
+      idempotencyKey: "shared-check-b",
+    });
+    const first = await server.claimReward({
+      rallyId: "rally",
+      userId: "alice",
+      rewardId: "r1",
+      idempotencyKey: "shared-claim-a",
+    });
+    const second = await server.claimReward({
+      rallyId: "rally",
+      userId: "bob",
+      rewardId: "r1",
+      idempotencyKey: "shared-claim-b",
+    });
+    expect(first).toMatchObject({ ok: true, inventory: { sharedRemaining: 0 } });
+    expect(second).toMatchObject({ ok: false, code: "OUT_OF_STOCK" });
+    expect((await server.sync("rally", "bob")).inventory?.sharedRemaining).toBe(0);
+  });
+
+  it("returns structured validation errors and scopes anonymous sessions", async () => {
+    const gpsConfig = {
+      ...config,
+      spots: [
+        {
+          id: "s1",
+          orderIndex: 0,
+          name: "GPS",
+          conditions: [{ type: "gps" as const, latitude: 0, longitude: 0, radiusMeters: 10 }],
+        },
+      ],
+    };
+    const server = new StampRallyServer(gpsConfig, new InMemoryServerPersistenceAdapter(), {
+      anonymousPolicy: "session_scoped",
+    });
+    const invalid = await server.handle(
+      new Request("https://example.test/check-in", {
+        method: "POST",
+        body: JSON.stringify({
+          rallyId: "rally",
+          spotId: "s1",
+          context: { type: "gps", latitude: 91, longitude: 0 },
+          idempotencyKey: "invalid",
+        }),
+      }),
+    );
+    expect(invalid.status).toBe(400);
+    expect(await invalid.json()).toMatchObject({
+      error: "VALIDATION_FAILED",
+      details: [{ path: "proof.latitude", code: "INVALID_RANGE" }],
+    });
+    const unauthorized = await server.handle(
+      new Request("https://example.test/check-in", {
+        method: "POST",
+        body: JSON.stringify({
+          rallyId: "rally",
+          spotId: "s1",
+          context: { type: "gps", latitude: 0, longitude: 0 },
+          idempotencyKey: "no-session",
+        }),
+      }),
+    );
+    expect(unauthorized.status).toBe(401);
+    const session = "123e4567-e89b-42d3-a456-426614174000";
+    const authorized = await server.handle(
+      new Request("https://example.test/check-in", {
+        method: "POST",
+        headers: { "X-Anonymous-Session-Id": session },
+        body: JSON.stringify({
+          rallyId: "rally",
+          spotId: "s1",
+          context: { type: "gps", latitude: 0, longitude: 0 },
+          idempotencyKey: "session",
+        }),
+      }),
+    );
+    expect(authorized.status).toBe(200);
+    expect((await authorized.json()).state.userId).toBe(session);
+  });
   it("keeps check-in state, audit, and idempotency atomic", async () => {
     class FailingAuditPersistence extends InMemoryServerPersistenceAdapter {
       override async recordAuditLog(): Promise<void> {

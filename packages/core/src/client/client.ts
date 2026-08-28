@@ -11,9 +11,14 @@ import type {
   Validator,
 } from "../domain/index.js";
 import { consumeReward, type RewardConsumeError, reconcileRewardStates } from "../engine/index.js";
-import { resolveRallyStateConflict } from "../engine/sync.js";
 import type { OfflineOperationError, OfflineQueue, SyncState } from "./offlineQueue.js";
-import { cloneState, InMemoryStorage, type StampStorage, storageKey } from "./storage.js";
+import {
+  cloneState,
+  createAnonymousSessionId,
+  InMemoryStorage,
+  type StampStorage,
+  storageKey,
+} from "./storage.js";
 
 export type CheckInOptions = {
   readonly now?: string;
@@ -67,6 +72,7 @@ export interface CheckInRequest {
   readonly idempotencyKey: string;
   readonly now: string;
   readonly state: UserRallyState;
+  readonly anonymousSessionId?: string;
 }
 export interface ClaimRequest {
   readonly rallyId: string;
@@ -76,6 +82,7 @@ export interface ClaimRequest {
   readonly now: string;
   readonly options: ClaimOptions;
   readonly state: UserRallyState;
+  readonly anonymousSessionId?: string;
 }
 export interface SyncAdapter {
   readonly checkIn?: (request: CheckInRequest) => Promise<CheckInResult>;
@@ -84,6 +91,7 @@ export interface SyncAdapter {
     readonly rallyId: string;
     readonly userId: string | null;
     readonly state: UserRallyState;
+    readonly anonymousSessionId?: string;
   }) => Promise<UserRallyState>;
 }
 export interface ClientOptions {
@@ -93,6 +101,7 @@ export interface ClientOptions {
   readonly customValidators?: Readonly<Record<string, Validator>>;
   readonly clock?: () => string;
   readonly userId?: string | null;
+  readonly anonymousSessionId?: string;
   readonly offlineQueue?: OfflineQueue;
 }
 type StorageOrOptions = StampStorage | ClientOptions;
@@ -146,6 +155,7 @@ export class StampRallyClient {
   readonly #config: PublicRallyConfig;
   readonly #offlineQueue: OfflineQueue | undefined;
   #userId: string | null;
+  readonly #anonymousSessionId: string;
   #state: UserRallyState | null = null;
   #initialization: Promise<UserRallyState> | null = null;
   #queue: Promise<unknown> = Promise.resolve();
@@ -153,7 +163,8 @@ export class StampRallyClient {
     this.#config = config;
     this.#options = isStorage(storageOrOptions) ? { storage: storageOrOptions } : storageOrOptions;
     this.#storage = this.#options.storage ?? new InMemoryStorage();
-    this.#userId = this.#options.userId ?? null;
+    this.#anonymousSessionId = this.#options.anonymousSessionId ?? createAnonymousSessionId();
+    this.#userId = this.#options.userId ?? this.#anonymousSessionId;
     this.#offlineQueue = this.#options.offlineQueue;
     this.#offlineQueue?.setSyncResultListener((event) => this.#handleOfflineSyncResult(event));
   }
@@ -165,6 +176,9 @@ export class StampRallyClient {
   }
   getUserId(): string | null {
     return this.#userId;
+  }
+  getAnonymousSessionId(): string {
+    return this.#anonymousSessionId;
   }
   get syncState(): SyncState {
     return this.#offlineQueue?.syncState ?? "idle";
@@ -208,11 +222,12 @@ export class StampRallyClient {
   }
   switchUser(newUserId: string | null): Promise<UserRallyState> {
     return this.#enqueue(async () => {
-      if (this.#userId === newUserId && this.#state !== null) return this.#state;
-      this.#userId = newUserId;
+      const nextUserId = newUserId ?? this.#anonymousSessionId;
+      if (this.#userId === nextUserId && this.#state !== null) return this.#state;
+      this.#userId = nextUserId;
       this.#state = null;
       this.#initialization = null;
-      await this.#offlineQueue?.switchUser(newUserId);
+      await this.#offlineQueue?.switchUser(nextUserId);
       return this.initialize();
     });
   }
@@ -293,6 +308,9 @@ export class StampRallyClient {
         idempotencyKey: options.idempotencyKey ?? id("check-in"),
         now,
         state: current,
+        ...(this.#userId === this.#anonymousSessionId
+          ? { anonymousSessionId: this.#anonymousSessionId }
+          : {}),
       };
       const remote = this.#options.syncAdapter?.checkIn;
       if (options.sync !== false && remote !== undefined) {
@@ -349,6 +367,9 @@ export class StampRallyClient {
         now,
         options,
         state: current,
+        ...(this.#userId === this.#anonymousSessionId
+          ? { anonymousSessionId: this.#anonymousSessionId }
+          : {}),
       };
       const remote = this.#options.syncAdapter?.claimReward;
       if (options.sync !== false && remote !== undefined) {
@@ -401,15 +422,11 @@ export class StampRallyClient {
         rallyId: this.#config.id,
         userId: this.#userId,
         state: this.#state ?? current,
+        ...(this.#userId === this.#anonymousSessionId
+          ? { anonymousSessionId: this.#anonymousSessionId }
+          : {}),
       });
-      const localState = this.#state ?? current;
-      const merged =
-        this.#offlineQueue === undefined
-          ? serverState
-          : resolveRallyStateConflict(serverState, localState, {
-              policy: this.#offlineQueue.conflictPolicy,
-            });
-      const next = this.#reconcile(merged);
+      const next = this.#reconcile(serverState);
       await this.#storage.save(next);
       this.#state = next;
       this.#emit(next);

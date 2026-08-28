@@ -9,8 +9,18 @@ import type {
 } from "./client.js";
 
 export type OfflineOperation =
-  | { readonly kind: "checkIn"; readonly request: CheckInRequest }
-  | { readonly kind: "claimReward"; readonly request: ClaimRequest };
+  | {
+      readonly kind: "checkIn";
+      readonly request: CheckInRequest;
+      readonly status?: OfflineOperationLifecycleStatus;
+      readonly attempts?: number;
+    }
+  | {
+      readonly kind: "claimReward";
+      readonly request: ClaimRequest;
+      readonly status?: OfflineOperationLifecycleStatus;
+      readonly attempts?: number;
+    };
 export type OfflineResult = CheckInResult | ClaimResult | UserRallyState;
 export type SyncState = "idle" | "syncing" | "error";
 export type SyncConflictPolicy = "server_wins" | "merge";
@@ -44,6 +54,16 @@ export interface OfflineQueueOptions {
     | ((context: OfflineConflict) => SyncConflictPolicy | Promise<SyncConflictPolicy>);
   /** Enables storage-event/BroadcastChannel synchronization when browser APIs exist. */
   readonly synchronizeInstances?: boolean;
+  readonly retryOptions?: SyncRetryOptions;
+  readonly retry?: SyncRetryOptions;
+  /** Alias accepted for callers that configure retry behavior at sync time. */
+  readonly syncRetryOptions?: SyncRetryOptions;
+}
+
+export interface SyncRetryOptions {
+  readonly maxRetries?: number;
+  readonly initialIntervalMs?: number;
+  readonly backoffMultiplier?: number;
 }
 
 export interface OfflineConflict {
@@ -55,7 +75,14 @@ export interface OfflineConflict {
 export type OfflineSender = (
   operation: OfflineOperation,
 ) => Promise<OfflineResult | OfflineConflictResult | OfflineOperationResponse>;
-export type OfflineOperationStatus = "ACCEPTED" | "REJECTED_PERMANENT" | "RETRYABLE_ERROR";
+export type OfflineOperationStatus =
+  | "PENDING"
+  | "IN_FLIGHT"
+  | "ACCEPTED"
+  | "REJECTED"
+  | "REJECTED_PERMANENT"
+  | "RETRYABLE_ERROR";
+export type OfflineOperationLifecycleStatus = "PENDING" | "IN_FLIGHT" | "ACCEPTED" | "REJECTED";
 export interface OfflineOperationError {
   readonly code: string;
   readonly message: string;
@@ -217,6 +244,11 @@ function errorValue(value: unknown, fallbackCode: string): OfflineOperationError
 
 const syncLocks = new Map<string, { readonly owner: string; readonly expiresAt: number }>();
 const SYNC_LOCK_TTL_MS = 30_000;
+const DEFAULT_RETRY_OPTIONS: Required<SyncRetryOptions> = {
+  maxRetries: 0,
+  initialIntervalMs: 250,
+  backoffMultiplier: 2,
+};
 
 function randomId(): string {
   return (
@@ -240,6 +272,7 @@ export class OfflineQueue {
   #syncPromise: Promise<void> | null = null;
   #syncResultListener: OfflineSyncResultListener | undefined;
   readonly #synchronizeInstances: boolean;
+  readonly #retryOptions: Required<SyncRetryOptions>;
   readonly #instanceId = randomId();
   readonly #lockStorage: NonNullable<OfflineQueueOptions["storageLike"]> | null;
   #storageListener: ((event: StorageEvent) => void) | undefined;
@@ -256,6 +289,15 @@ export class OfflineQueue {
     this.#conflictPolicy = options.conflictPolicy ?? "server_wins";
     this.#onSyncConflict = options.onSyncConflict;
     this.#synchronizeInstances = options.synchronizeInstances ?? true;
+    const retryOptions = {
+      ...DEFAULT_RETRY_OPTIONS,
+      ...(options.retryOptions ?? options.syncRetryOptions ?? options.retry ?? {}),
+    };
+    this.#retryOptions = {
+      maxRetries: Math.max(0, Math.floor(retryOptions.maxRetries)),
+      initialIntervalMs: Math.max(0, retryOptions.initialIntervalMs),
+      backoffMultiplier: Math.max(1, retryOptions.backoffMultiplier),
+    };
     this.#lockStorage =
       options.storageLike ??
       (globalThis as { readonly localStorage?: OfflineQueueOptions["storageLike"] }).localStorage ??
@@ -297,7 +339,7 @@ export class OfflineQueue {
 
   async initialize(): Promise<void> {
     if (this.#loaded) return;
-    this.#operations = [...(await this.#storage.load(this.#storageKey()))];
+    this.#operations = (await this.#storage.load(this.#storageKey())).map(normalizeOperation);
     this.#loaded = true;
   }
 
@@ -347,7 +389,7 @@ export class OfflineQueue {
     await this.initialize();
     const id = operationId(operation);
     if (this.#operations.some((item) => operationId(item) === id)) return;
-    this.#operations = [...this.#operations, operation];
+    this.#operations = [...this.#operations, { ...operation, status: "PENDING", attempts: 0 }];
     await this.#storage.save(this.#storageKey(), this.#operations);
     this.#announceChange();
   }
@@ -383,6 +425,47 @@ export class OfflineQueue {
   }
 
   async #run(sender: OfflineSender): Promise<void> {
+    const locks = (
+      globalThis as {
+        readonly navigator?: {
+          readonly locks?: {
+            request<T>(
+              name: string,
+              options: { ifAvailable: boolean },
+              callback: (lock: unknown) => Promise<T>,
+            ): Promise<T>;
+          };
+        };
+      }
+    ).navigator?.locks;
+    if (locks !== undefined) {
+      let callbackStarted = false;
+      try {
+        const acquired = await locks.request(
+          `stamprally:${this.#storageKey()}:sync`,
+          { ifAvailable: true },
+          async (lock) => {
+            if (lock === null) {
+              await this.#reloadFromStorage();
+              this.#state = "idle";
+              return false;
+            }
+            callbackStarted = true;
+            await this.#runWithStorageLock(sender);
+            return true;
+          },
+        );
+        if (!acquired) return;
+        return;
+      } catch (error) {
+        // Older browsers and test doubles can expose a partial Locks API.
+        if (callbackStarted) throw error;
+      }
+    }
+    await this.#runWithStorageLock(sender);
+  }
+
+  async #runWithStorageLock(sender: OfflineSender): Promise<void> {
     this.#state = "syncing";
     this.#error = null;
     if (!this.#acquireSyncLock()) {
@@ -394,17 +477,33 @@ export class OfflineQueue {
       while (this.#operations.length > 0) {
         const operation = this.#operations[0];
         if (operation === undefined) break;
-        let rawResult: OfflineResult | OfflineConflictResult | OfflineOperationResponse;
-        try {
-          rawResult = await sender(operation);
-        } catch (cause) {
-          throw new Error(errorValue(cause, "RETRYABLE_ERROR").message);
-        }
-        const response = this.#normalizeResponse(rawResult);
-        if (response.status === "RETRYABLE_ERROR") {
+        let attempt = 0;
+        let response: {
+          readonly status: OfflineOperationStatus;
+          readonly result?: OfflineResult | OfflineConflictResult;
+          readonly state?: UserRallyState;
+          readonly error?: ClientError | OfflineOperationError;
+          readonly reason?: ClientError | OfflineOperationError;
+        };
+        while (true) {
+          await this.#updateOperationStatus("IN_FLIGHT", attempt);
+          try {
+            response = this.#normalizeResponse(await sender(operation));
+          } catch (cause) {
+            response = {
+              status: "RETRYABLE_ERROR",
+              error: errorValue(cause, "RETRYABLE_ERROR"),
+            };
+          }
+          if (response.status !== "RETRYABLE_ERROR") break;
           const error = errorValue(response.error ?? response.reason, "RETRYABLE_ERROR");
+          await this.#updateOperationStatus("PENDING", attempt + 1);
           await this.#syncResultListener?.({ operation, status: response.status, error });
-          throw new Error(error.message);
+          if (attempt >= this.#retryOptions.maxRetries) throw new Error(error.message);
+          const interval =
+            this.#retryOptions.initialIntervalMs * this.#retryOptions.backoffMultiplier ** attempt;
+          await new Promise<void>((resolve) => setTimeout(resolve, Math.max(0, interval)));
+          attempt += 1;
         }
         const result = response.result;
         const state =
@@ -418,6 +517,13 @@ export class OfflineQueue {
           response.status === "REJECTED_PERMANENT"
             ? errorValue(response.error ?? response.reason, "REJECTED_PERMANENT")
             : undefined;
+        await this.#updateOperationStatus(
+          response.status === "ACCEPTED" ? "ACCEPTED" : "REJECTED",
+          attempt + 1,
+        );
+        const fallbackState =
+          response.status === "REJECTED_PERMANENT" ? operation.request.state : undefined;
+        const eventState = state ?? fallbackState;
         this.#operations = this.#operations.slice(1);
         await this.#storage.save(this.#storageKey(), this.#operations);
         this.#announceChange();
@@ -426,7 +532,7 @@ export class OfflineQueue {
           ...(result === undefined ? {} : { result }),
           status: response.status,
           ...(error === undefined ? {} : { error }),
-          ...(state === undefined ? {} : { state }),
+          ...(eventState === undefined ? {} : { state: eventState }),
         });
       }
       this.#state = "idle";
@@ -437,6 +543,17 @@ export class OfflineQueue {
     } finally {
       this.#releaseSyncLock();
     }
+  }
+
+  async #updateOperationStatus(
+    status: OfflineOperationLifecycleStatus,
+    attempts: number,
+  ): Promise<void> {
+    const operation = this.#operations[0];
+    if (operation === undefined) return;
+    this.#operations = [{ ...operation, status, attempts }, ...this.#operations.slice(1)];
+    await this.#storage.save(this.#storageKey(), this.#operations);
+    this.#announceChange();
   }
 
   #subscribeToExternalChanges(): void {
@@ -474,7 +591,7 @@ export class OfflineQueue {
   async #reloadFromStorage(): Promise<void> {
     if (this.#state === "syncing") return;
     try {
-      this.#operations = [...(await this.#storage.load(this.#storageKey()))];
+      this.#operations = (await this.#storage.load(this.#storageKey())).map(normalizeOperation);
       this.#loaded = true;
     } catch {
       // A transient storage failure must not destroy the in-memory queue.
@@ -574,6 +691,14 @@ export class OfflineQueue {
         : configured) ?? this.#conflictPolicy;
     return resolveRallyStateConflict(serverState, localState, { policy });
   }
+}
+
+function normalizeOperation(operation: OfflineOperation): OfflineOperation {
+  return {
+    ...operation,
+    status: operation.status === "IN_FLIGHT" ? "PENDING" : (operation.status ?? "PENDING"),
+    attempts: operation.attempts ?? 0,
+  };
 }
 
 export { MemoryQueueStorage as InMemoryOfflineQueueStorage };

@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  createAnonymousSessionId,
   evaluateSpotStatus,
   InMemoryOfflineQueueStorage,
   OfflineQueue,
   resolveRallyStateConflict,
+  StampRallyClient,
+  toPublicConfig,
   type UserRallyState,
 } from "../src/index.js";
 
@@ -43,6 +46,84 @@ describe("resolveRallyStateConflict", () => {
 });
 
 describe("OfflineQueue conflict synchronization", () => {
+  it("rolls optimistic state back when the server permanently rejects an operation", async () => {
+    const config = toPublicConfig({
+      id: "rally",
+      version: "1",
+      title: "Rally",
+      spots: [
+        { id: "s1", orderIndex: 0, name: "Spot", conditions: [{ type: "passcode", code: "OPEN" }] },
+      ],
+      rewards: [],
+    });
+    const queue = new OfflineQueue({
+      storage: new InMemoryOfflineQueueStorage(),
+      rallyId: "rally",
+      userId: "user",
+    });
+    let offline = true;
+    const client = new StampRallyClient(config, {
+      offlineQueue: queue,
+      userId: "user",
+      syncAdapter: {
+        checkIn: async () => {
+          if (offline) throw new Error("offline");
+          return { ok: false, error: { code: "INVALID_PROOF", spotId: "s1", message: "Rejected" } };
+        },
+        sync: async () => ({
+          rallyId: "rally",
+          userId: "user",
+          records: [],
+          rewards: [],
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        }),
+      },
+    });
+    expect((await client.checkIn("s1", "OPEN", { now: "2026-01-01T00:00:00.000Z" })).ok).toBe(true);
+    expect(client.getState()?.records).toHaveLength(1);
+    offline = false;
+    await client.sync();
+    expect(client.getState()?.records).toHaveLength(0);
+  });
+
+  it("retries retryable operations with bounded exponential backoff", async () => {
+    const queue = new OfflineQueue({
+      storage: new InMemoryOfflineQueueStorage(),
+      key: "retry-options",
+      retryOptions: { maxRetries: 2, initialIntervalMs: 0, backoffMultiplier: 2 },
+    });
+    await queue.enqueueCheckIn({
+      rallyId: "rally",
+      userId: "user",
+      spotId: "s1",
+      proofData: "proof",
+      idempotencyKey: "retry-options",
+      now: "2026-01-01T00:00:00.000Z",
+      state: state([], "LOCKED"),
+    });
+    let attempts = 0;
+    await queue.sync(async () => {
+      attempts += 1;
+      if (attempts < 3)
+        return { status: "RETRYABLE_ERROR", error: { code: "NETWORK", message: "Retry" } };
+      return { status: "ACCEPTED", state: state(["s1"], "AVAILABLE") };
+    });
+    expect(attempts).toBe(3);
+    expect(queue.pendingCount).toBe(0);
+  });
+
+  it("creates a persistent UUID v4 anonymous session id", () => {
+    const values = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+      removeItem: (key: string) => values.delete(key),
+    };
+    const first = createAnonymousSessionId(storage);
+    expect(first).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+    expect(createAnonymousSessionId(storage)).toBe(first);
+  });
+
   it("resolves conflicts, notifies the client, and removes the operation", async () => {
     const storage = new InMemoryOfflineQueueStorage();
     const queue = new OfflineQueue({ storage, key: "conflict", conflictPolicy: "merge" });

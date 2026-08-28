@@ -1,6 +1,6 @@
 # Synchronization and reward transactions
 
-Version 0.13.0 makes reward persistence atomic. A `ServerPersistenceAdapter` must
+Version v0.15.0 makes check-in and reward persistence atomic. A `ServerPersistenceAdapter` must
 implement `executeClaimRewardTransaction`; there is no non-transactional fallback.
 The adapter commits stock, user state, claim count, audit log, and idempotency data
 as one unit and rolls all of them back if any write fails.
@@ -36,7 +36,10 @@ independent network writes.
 
 ## Offline conflict policy
 
-`OfflineQueue` supports `server_wins` and `merge`. Merge keeps the server state as
+`OfflineQueue` supports `server_wins` and `merge`. Normal client synchronization is
+server-authoritative: the server snapshot is the base and locally optimistic values
+are never merged into it. Merge is available only for explicit conflict responses.
+Merge keeps the server state as
 the base, adds locally acquired stamps that are absent on the server, preserves
 server reward values, and gives a consumed reward priority if either side consumed it.
 
@@ -68,7 +71,15 @@ Transport or explicitly retryable failures remain queued for `retrySync`.
 `useStampRally` observes the client state and error events, so accepted and merged
 results are visible immediately.
 
-The default queue key is `stamprally:queue:<rallyId>:<userId-or-anonymous>`. A
+The queue marks every persisted operation `PENDING`, `IN_FLIGHT`, `ACCEPTED`, or
+`REJECTED`. Web Locks is used when available; the storage lock is the fallback.
+`retryOptions` supports bounded retries with `maxRetries`, `initialIntervalMs`, and
+`backoffMultiplier`.
+
+Anonymous clients receive a browser-persistent UUID v4 `anonymousSessionId`, which
+is used as the state and queue scope and should be sent as the
+`X-Anonymous-Session-Id` request header. The default queue key is
+`stamprally:queue:<rallyId>:<userId-or-anonymous>`. A
 queue can switch users with `switchUser(userId)`; every operation is checked against
 the active rally/user scope. Pass an explicit `key` only when an application owns
 an equivalent isolation scheme.

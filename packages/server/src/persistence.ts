@@ -20,10 +20,15 @@ export interface ClaimRewardTransactionParams {
   readonly idempotencyTtlMs?: number;
   /** Used when the first claim is made before a user state has been stored. */
   readonly initialUserState?: UserRallyState;
+  readonly stockKey?: string;
+  readonly secondaryStockKey?: string;
+  readonly initialStock?: number | null;
+  readonly initialSecondaryStock?: number | null;
 }
 
 export interface ClaimRewardTransactionMutation {
   readonly nextStock: number | null;
+  readonly nextSecondaryStock?: number | null;
   readonly nextUserState: UserRallyState;
   readonly auditLog: AuditLog;
   /** The server response is persisted by the adapter with the idempotency key. */
@@ -64,6 +69,7 @@ export interface ServerPersistenceAdapter {
     params: ClaimRewardTransactionParams,
     mutation: (current: {
       readonly stock: number | null;
+      readonly secondaryStock: number | null;
       readonly claimCount: number;
       readonly userState: UserRallyState;
     }) => ClaimRewardTransactionMutation,
@@ -158,6 +164,7 @@ export class InMemoryServerPersistenceAdapter implements ServerPersistenceAdapte
     params: ClaimRewardTransactionParams,
     mutation: (current: {
       readonly stock: number | null;
+      readonly secondaryStock: number | null;
       readonly claimCount: number;
       readonly userState: UserRallyState;
     }) => ClaimRewardTransactionMutation,
@@ -168,8 +175,17 @@ export class InMemoryServerPersistenceAdapter implements ServerPersistenceAdapte
           (await this.getUserState(params.rallyId, params.userId)) ?? params.initialUserState;
         if (userState === undefined)
           return { success: false, error: "A user state is required for this transaction." };
+        const storedStock = await this.getRewardStock(
+          params.rallyId,
+          params.stockKey ?? params.rewardId,
+        );
+        const storedSecondaryStock =
+          params.secondaryStockKey === undefined
+            ? null
+            : await this.getRewardStock(params.rallyId, params.secondaryStockKey);
         const mutationResult = mutation({
-          stock: await this.getRewardStock(params.rallyId, params.rewardId),
+          stock: storedStock ?? params.initialStock ?? null,
+          secondaryStock: storedSecondaryStock ?? params.initialSecondaryStock ?? null,
           claimCount: await this.getUserClaimCount(params.rallyId, params.userId, params.rewardId),
           userState,
         });
@@ -185,19 +201,67 @@ export class InMemoryServerPersistenceAdapter implements ServerPersistenceAdapte
             );
           return { success: false, error: mutationResult.error };
         }
-        const currentStock = await this.getRewardStock(params.rallyId, params.rewardId);
+        const currentStock = await this.getRewardStock(
+          params.rallyId,
+          params.stockKey ?? params.rewardId,
+        );
+        const effectiveStock = currentStock ?? params.initialStock ?? null;
         if (
-          currentStock !== null &&
+          currentStock === null &&
+          params.initialStock !== undefined &&
+          params.initialStock !== null
+        )
+          this.#stocks.set(
+            this.#stockKey(params.rallyId, params.stockKey ?? params.rewardId),
+            params.initialStock,
+          );
+        const currentSecondaryStock =
+          params.secondaryStockKey === undefined
+            ? null
+            : await this.getRewardStock(params.rallyId, params.secondaryStockKey);
+        const effectiveSecondaryStock =
+          currentSecondaryStock ?? params.initialSecondaryStock ?? null;
+        if (
+          currentSecondaryStock === null &&
+          params.secondaryStockKey !== undefined &&
+          params.initialSecondaryStock !== undefined &&
+          params.initialSecondaryStock !== null
+        )
+          this.#stocks.set(
+            this.#stockKey(params.rallyId, params.secondaryStockKey),
+            params.initialSecondaryStock,
+          );
+        if (
+          effectiveStock !== null &&
           (mutationResult.nextStock === null || mutationResult.nextStock < 0)
         )
           throw new Error("The transaction produced an invalid stock value.");
-        if (currentStock === null && mutationResult.nextStock !== null)
+        if (effectiveStock === null && mutationResult.nextStock !== null)
           throw new Error("The transaction changed an unlimited stock to a limited stock.");
         if (mutationResult.nextStock !== null)
           this.#stocks.set(
-            this.#stockKey(params.rallyId, params.rewardId),
+            this.#stockKey(params.rallyId, params.stockKey ?? params.rewardId),
             mutationResult.nextStock,
           );
+        if (
+          params.secondaryStockKey !== undefined &&
+          mutationResult.nextSecondaryStock !== undefined
+        ) {
+          if (
+            effectiveSecondaryStock !== null &&
+            (mutationResult.nextSecondaryStock === null || mutationResult.nextSecondaryStock < 0)
+          )
+            throw new Error("The transaction produced an invalid secondary stock value.");
+          if (effectiveSecondaryStock === null && mutationResult.nextSecondaryStock !== null)
+            throw new Error(
+              "The transaction changed an unlimited secondary stock to a limited stock.",
+            );
+          if (mutationResult.nextSecondaryStock !== null)
+            this.#stocks.set(
+              this.#stockKey(params.rallyId, params.secondaryStockKey),
+              mutationResult.nextSecondaryStock,
+            );
+        }
         await this.saveUserState(params.rallyId, params.userId, mutationResult.nextUserState);
         const reward = mutationResult.nextUserState.rewards.find(
           (item) => item.rewardId === params.rewardId,

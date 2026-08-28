@@ -1,4 +1,4 @@
-# stamprally-core-app
+# stamprally-core-app v0.15.0
 
 A headless, storage-agnostic stamp rally engine with React, participant UI, authoring UI, and Web Standard server integration.
 
@@ -12,7 +12,7 @@ A headless, storage-agnostic stamp rally engine with React, participant UI, auth
 
 ## Requirements and commands
 
-- Node.js 22.12 or later
+- Node.js 22 or later
 - pnpm 11
 
 ```sh
@@ -34,7 +34,7 @@ import { RallyViewer } from "@stamprally/ui";
 
 const adminConfig: AdminRallyConfig = {
   id: "city-tour",
-  version: "0.9.1",
+  version: "0.15.0",
   title: { ja: "街歩きラリー", en: "City Tour" },
   spots: [
     {
@@ -92,7 +92,7 @@ app.all("/api/*", async (context) => {
 
 Implement `ServerPersistenceAdapter` with rallyId-scoped locks, reward stock, idempotency, user state, claim records, and audit logs. Production deployments should use a transactional database or Redis primitives with equivalent atomicity.
 
-For v0.13 offline clients, use the scoped `OfflineQueue` key and return explicit
+For v0.15.0 offline clients, use the scoped `OfflineQueue` key and return explicit
 operation outcomes (`ACCEPTED`, `REJECTED_PERMANENT`, or `RETRYABLE_ERROR`). The
 SQL transaction reference in `packages/server/src/examples/transaction.ts` shows
 the required all-or-nothing reward claim writes.

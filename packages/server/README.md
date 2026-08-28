@@ -1,4 +1,4 @@
-# @stamprally/server
+# @stamprally/server v0.15.0
 
 Web Standard `Request` / `Response` handlers for server-authoritative check-ins and reward claims.
 
@@ -16,8 +16,15 @@ const response = await server.handle(request);
 HTTP check-in and reward-claim responses include an operation status: `ACCEPTED`,
 `REJECTED_PERMANENT`, or `RETRYABLE_ERROR`. Clients can pass the response directly
 to an `OfflineQueue` sender; the queue removes accepted/permanent operations and
-retains retryable failures. The SQL transaction contract and all-or-nothing example
-are exported as `executeClaimRewardTransaction` from `src/examples/transaction.ts`.
+retains retryable failures. The SQL transaction contract and all-or-nothing examples
+for check-ins and claims are exported as `executeCheckInTransaction` and
+`executeClaimRewardTransaction` from `src/examples/transaction.ts`. Redis adapters
+can use the exported `executeRedisTransaction` helper to wrap a MULTI/EXEC batch.
+
+Configure `anonymousPolicy: "session_scoped"` to use the UUID v4 from the
+`X-Anonymous-Session-Id` header as the anonymous identity, or `"reject"` to return
+HTTP 401 when no authenticated identity is present. Request validation failures use
+HTTP 400 with `{ error: "VALIDATION_FAILED", details: [...] }`.
 
 Hono can mount the handler directly because it accepts the same Web Standard request and response types.
 

@@ -1,4 +1,4 @@
-# @stamprally/ui
+# @stamprally/ui v0.15.0
 
 Participant-facing React components for `@stamprally/core`.
 
