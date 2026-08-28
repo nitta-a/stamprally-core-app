@@ -1,3 +1,11 @@
+.sry-feedback {
+  min-height: 1.5rem;
+  color: var(--stamprally-feedback-color, currentColor);
+}
+.sry-action {
+  margin-block: 0.35rem;
+}
+
 .stamp-sheet,
 :where(.stamprally-sheet, .stamprally-rewards) {
   color: var(--stamprally-text, #352f25);

@@ -38,6 +38,10 @@ export interface ServerOptions {
   readonly now?: () => string;
 }
 export type { UserRallyState } from "@stamprally/core";
-export type { InMemoryServerPersistenceOptions, ServerPersistenceAdapter } from "./persistence.js";
+export type {
+  InMemoryServerPersistenceOptions,
+  ServerPersistenceAdapter,
+  UserClaimRecord,
+} from "./persistence.js";
 export { InMemoryServerPersistenceAdapter } from "./persistence.js";
 export { StampRallyServer } from "./server.js";

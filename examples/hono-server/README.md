@@ -12,4 +12,6 @@ app.all("/api/*", async (c) => {
 
 The application should authenticate the request before the handler or provide
 `AdminRallyConfig.authenticate`. Store rally state, audit logs, and reward
-stock in Redis or a transactional database for multi-instance deployments.
+stock in Redis or a transactional database for multi-instance deployments. Every
+`ServerPersistenceAdapter` operation receives `rallyId`, and `recordUserClaim`
+records the issued ticket and timestamp.

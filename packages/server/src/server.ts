@@ -174,10 +174,19 @@ export class StampRallyServer {
   }
   async checkIn(request: CheckInRequest & { readonly userId: string }): Promise<CheckInResponse> {
     const key = `check-in:${request.rallyId}:${request.userId}:${request.idempotencyKey}`;
-    const previous = await this.#persistence.getIdempotentResult<CheckInResponse>(key);
+    const previous = await this.#persistence.getIdempotentResult<CheckInResponse>(
+      request.rallyId,
+      key,
+    );
     if (previous !== null) return previous;
     const lockKey = `state:${request.rallyId}:${request.userId}`;
-    if (!(await this.#persistence.acquireLock(lockKey, this.#options.lockTtlMs ?? 5_000)))
+    if (
+      !(await this.#persistence.acquireLock(
+        request.rallyId,
+        lockKey,
+        this.#options.lockTtlMs ?? 5_000,
+      ))
+    )
       return { ok: false, code: "CONFLICT", message: "The user state is being updated." };
     const timestamp = now(this.#options, request.now);
     try {
@@ -267,14 +276,17 @@ export class StampRallyServer {
         timestamp,
       );
     } finally {
-      await this.#persistence.releaseLock(lockKey);
+      await this.#persistence.releaseLock(request.rallyId, lockKey);
     }
   }
   async claimReward(
     request: ClaimRewardRequest & { readonly userId: string },
   ): Promise<ClaimResponse> {
     const key = `claim:${request.rallyId}:${request.userId}:${request.rewardId}:${request.idempotencyKey}`;
-    const previous = await this.#persistence.getIdempotentResult<ClaimResponse>(key);
+    const previous = await this.#persistence.getIdempotentResult<ClaimResponse>(
+      request.rallyId,
+      key,
+    );
     if (previous !== null) return previous;
     const reward = this.#config.rewards.find((item) => item.id === request.rewardId);
     if (reward === undefined)
@@ -285,12 +297,21 @@ export class StampRallyServer {
         now(this.#options, request.now),
       );
     const lockKey = `reward:${request.rallyId}:${reward.id}`;
-    if (!(await this.#persistence.acquireLock(lockKey, this.#options.lockTtlMs ?? 5_000)))
+    if (
+      !(await this.#persistence.acquireLock(
+        request.rallyId,
+        lockKey,
+        this.#options.lockTtlMs ?? 5_000,
+      ))
+    )
       return { ok: false, code: "CONFLICT", message: "The reward is being claimed." };
     const timestamp = now(this.#options, request.now);
     let decremented = false;
     try {
-      const checked = await this.#persistence.getIdempotentResult<ClaimResponse>(key);
+      const checked = await this.#persistence.getIdempotentResult<ClaimResponse>(
+        request.rallyId,
+        key,
+      );
       if (checked !== null) return checked;
       const current =
         (await this.#persistence.getUserState(request.rallyId, request.userId)) ??
@@ -325,7 +346,7 @@ export class StampRallyServer {
           request,
           timestamp,
         );
-      const stock = await this.#persistence.decrementRewardStock(reward.id);
+      const stock = await this.#persistence.decrementRewardStock(request.rallyId, reward.id);
       if (!stock.success)
         return this.#rememberClaim(
           key,
@@ -345,6 +366,13 @@ export class StampRallyServer {
           local.value.claimTicketNumber === undefined
             ? { ok: true, state: next }
             : { ok: true, state: next, claimTicketNumber: local.value.claimTicketNumber };
+        await this.#persistence.recordUserClaim({
+          rallyId: request.rallyId,
+          userId: request.userId,
+          rewardId: reward.id,
+          ticketNumber: local.value.claimTicketNumber ?? "",
+          timestamp: Number.isNaN(Date.parse(timestamp)) ? Date.now() : Date.parse(timestamp),
+        });
         await this.#persistence.recordAuditLog(
           audit(
             request.rallyId,
@@ -357,31 +385,26 @@ export class StampRallyServer {
           ),
         );
         await this.#persistence.saveIdempotentResult(
+          request.rallyId,
           key,
           response,
           this.#options.idempotencyTtlMs ?? 86_400_000,
         );
-        if (
-          this.#persistence instanceof Object &&
-          "recordClaim" in this.#persistence &&
-          typeof this.#persistence.recordClaim === "function"
-        )
-          this.#persistence.recordClaim(request.rallyId, request.userId, reward.id);
         return response;
       } catch (error) {
-        await this.#persistence.incrementRewardStock(reward.id);
+        await this.#restoreRewardStock(request.rallyId, reward.id);
         decremented = false;
         throw error;
       }
     } catch (error) {
-      if (decremented) await this.#persistence.incrementRewardStock(reward.id);
+      if (decremented) await this.#restoreRewardStock(request.rallyId, reward.id);
       return {
         ok: false,
         code: "PERSISTENCE_FAILED",
         message: error instanceof Error ? error.message : "Reward claim failed.",
       };
     } finally {
-      await this.#persistence.releaseLock(lockKey);
+      await this.#persistence.releaseLock(request.rallyId, lockKey);
     }
   }
   async sync(rallyId: string, userId: string): Promise<UserRallyState> {
@@ -426,6 +449,7 @@ export class StampRallyServer {
       ),
     );
     await this.#persistence.saveIdempotentResult(
+      rallyId,
       key,
       result,
       this.#options.idempotencyTtlMs ?? 86_400_000,
@@ -451,10 +475,15 @@ export class StampRallyServer {
       ),
     );
     await this.#persistence.saveIdempotentResult(
+      request.rallyId,
       key,
       result,
       this.#options.idempotencyTtlMs ?? 86_400_000,
     );
     return result;
+  }
+  async #restoreRewardStock(rallyId: string, rewardId: string): Promise<void> {
+    if (this.#persistence.restoreRewardStock !== undefined)
+      await this.#persistence.restoreRewardStock(rallyId, rewardId);
   }
 }

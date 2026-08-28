@@ -1,209 +1,107 @@
 # stamprally-core-app
 
-A headless, storage-agnostic stamp rally engine with React integration for TypeScript/JavaScript.
+A headless, storage-agnostic stamp rally engine with React, participant UI, authoring UI, and Web Standard server integration.
 
 ## Packages
 
-- `@stamprally/core`: Dependency-free domain types, detailed condition evaluation, immutable state transitions, progress calculation, browser storage adapters, sensor detectors, and a storage-agnostic client.
+- `@stamprally/core`: Domain models, immutable state transitions, storage adapters, browser detectors, public-config projection, and runtime parsers.
 - `@stamprally/react`: The `useStampRally` React hook.
-- `@stamprally/ui`: Accessible participant components such as `StampSheet`, `StampModal`, and `RewardPanel`.
-- `@stamprally/admin-ui`: Authoring components for settings, spots, rewards, themes, QR output, and JSON IO.
-- `@stamprally/web`: A Vite field-test UI for instant, QR-token, GPS, sequential, and free-mode acquisition.
+- `@stamprally/ui`: Accessible participant components including `RallyViewer` and `StampSheet`.
+- `@stamprally/admin-ui`: Authoring forms for rally settings, spots, rewards, conditions, localization, and JSON import.
+- `@stamprally/server`: Server-authoritative check-in and reward-claim handlers using Web Standard `Request`/`Response`.
 
-## Requirements
+## Requirements and commands
 
 - Node.js 22.12 or later
 - pnpm 11
 
-## Setup and commands
-
 ```sh
 pnpm install
-pnpm build
 pnpm test
 pnpm typecheck
 pnpm lint
-pnpm dev
-```
-
-`pnpm dev` starts the package build watchers and the Vite application. Open the URL printed by Vite.
-
-The demo persists progress in LocalStorage. Use **Clear State** to remove it. GPS presets remain available when browser geolocation is unavailable or denied.
-
-## Core API example
-
-```ts
-import {
-  InMemoryStorage,
-  StampRallyClient,
-  type RallyConfig,
-} from "@stamprally/core";
-
-const config: RallyConfig = {
-  id: "city-tour",
-  stamps: [
-    {
-      id: "station",
-      name: "Central Station",
-      condition: { type: "token", token: "ARRIVED" },
-    },
-  ],
-};
-
-const client = new StampRallyClient(config, new InMemoryStorage());
-await client.init();
-
-const result = await client.acquire(
-  "station",
-  { type: "token", token: "ARRIVED" },
-  new Date().toISOString(),
-);
-
-if (!result.ok) {
-  console.error(result.error.code);
-}
-```
-
-All engine timestamps are ISO 8601 strings. Verification inputs such as tokens and coordinates are not copied into stamp record metadata.
-
-## Storage
-
-`InMemoryStorage`, `LocalStorageAdapter`, and `IndexedDBAdapter` implement the same `StampStorage` contract.
-
-`LocalStorageAdapter` defaults to an in-memory fallback when LocalStorage is unavailable, blocked, corrupt, or full. The fallback lasts for that adapter instance only. Use strict mode when callers must handle a typed failure:
-
-```ts
-const storage = new LocalStorageAdapter({
-  failureMode: "throw",
-  onWarning: (error) => console.warn(error.code),
-});
-```
-
-Call `client.reset()` to remove persisted progress and notify subscribers with a new empty state.
-
-## Detector API
-
-Detectors convert browser sensor output into type-safe `VerificationContext` values without throwing:
-
-```ts
-import { getCurrentGeoContext, readNfcContext, readQrContext } from "@stamprally/core";
-
-const geo = await getCurrentGeoContext({ enableHighAccuracy: true, timeout: 10_000 });
-const nfc = await readNfcContext({ signal: abortController.signal });
-const qr = await readQrContext(videoElement, { facingMode: "environment" });
-```
-
-Geolocation, Web NFC, and camera access require a secure context (HTTPS, or localhost where supported) and user permission. Web NFC and native `BarcodeDetector` are not available in every browser; check `isGeolocationSupported()`, `isNfcSupported()`, and `isQrSupported()` and keep a manual input fallback.
-
-## Design principles
-
-- The core domain engine remains pure and independent of the DOM, React, browser APIs, and any persistence implementation. Optional adapters and detectors touch browser globals only when called.
-- Conditions use discriminated unions and support recursive token, geo, composite, and time-window evaluation.
-- State transitions never mutate their input and return a `Result` together with events.
-- v0.2 adds generic localized models, runtime validation/migration, signed encrypted snapshot tokens, reward limits, public-config stripping, and the pure `evaluateCheckIn` server API.
-
----
-
-# stamprally-core-app（日本語）
-
-TypeScript/JavaScript向けの、ヘッドレスかつストレージ非依存なスタンプラリー判定エンジンとReact連携です。
-
-## パッケージ
-
-- `@stamprally/core`: 実行時依存ゼロのドメイン型、詳細な条件判定、イミュータブルな状態遷移、進捗計算、ブラウザストレージアダプタ、センサーDetector、ストレージ非依存Clientを提供します。
-- `@stamprally/react`: `useStampRally` React Hookを提供します。
-- `@stamprally/ui`: 参加者向けの `StampSheet`、`StampModal`、`RewardPanel` などアクセシブルなUIを提供します。
-- `@stamprally/admin-ui`: 基本設定、スポット、景品、テーマ、QR出力、JSON入出力の編集UIを提供します。
-- `@stamprally/web`: Instant、QRトークン、GPS、Sequential、Freeモードを検証できるViteデモアプリです。
-
-## 必要環境
-
-- Node.js 22.12以降
-- pnpm 11
-
-## セットアップとコマンド
-
-```sh
-pnpm install
 pnpm build
-pnpm test
-pnpm typecheck
-pnpm lint
-pnpm dev
 ```
 
-`pnpm dev` はパッケージのwatchビルドとViteアプリを起動します。Viteが表示するURLを開いてください。
+## Minimal end-to-end setup
 
-デモの進捗はLocalStorageに保存されます。保存状態を削除するには **Clear State** を押してください。ブラウザの位置情報が利用できない場合や拒否された場合も、GPSプリセットで検証できます。
+Keep `AdminRallyConfig` on the authoring/server side and publish only its safe projection:
 
-## Core APIの例
+```tsx
+import { StampRallyClient, toPublicConfig, type AdminRallyConfig } from "@stamprally/core";
+import { useStampRally } from "@stamprally/react";
+import { RallyViewer } from "@stamprally/ui";
 
-```ts
-import {
-  InMemoryStorage,
-  StampRallyClient,
-  type RallyConfig,
-} from "@stamprally/core";
-
-const config: RallyConfig = {
+const adminConfig: AdminRallyConfig = {
   id: "city-tour",
-  stamps: [
+  version: "0.9.1",
+  title: { ja: "街歩きラリー", en: "City Tour" },
+  spots: [
     {
       id: "station",
-      name: "Central Station",
-      condition: { type: "token", token: "ARRIVED" },
+      orderIndex: 0,
+      name: { ja: "中央駅", en: "Central Station" },
+      conditions: [{ type: "passcode", code: "ARRIVED" }],
     },
   ],
+  rewards: [],
 };
 
-const client = new StampRallyClient(config, new InMemoryStorage());
-await client.init();
+const publicConfig = toPublicConfig(adminConfig);
+const client = new StampRallyClient(publicConfig, { userId: null });
 
-const result = await client.acquire(
-  "station",
-  { type: "token", token: "ARRIVED" },
-  new Date().toISOString(),
-);
-
-if (!result.ok) {
-  console.error(result.error.code);
+export function App() {
+  useStampRally(client);
+  return <RallyViewer config={publicConfig} client={client} locale="en" />;
 }
 ```
 
-エンジンが扱う日時はすべてISO 8601文字列です。トークンや座標などの検証入力は、スタンプレコードのmetadataへ自動保存されません。
+`client.checkIn(spotId, proof, options?)` performs a check-in. `client.claimReward(rewardId, options?)` consumes an available reward. All timestamps are ISO 8601 strings and verification inputs are not stored in progress metadata.
 
-## ストレージ
+## Runtime validation
 
-`InMemoryStorage`、`LocalStorageAdapter`、`IndexedDBAdapter` は同じ `StampStorage` 契約を実装します。
-
-`LocalStorageAdapter` はLocalStorageが利用不可・ブロック・破損・容量超過の場合、既定で同一Adapter内のメモリストレージへ退避します。この退避状態はページ再読み込み後には保持されません。型付き例外を呼び出し側で処理したい場合はstrict設定を利用できます。
+Use the pure parsers at an untrusted JSON boundary. `safeParseAdminConfig` and `safeParsePublicConfig` return field-level paths such as `spots[0].conditions[1].latitude`; the `parse*` variants throw `ConfigValidationError` with the same errors.
 
 ```ts
-const storage = new LocalStorageAdapter({
-  failureMode: "throw",
-  onWarning: (error) => console.warn(error.code),
+import { safeParseAdminConfig } from "@stamprally/core";
+
+const result = safeParseAdminConfig(JSON.parse(jsonText));
+if (!result.success) {
+  for (const error of result.errors) console.error(error.path, error.code, error.message);
+}
+```
+
+## React and server integration
+
+`useStampRally(client)` subscribes to immutable state updates and exposes `onCheckIn`, `onClaimReward`, synchronization, and user switching. `RallyViewer` accepts a `PublicRallyConfig`, a client, or a server-backed adapter. Supply a locale dictionary to translate labels, statuses, placeholders, and feedback messages.
+
+Mount the server handler with Hono or any Web Standard router:
+
+```ts
+import { StampRallyServer } from "@stamprally/server";
+
+const server = new StampRallyServer(adminConfig, persistence, {
+  authenticate: (request) => request.headers.get("x-user-id"),
+});
+
+app.all("/api/*", async (context) => {
+  const response = await server.handle(context.req.raw);
+  return new Response(response.body, response);
 });
 ```
 
-`client.reset()` を呼ぶと永続化された進捗を削除し、購読者へ空の新しい状態を通知します。
+Implement `ServerPersistenceAdapter` with rallyId-scoped locks, reward stock, idempotency, user state, claim records, and audit logs. Production deployments should use a transactional database or Redis primitives with equivalent atomicity.
 
-## Detector API
+## Browser detectors
 
-Detectorはブラウザセンサーの出力を型安全な `VerificationContext` へ変換し、例外を投げずに `Result` を返します。
+`getCurrentGeoContext`, `readNfcContext`, and `readQrContext` return typed `Result` values for unsupported browsers, permission failures, timeouts, and device errors. Check `isGeolocationSupported()`, `isNfcSupported()`, and `isQrSupported()` and retain manual input fallbacks.
 
-```ts
-import { getCurrentGeoContext, readNfcContext, readQrContext } from "@stamprally/core";
+## 日本語
 
-const geo = await getCurrentGeoContext({ enableHighAccuracy: true, timeout: 10_000 });
-const nfc = await readNfcContext({ signal: abortController.signal });
-const qr = await readQrContext(videoElement, { facingMode: "environment" });
-```
+このモノレポは、ストレージ非依存のスタンプラリーエンジン、React Hook、参加者向け Viewer、管理者向け Maker UI、Web Standard サーバーを提供します。管理用の `AdminRallyConfig` は公開せず、必ず `toPublicConfig(config)` で秘密情報を除去してから `RallyViewer` に渡してください。
 
-Geolocation、Web NFC、カメラはHTTPS（対応ブラウザではlocalhostも可）と利用者の権限許可が必要です。Web NFCとネイティブ `BarcodeDetector` は対応ブラウザが限られるため、`isGeolocationSupported()`、`isNfcSupported()`、`isQrSupported()` で判定し、手入力の代替手段を用意してください。
+設定を外部 JSON から読み込む場合は `safeParseAdminConfig` / `safeParsePublicConfig` を利用してください。エラーには `spots[0].conditions[1].latitude` のようなフィールドパスが含まれます。管理 UI の `dictionary` と `locale` でラベル・状態・入力案内を翻訳でき、`updateLocalizedField` は他言語の値を保持したまま更新します。
 
-## 設計方針
+## License
 
-- coreのドメイン判定エンジンはDOM、React、ブラウザAPI、特定の永続化層に依存しません。任意のAdapterとDetectorは呼び出し時にのみブラウザglobalへアクセスします。
-- 条件はタグ付きユニオンで表現し、token、geo、composite、time windowを再帰的に評価します。
-- 状態遷移は入力状態を変更せず、`Result` とイベントを返します。
-- v0.2では多言語モデルのジェネリクス、ランタイム検証・移行、署名付き暗号化スナップショット、景品制限、公開用Config変換、純粋なサーバー判定APIを追加しています。
+MIT

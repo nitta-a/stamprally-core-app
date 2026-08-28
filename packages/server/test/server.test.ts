@@ -40,7 +40,24 @@ describe("StampRallyServer", () => {
     expect(first.ok).toBe(true);
     expect(second).toEqual(first);
     expect(await persistence.getUserClaimCount("rally", "alice", "r1")).toBe(1);
+    expect(persistence.getClaimRecords()).toHaveLength(1);
+    expect(persistence.getClaimRecords()[0]?.ticketNumber).toBeTruthy();
     expect(toPublicConfig(config).rewards[0]).not.toHaveProperty("digitalContentUrl");
+  });
+
+  it("keeps locks, stock, and idempotency values isolated by rally", async () => {
+    const persistence = new InMemoryServerPersistenceAdapter({
+      stocks: { "rally-a:r1": 1, "rally-b:r1": 2 },
+    });
+    expect(await persistence.acquireLock("rally-a", "same", 1_000)).toBe(true);
+    expect(await persistence.acquireLock("rally-b", "same", 1_000)).toBe(true);
+    expect(await persistence.decrementRewardStock("rally-a", "r1")).toEqual({
+      success: true,
+      remainingStock: 0,
+    });
+    expect(await persistence.getRewardStock("rally-b", "r1")).toBe(2);
+    await persistence.saveIdempotentResult("rally-a", "same", { rally: "a" }, 1_000);
+    expect(await persistence.getIdempotentResult("rally-b", "same")).toBeNull();
   });
 
   it("serializes concurrent claims against one stock unit", async () => {

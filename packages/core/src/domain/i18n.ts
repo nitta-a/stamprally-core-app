@@ -1,5 +1,15 @@
 import type { LocalizedString, LocalizedText, SupportedLocale } from "./models.js";
 
+export function updateLocalizedField<TLocale extends string>(
+  current: LocalizedText<TLocale> | undefined,
+  locale: TLocale,
+  newValue: string,
+): LocalizedText<TLocale> {
+  if (typeof current === "string" || current === undefined)
+    return { [locale]: newValue } as LocalizedText<TLocale>;
+  return { ...current, [locale]: newValue };
+}
+
 export function resolveLocalizedText<TLocale extends string = SupportedLocale>(
   text: LocalizedText<TLocale> | undefined,
   locale: string,

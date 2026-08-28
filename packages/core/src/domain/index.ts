@@ -9,7 +9,7 @@ export type {
   Validator,
   VerificationContext,
 } from "./errors.js";
-export { resolveLocalizedText, toLocalizedString } from "./i18n.js";
+export { resolveLocalizedText, toLocalizedString, updateLocalizedField } from "./i18n.js";
 export type {
   AdminRallyConfig,
   CheckInCondition,
@@ -46,3 +46,11 @@ export {
   toPublicConfig,
 } from "./models.js";
 export { THEME_PRESETS } from "./themePresets.js";
+export type { ParseResult, ValidationError } from "./validation.js";
+export {
+  ConfigValidationError,
+  parseAdminConfig,
+  parsePublicConfig,
+  safeParseAdminConfig,
+  safeParsePublicConfig,
+} from "./validation.js";
