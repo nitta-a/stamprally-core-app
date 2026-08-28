@@ -45,15 +45,15 @@ export function getCurrentGeoContext(
     try {
       navigator.geolocation.getCurrentPosition(
         (position) => {
-          const currentLatitude = position.coords.latitude;
-          const currentLongitude = position.coords.longitude;
+          const latitude = position.coords.latitude;
+          const longitude = position.coords.longitude;
           if (
-            !Number.isFinite(currentLatitude) ||
-            currentLatitude < -90 ||
-            currentLatitude > 90 ||
-            !Number.isFinite(currentLongitude) ||
-            currentLongitude < -180 ||
-            currentLongitude > 180
+            !Number.isFinite(latitude) ||
+            latitude < -90 ||
+            latitude > 90 ||
+            !Number.isFinite(longitude) ||
+            longitude < -180 ||
+            longitude > 180
           ) {
             resolve({
               ok: false,
@@ -67,7 +67,7 @@ export function getCurrentGeoContext(
           }
           resolve({
             ok: true,
-            value: { type: "geo", currentLatitude, currentLongitude },
+            value: { type: "gps", latitude, longitude },
           });
         },
         (error) => {

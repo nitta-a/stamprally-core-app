@@ -1,5 +1,5 @@
 import type { AdminRallyConfig } from "@stamprally/core";
-import { InMemoryServerPersistenceAdapter, UniversalRallyServer } from "@stamprally/server";
+import { InMemoryServerPersistenceAdapter, StampRallyServer } from "@stamprally/server";
 import { Hono } from "hono";
 import { jwtVerify } from "jose";
 
@@ -19,7 +19,7 @@ const config: AdminRallyConfig = {
   rewards: [],
 };
 
-const server = new UniversalRallyServer(config, new InMemoryServerPersistenceAdapter(), {
+const server = new StampRallyServer(config, new InMemoryServerPersistenceAdapter(), {
   authenticate: async (request) => {
     const authorization = request.headers.get("authorization");
     if (authorization?.startsWith("Bearer ") !== true) return null;

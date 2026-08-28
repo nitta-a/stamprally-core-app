@@ -1,8 +1,18 @@
 export type {
-  Clock,
-  StampRallyClientEvent,
-  StampRallyEventListener,
-  StampRallyListener,
+  CheckInOptions,
+  CheckInRequest,
+  CheckInResult,
+  CheckInSuccess,
+  ClaimOptions,
+  ClaimRequest,
+  ClaimResult,
+  ClaimSuccess,
+  ClientError,
+  ClientEvent,
+  ClientEventListener,
+  ClientListener,
+  ClientOptions,
+  SyncAdapter,
 } from "./client.js";
 export { StampRallyClient } from "./client.js";
 export type {
@@ -25,26 +35,5 @@ export {
   isStampRallyState,
   LocalStorageAdapter,
   StorageAdapterError,
+  storageKey,
 } from "./storage.js";
-export type {
-  CheckInOptions,
-  CheckInSuccess,
-  ClaimOptions,
-  ClaimResult,
-  ClaimSuccess,
-  ClientCheckInResult,
-  ClientClaimResult,
-  CustomValidator,
-  UniversalCheckInResult,
-  UniversalClaimRequest,
-  UniversalClaimResult,
-  UniversalClientError,
-  UniversalClientEvent,
-  UniversalClientEventListener,
-  UniversalClientListener,
-  UniversalClientRequest,
-  UniversalClientSyncAdapter,
-  UniversalStampRallyClientOptions,
-  UserRallyState,
-} from "./universalClient.js";
-export { UniversalStampRallyClient } from "./universalClient.js";

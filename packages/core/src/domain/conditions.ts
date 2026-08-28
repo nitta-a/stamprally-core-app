@@ -1,33 +1,6 @@
-export type StampCondition =
-  | { readonly type: "instant" }
-  | { readonly type: "token"; readonly token: string }
-  | {
-      readonly type: "geo";
-      readonly latitude: number;
-      readonly longitude: number;
-      readonly radiusMeters: number;
-    }
-  | {
-      readonly type: "composite";
-      readonly operator: "AND" | "OR";
-      readonly conditions: ReadonlyArray<StampCondition>;
-    }
-  | {
-      readonly type: "time_window";
-      readonly startsAt: string;
-      readonly endsAt: string;
-      readonly condition: StampCondition;
-    };
-
 export type VerificationContext =
-  | { readonly type: "instant" }
-  | { readonly type: "token"; readonly token: string }
-  | {
-      readonly type: "geo";
-      readonly currentLatitude: number;
-      readonly currentLongitude: number;
-    }
-  | {
-      readonly type: "composite";
-      readonly contexts: ReadonlyArray<VerificationContext>;
-    };
+  | { readonly type: "qr"; readonly token: string }
+  | { readonly type: "passcode"; readonly code: string }
+  | { readonly type: "gps"; readonly latitude: number; readonly longitude: number }
+  | { readonly type: "nfc"; readonly tagId: string }
+  | { readonly type: "custom"; readonly value: unknown };

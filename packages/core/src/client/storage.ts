@@ -1,9 +1,9 @@
 import type { RewardState, StampRallyState, StampRecord } from "../domain/index.js";
 
 export interface StampStorage {
-  load(rallyId: string): Promise<StampRallyState | null>;
+  load(rallyId: string, userId: string | null): Promise<StampRallyState | null>;
   save(state: StampRallyState): Promise<void>;
-  remove(rallyId: string): Promise<void>;
+  remove(rallyId: string, userId: string | null): Promise<void>;
 }
 
 export interface StorageLike {
@@ -95,6 +95,7 @@ export function isStampRallyState(value: unknown): value is StampRallyState {
   const state = value as Partial<StampRallyState>;
   return (
     typeof state.rallyId === "string" &&
+    (typeof state.userId === "string" || state.userId === null) &&
     typeof state.updatedAt === "string" &&
     Array.isArray(state.records) &&
     state.records.every(isRecord) &&
@@ -106,7 +107,8 @@ export function isStampRallyState(value: unknown): value is StampRallyState {
 export interface RallySnapshot {
   readonly version: 1;
   readonly rallyId: string;
-  readonly stamps: ReadonlyArray<StampRecord>;
+  readonly userId: string | null;
+  readonly records: ReadonlyArray<StampRecord>;
   readonly rewards: ReadonlyArray<RewardState>;
   readonly exportedAt: string;
 }
@@ -125,8 +127,9 @@ function isRallySnapshot(value: unknown): value is RallySnapshot {
   return (
     snapshot.version === 1 &&
     typeof snapshot.rallyId === "string" &&
-    Array.isArray(snapshot.stamps) &&
-    snapshot.stamps.every(isSnapshotRecord) &&
+    (typeof snapshot.userId === "string" || snapshot.userId === null) &&
+    Array.isArray(snapshot.records) &&
+    snapshot.records.every(isSnapshotRecord) &&
     Array.isArray(snapshot.rewards) &&
     snapshot.rewards.every(isRewardState) &&
     isValidDate(snapshot.exportedAt)
@@ -143,7 +146,7 @@ export function importProgressToken(token: string, currentRallyId: string): Rall
     if (!isRallySnapshot(parsed) || parsed.rallyId !== currentRallyId) return null;
     return {
       ...parsed,
-      stamps: parsed.stamps.map(cloneRecord),
+      records: parsed.records.map(cloneRecord),
       rewards: parsed.rewards.map(cloneRewardState),
     };
   } catch {
@@ -154,18 +157,22 @@ export function importProgressToken(token: string, currentRallyId: string): Rall
 export class InMemoryStorage implements StampStorage {
   readonly #states = new Map<string, StampRallyState>();
 
-  async load(rallyId: string): Promise<StampRallyState | null> {
-    const state = this.#states.get(rallyId);
+  async load(rallyId: string, userId: string | null): Promise<StampRallyState | null> {
+    const state = this.#states.get(storageKey(rallyId, userId));
     return state === undefined ? null : cloneState(state);
   }
 
   async save(state: StampRallyState): Promise<void> {
-    this.#states.set(state.rallyId, cloneState(state));
+    this.#states.set(storageKey(state.rallyId, state.userId), cloneState(state));
   }
 
-  async remove(rallyId: string): Promise<void> {
-    this.#states.delete(rallyId);
+  async remove(rallyId: string, userId: string | null): Promise<void> {
+    this.#states.delete(storageKey(rallyId, userId));
   }
+}
+
+export function storageKey(rallyId: string, userId: string | null): string {
+  return `stamprally:${rallyId}:${userId ?? "anonymous"}`;
 }
 
 export interface LocalStorageAdapterOptions {
@@ -197,11 +204,11 @@ export class LocalStorageAdapter implements StampStorage {
     this.#onWarning = options.onWarning ?? defaultStorageWarningHandler;
   }
 
-  async load(rallyId: string): Promise<StampRallyState | null> {
-    if (this.#isFallbackActive) return this.#fallbackStorage.load(rallyId);
+  async load(rallyId: string, userId: string | null): Promise<StampRallyState | null> {
+    if (this.#isFallbackActive) return this.#fallbackStorage.load(rallyId, userId);
 
     try {
-      const serialized = this.#getStorage("load", rallyId).getItem(this.#key(rallyId));
+      const serialized = this.#getStorage("load", rallyId).getItem(this.#key(rallyId, userId));
       if (serialized === null) return null;
 
       let parsed: unknown;
@@ -233,7 +240,7 @@ export class LocalStorageAdapter implements StampStorage {
           `Failed to read rally '${rallyId}' from localStorage.`,
           rallyId,
         ),
-        () => this.#fallbackStorage.load(rallyId),
+        () => this.#fallbackStorage.load(rallyId, userId),
       );
     }
   }
@@ -243,7 +250,7 @@ export class LocalStorageAdapter implements StampStorage {
 
     try {
       this.#getStorage("save", state.rallyId).setItem(
-        this.#key(state.rallyId),
+        this.#key(state.rallyId, state.userId),
         JSON.stringify(state),
       );
     } catch (cause) {
@@ -260,11 +267,11 @@ export class LocalStorageAdapter implements StampStorage {
     }
   }
 
-  async remove(rallyId: string): Promise<void> {
-    if (this.#isFallbackActive) return this.#fallbackStorage.remove(rallyId);
+  async remove(rallyId: string, userId: string | null): Promise<void> {
+    if (this.#isFallbackActive) return this.#fallbackStorage.remove(rallyId, userId);
 
     try {
-      this.#getStorage("remove", rallyId).removeItem(this.#key(rallyId));
+      this.#getStorage("remove", rallyId).removeItem(this.#key(rallyId, userId));
     } catch (cause) {
       return this.#handleFailure(
         this.#normalizeError(
@@ -274,13 +281,13 @@ export class LocalStorageAdapter implements StampStorage {
           `Failed to remove rally '${rallyId}' from localStorage.`,
           rallyId,
         ),
-        () => this.#fallbackStorage.remove(rallyId),
+        () => this.#fallbackStorage.remove(rallyId, userId),
       );
     }
   }
 
-  #key(rallyId: string): string {
-    return `${this.#keyPrefix}${rallyId}`;
+  #key(rallyId: string, userId: string | null): string {
+    return `${this.#keyPrefix}${rallyId}:${userId ?? "anonymous"}`;
   }
 
   #getStorage(operation: StorageOperation, rallyId: string): StorageLike {
@@ -361,12 +368,14 @@ export class IndexedDBAdapter implements StampStorage {
     this.#databaseName = options.databaseName ?? "stamprally";
   }
 
-  async load(rallyId: string): Promise<StampRallyState | null> {
+  async load(rallyId: string, userId: string | null): Promise<StampRallyState | null> {
     const database = await this.#openDatabase(rallyId);
     return new Promise((resolve, reject) => {
       try {
         const transaction = database.transaction(INDEXED_DB_STORE_NAME, "readonly");
-        const request = transaction.objectStore(INDEXED_DB_STORE_NAME).get(rallyId);
+        const request = transaction
+          .objectStore(INDEXED_DB_STORE_NAME)
+          .get(storageKey(rallyId, userId));
         request.onsuccess = () => {
           const value: unknown = request.result;
           if (value === undefined) {
@@ -414,7 +423,9 @@ export class IndexedDBAdapter implements StampStorage {
     return new Promise((resolve, reject) => {
       try {
         const transaction = database.transaction(INDEXED_DB_STORE_NAME, "readwrite");
-        transaction.objectStore(INDEXED_DB_STORE_NAME).put(cloneState(state), state.rallyId);
+        transaction
+          .objectStore(INDEXED_DB_STORE_NAME)
+          .put(cloneState(state), storageKey(state.rallyId, state.userId));
         transaction.oncomplete = () => resolve();
         transaction.onerror = () => {
           reject(
@@ -440,12 +451,12 @@ export class IndexedDBAdapter implements StampStorage {
     });
   }
 
-  async remove(rallyId: string): Promise<void> {
+  async remove(rallyId: string, userId: string | null): Promise<void> {
     const database = await this.#openDatabase(rallyId);
     return new Promise((resolve, reject) => {
       try {
         const transaction = database.transaction(INDEXED_DB_STORE_NAME, "readwrite");
-        transaction.objectStore(INDEXED_DB_STORE_NAME).delete(rallyId);
+        transaction.objectStore(INDEXED_DB_STORE_NAME).delete(storageKey(rallyId, userId));
         transaction.oncomplete = () => resolve();
         transaction.onerror = () => {
           reject(

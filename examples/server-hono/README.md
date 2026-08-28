@@ -1,7 +1,7 @@
-# Universal model server (Hono)
+# StampRally server (Hono)
 
 This sample keeps `AdminRallyConfig` on the server and exposes only the result
-of `toPublicRallyConfig` to participants. `UniversalRallyServer` uses the same
+of `toPublicConfig` to participants. `StampRallyServer` uses the same
 Web Standard `Request`/`Response` primitives as Hono and delegates locks,
 idempotency, state, stock, and audit persistence to `ServerPersistenceAdapter`.
 

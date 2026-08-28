@@ -1,4 +1,4 @@
-import type { DetectorError, DetectorResult, TokenVerificationContext } from "./types.js";
+import type { DetectorError, DetectorResult, NfcVerificationContext } from "./types.js";
 import { createDetectorError, mapBrowserError } from "./types.js";
 
 interface NdefRecordLike {
@@ -53,7 +53,7 @@ function decodeFirstTextRecord(event: NdefReadingEventLike): string | null {
 
 export function readNfcContext(
   options: NfcDetectorOptions = {},
-): Promise<DetectorResult<TokenVerificationContext>> {
+): Promise<DetectorResult<NfcVerificationContext>> {
   const Reader = getNdefReaderConstructor();
   if (Reader === undefined) {
     return Promise.resolve({
@@ -91,7 +91,7 @@ export function readNfcContext(
     let settled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
 
-    const finish = (result: DetectorResult<TokenVerificationContext>) => {
+    const finish = (result: DetectorResult<NfcVerificationContext>) => {
       if (settled) return;
       settled = true;
       if (timer !== undefined) clearTimeout(timer);
@@ -116,7 +116,7 @@ export function readNfcContext(
         fail(createDetectorError("nfc", "NO_TOKEN", "The NFC tag has no text token."));
         return;
       }
-      finish({ ok: true, value: { type: "token", token } });
+      finish({ ok: true, value: { type: "nfc", tagId: token } });
     };
     reader.onreadingerror = (event) =>
       fail(createDetectorError("nfc", "READ_FAILED", "The NFC tag could not be read.", event));

@@ -1,5 +1,5 @@
 import type { Result } from "../domain/index.js";
-import type { DetectorError, DetectorResult, TokenVerificationContext } from "./types.js";
+import type { DetectorError, DetectorResult, QrVerificationContext } from "./types.js";
 import { createDetectorError, mapBrowserError } from "./types.js";
 
 interface DetectedBarcodeLike {
@@ -90,7 +90,7 @@ function waitForNextScan(): Promise<void> {
 export async function readQrContext(
   videoElement: HTMLVideoElement,
   options: QrDetectorOptions = {},
-): Promise<DetectorResult<TokenVerificationContext>> {
+): Promise<DetectorResult<QrVerificationContext>> {
   const Detector = getBarcodeDetectorConstructor();
   const mediaDevices = getMediaDevices();
   if (Detector === undefined || typeof mediaDevices?.getUserMedia !== "function") {
@@ -150,7 +150,7 @@ export async function readQrContext(
       if (!detection.ok) return detection;
       const token = detection.value.find((barcode) => barcode.rawValue.length > 0)?.rawValue;
       if (token !== undefined) {
-        return { ok: true, value: { type: "token", token } };
+        return { ok: true, value: { type: "qr", token } };
       }
 
       const interval = await raceWithTermination(waitForNextScan(), termination.promise);

@@ -1,92 +1,53 @@
-import type { StampCondition, VerificationContext } from "./conditions.js";
+import type { CheckInCondition } from "./models.js";
 
 export interface ConditionMatch {
-  readonly conditionType: StampCondition["type"];
+  readonly conditionType: CheckInCondition["type"];
   readonly distanceMeters?: number;
 }
-
+export type ConditionMismatch = {
+  readonly code: "CONDITION_MISMATCH";
+  readonly conditionType: CheckInCondition["type"];
+  readonly reason: "INVALID_PROOF" | "INVALID_GEO_INPUT" | "OUTSIDE_RADIUS" | "VALIDATOR_FAILED";
+  readonly distanceMeters?: number;
+  readonly radiusMeters?: number;
+};
 export interface CompositeConditionFailure {
   readonly index: number;
   readonly error: ConditionMismatch;
 }
-
-export type ConditionMismatch =
-  | {
-      readonly code: "CONDITION_MISMATCH";
-      readonly conditionType: Exclude<StampCondition["type"], "time_window">;
-      readonly reason: "CONTEXT_TYPE_MISMATCH";
-      readonly expectedContextType: VerificationContext["type"];
-      readonly actualContextType: VerificationContext["type"];
-    }
-  | {
-      readonly code: "CONDITION_MISMATCH";
-      readonly conditionType: "token";
-      readonly reason: "TOKEN_MISMATCH";
-    }
-  | {
-      readonly code: "CONDITION_MISMATCH";
-      readonly conditionType: "geo";
-      readonly reason: "INVALID_GEO_INPUT";
-    }
-  | {
-      readonly code: "CONDITION_MISMATCH";
-      readonly conditionType: "geo";
-      readonly reason: "OUTSIDE_RADIUS";
-      readonly distanceMeters: number;
-      readonly radiusMeters: number;
-      readonly differenceMeters: number;
-    }
-  | {
-      readonly code: "CONDITION_MISMATCH";
-      readonly conditionType: "composite";
-      readonly reason: "CONTEXT_LENGTH_MISMATCH";
-      readonly expectedCount: number;
-      readonly actualCount: number;
-    }
-  | {
-      readonly code: "CONDITION_MISMATCH";
-      readonly conditionType: "composite";
-      readonly reason: "AND_CHILD_FAILED" | "OR_ALL_FAILED";
-      readonly failures: ReadonlyArray<CompositeConditionFailure>;
-    }
-  | {
-      readonly code: "CONDITION_MISMATCH";
-      readonly conditionType: "time_window";
-      readonly reason: "INVALID_NOW" | "INVALID_TIME_WINDOW" | "BEFORE_START" | "AFTER_END";
-      readonly now: string;
-      readonly startsAt: string;
-      readonly endsAt: string;
-    };
-
 export type StampError =
+  | { readonly code: "SPOT_NOT_FOUND"; readonly spotId: string }
+  | { readonly code: "STAMP_ALREADY_ACQUIRED"; readonly spotId: string }
+  | { readonly code: "PREREQUISITES_NOT_MET"; readonly spotId: string }
+  | { readonly code: "INVALID_PROOF"; readonly spotId: string }
   | {
-      readonly code: "STAMP_NOT_FOUND";
-      readonly stampId: string;
-    }
-  | {
-      readonly code: "STAMP_ALREADY_ACQUIRED";
-      readonly stampId: string;
-    }
-  | {
-      readonly code: "INVALID_ORDER";
-      readonly stampId: string;
-      readonly expectedStampId: string;
-    }
-  | {
-      readonly code: "CONDITION_MISMATCH";
-      readonly stampId: string;
-      readonly mismatch: ConditionMismatch;
-    }
-  | {
-      readonly code: "OFFLINE_QUEUED";
-      readonly stampId: string;
-      readonly idempotencyKey: string;
-    }
-  | {
-      readonly code: "INVALID_PROOF";
-      readonly stampId: string;
+      readonly code: "CUSTOM_VALIDATION_FAILED";
+      readonly spotId: string;
+      readonly message: string;
     };
-
 export type Result<T, E> =
   | { readonly ok: true; readonly value: T }
   | { readonly ok: false; readonly error: E };
+
+export interface CustomValidationContext {
+  readonly rallyId: string;
+  readonly spotId: string;
+  readonly proofData: unknown;
+  readonly condition: Extract<CheckInCondition, { readonly type: "custom" }>;
+  readonly userState: import("./models.js").UserRallyState;
+}
+export interface CustomValidator {
+  validate(
+    context: CustomValidationContext,
+  ): Promise<boolean | { readonly valid: boolean; readonly message?: string }>;
+}
+export type Validator =
+  | CustomValidator
+  | ((
+      context: CustomValidationContext,
+    ) =>
+      | Promise<boolean | { readonly valid: boolean; readonly message?: string }>
+      | boolean
+      | { readonly valid: boolean; readonly message?: string });
+
+export type { VerificationContext } from "./conditions.js";

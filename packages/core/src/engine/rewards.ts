@@ -1,4 +1,4 @@
-import type { RewardItem, RewardState } from "../domain/models.js";
+import type { Reward, RewardState } from "../domain/models.js";
 
 export interface ClaimTicketOptions {
   readonly issuedAt?: string;
@@ -44,11 +44,11 @@ export function createUniqueClaimTicketNumber(rewardId: string, issuedAt: string
 }
 
 export function issueClaimTicketNumber(
-  reward: RewardItem,
+  reward: Reward,
   currentState: RewardState,
   options: ClaimTicketOptions = {},
 ): RewardState {
   if (currentState.claimTicketNumber !== undefined) return currentState;
-  const claimTicketNumber = reward.claimTicketNumber ?? createClaimTicketNumber(reward.id, options);
+  const claimTicketNumber = createClaimTicketNumber(reward.id, options);
   return { ...currentState, claimTicketNumber };
 }

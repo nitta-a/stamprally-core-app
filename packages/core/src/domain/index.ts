@@ -1,21 +1,30 @@
-export type { StampCondition, VerificationContext } from "./conditions.js";
 export type {
   CompositeConditionFailure,
   ConditionMatch,
   ConditionMismatch,
+  CustomValidationContext,
+  CustomValidator,
   Result,
   StampError,
+  Validator,
+  VerificationContext,
 } from "./errors.js";
 export { resolveLocalizedText, toLocalizedString } from "./i18n.js";
-export { migrateRallyConfig } from "./migration.js";
 export type {
+  AdminRallyConfig,
+  CheckInCondition,
+  ExternalReference,
   FontFamily,
   LocaleDictionary,
   LocalizedString,
   LocalizedText,
+  PublicCheckInCondition,
+  PublicRallyConfig,
+  PublicReward,
+  PublicSpotItem,
   RallyConfig,
   RedemptionMethod,
-  RewardItem,
+  Reward,
   RewardState,
   RewardStatus,
   RewardType,
@@ -23,35 +32,17 @@ export type {
   SheetTheme,
   SlotShape,
   SpotItem,
-  StampDefinition,
   StampRallyState,
   StampRecord,
   SupportedLocale,
   ThemePreset,
   ThemePresetId,
+  UserRallyState,
 } from "./models.js";
-export { DEFAULT_SHEET_THEME } from "./models.js";
-export type { LegacyPublicRallyConfig, PublicRewardItem } from "./publicConfig.js";
-export { stripSensitiveConfig } from "./publicConfig.js";
-export { THEME_PRESETS } from "./themePresets.js";
-export type {
-  AdminRallyConfig,
-  AdminReward,
-  ExternalReference,
-  PublicCheckInCondition,
-  PublicRallyConfig,
-  PublicReward,
-  UniversalLocalizedText,
-  UniversalSpotItem,
-  VerificationCondition,
-} from "./universalModel.js";
-export { isPublicRallyConfig, toPublicRallyConfig } from "./universalModel.js";
-export type { UniversalValidationError, UniversalValidationResult } from "./universalValidation.js";
 export {
-  isAdminRallyConfig,
-  isPublicRallyConfigShape,
-  validateAdminRallyConfig,
-  validatePublicRallyConfig,
-} from "./universalValidation.js";
-export type { RallyConfigValidationResult, ValidationError } from "./validation.js";
-export { CURRENT_RALLY_CONFIG_VERSION, validateRallyConfig } from "./validation.js";
+  assertPublicConfig,
+  DEFAULT_SHEET_THEME,
+  isPublicConfig,
+  toPublicConfig,
+} from "./models.js";
+export { THEME_PRESETS } from "./themePresets.js";

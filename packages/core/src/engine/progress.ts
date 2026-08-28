@@ -1,41 +1,22 @@
-import type { RallyConfig, StampDefinition, StampRallyState } from "../domain/index.js";
-import { getOrderedStamps } from "./order.js";
-
+import type { PublicSpotItem, RallyConfig, StampRallyState } from "../domain/index.js";
 export interface StampRallyProgress {
   readonly acquired: number;
   readonly total: number;
   readonly percentage: number;
   readonly isCompleted: boolean;
-  /** @deprecated Use isCompleted instead. */
-  readonly isComplete: boolean;
-  readonly nextAvailableStamps: ReadonlyArray<StampDefinition>;
+  readonly nextAvailableSpots: ReadonlyArray<PublicSpotItem>;
 }
-
 export function calculateProgress(state: StampRallyState, config: RallyConfig): StampRallyProgress {
-  const configuredStampIds = new Set(config.stamps.map((stamp) => stamp.id));
-  const acquiredStampIds = new Set(
-    state.records
-      .map((record) => record.stampId)
-      .filter((stampId) => configuredStampIds.has(stampId)),
+  const ids = new Set(config.spots.map((spot) => spot.id));
+  const acquired = new Set(
+    state.records.map((record) => record.stampId).filter((id) => ids.has(id)),
   );
-  const total = config.stamps.length;
-  const acquired = acquiredStampIds.size;
-  const isCompleted = total > 0 && acquired === total;
-
-  const remainingStamps = config.stamps.filter((stamp) => !acquiredStampIds.has(stamp.id));
-  const nextAvailableStamps =
-    config.isSequential === true
-      ? getOrderedStamps(config)
-          .filter((stamp) => !acquiredStampIds.has(stamp.id))
-          .slice(0, 1)
-      : remainingStamps;
-
+  const remaining = config.spots.filter((spot) => !acquired.has(spot.id));
   return {
-    acquired,
-    total,
-    percentage: total === 0 ? 0 : (acquired / total) * 100,
-    isCompleted,
-    isComplete: isCompleted,
-    nextAvailableStamps,
+    acquired: acquired.size,
+    total: config.spots.length,
+    percentage: config.spots.length === 0 ? 0 : (acquired.size / config.spots.length) * 100,
+    isCompleted: config.spots.length > 0 && acquired.size === config.spots.length,
+    nextAvailableSpots: [...remaining].sort((left, right) => left.orderIndex - right.orderIndex),
   };
 }

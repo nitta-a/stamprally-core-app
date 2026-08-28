@@ -11,6 +11,7 @@ export type {
   DetectorKind,
   DetectorResult,
   GeoVerificationContext,
+  NfcVerificationContext,
   PasscodeCondition,
-  TokenVerificationContext,
+  QrVerificationContext,
 } from "./types.js";

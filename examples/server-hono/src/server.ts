@@ -1,5 +1,5 @@
 import type { AdminRallyConfig } from "@stamprally/core";
-import { InMemoryServerPersistenceAdapter, UniversalRallyServer } from "@stamprally/server";
+import { InMemoryServerPersistenceAdapter, StampRallyServer } from "@stamprally/server";
 import { Hono } from "hono";
 
 const adminConfig: AdminRallyConfig = {
@@ -9,7 +9,7 @@ const adminConfig: AdminRallyConfig = {
   spots: [],
   rewards: [],
 };
-const service = new UniversalRallyServer(adminConfig, new InMemoryServerPersistenceAdapter());
+const service = new StampRallyServer(adminConfig, new InMemoryServerPersistenceAdapter());
 const app = new Hono();
 
 app.post("/api/check-in", async (context) => {

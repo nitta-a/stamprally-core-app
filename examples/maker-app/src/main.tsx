@@ -1,5 +1,5 @@
 import { AdminRallyEditor } from "@stamprally/admin-ui";
-import { type AdminRallyConfig, toPublicRallyConfig } from "@stamprally/core";
+import { type AdminRallyConfig, toPublicConfig } from "@stamprally/core";
 
 export function MakerApp({
   config,
@@ -12,5 +12,5 @@ export function MakerApp({
 }
 
 export function publish(config: AdminRallyConfig) {
-  return toPublicRallyConfig(config);
+  return toPublicConfig(config);
 }

@@ -19,22 +19,15 @@ export interface DetectorError {
   readonly cause?: unknown;
 }
 
-export type GeoVerificationContext = Extract<VerificationContext, { readonly type: "geo" }>;
-export type TokenVerificationContext = Extract<VerificationContext, { readonly type: "token" }>;
+export type GeoVerificationContext = Extract<VerificationContext, { readonly type: "gps" }>;
+export type QrVerificationContext = Extract<VerificationContext, { readonly type: "qr" }>;
+export type NfcVerificationContext = Extract<VerificationContext, { readonly type: "nfc" }>;
 export type DetectorResult<T extends VerificationContext> = Result<T, DetectorError>;
 
 export interface PasscodeCondition {
-  readonly passcode: string;
+  readonly code: string;
   readonly caseSensitive?: boolean;
 }
-
-export type CheckInResult =
-  | { readonly success: true }
-  | {
-      readonly success: false;
-      readonly reason: "INVALID_PASSCODE";
-      readonly message: string;
-    };
 
 export function createDetectorError(
   detector: DetectorKind,
