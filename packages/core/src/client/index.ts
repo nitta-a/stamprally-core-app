@@ -24,6 +24,8 @@ export type {
   OfflineQueueStorage,
   OfflineResult,
   OfflineSender,
+  OfflineSyncResultEvent,
+  OfflineSyncResultListener,
   SyncConflictPolicy,
   SyncState,
 } from "./offlineQueue.js";

@@ -9,12 +9,42 @@ export interface UserClaimRecord {
   readonly timestamp: number;
 }
 
+export interface ClaimRewardTransactionParams {
+  readonly rallyId: string;
+  readonly userId: string;
+  readonly rewardId: string;
+  readonly ticketNumber: string;
+  readonly timestamp: number;
+  readonly idempotencyKey?: string;
+  readonly proofData?: unknown;
+  readonly idempotencyTtlMs?: number;
+  /** Used when the first claim is made before a user state has been stored. */
+  readonly initialUserState?: UserRallyState;
+}
+
+export interface ClaimRewardTransactionMutation {
+  readonly nextStock: number | null;
+  readonly nextUserState: UserRallyState;
+  readonly auditLog: AuditLog;
+  /** The server response is persisted by the adapter with the idempotency key. */
+  readonly result?: unknown;
+  /** A domain rejection is committed as an audit/idempotency record without mutations. */
+  readonly error?: string;
+}
+
 export interface ServerPersistenceAdapter {
-  /** Runs the callback in a storage-native transaction when supported. */
-  runTransaction?<T>(
-    rallyId: string,
-    operation: (transaction: ServerPersistenceAdapter) => Promise<T>,
-  ): Promise<T>;
+  /**
+   * Atomically commits stock, user state, claim count, audit log, and idempotency data.
+   * Adapters must roll back every write when the callback or any commit operation fails.
+   */
+  executeClaimRewardTransaction(
+    params: ClaimRewardTransactionParams,
+    mutation: (current: {
+      readonly stock: number | null;
+      readonly claimCount: number;
+      readonly userState: UserRallyState;
+    }) => ClaimRewardTransactionMutation,
+  ): Promise<{ readonly success: boolean; readonly error?: string }>;
   acquireLock(rallyId: string, lockKey: string, ttlMs: number): Promise<boolean>;
   releaseLock(rallyId: string, lockKey: string): Promise<void>;
   getRewardStock(rallyId: string, rewardId: string): Promise<number | null>;
@@ -22,18 +52,6 @@ export interface ServerPersistenceAdapter {
     rallyId: string,
     rewardId: string,
   ): Promise<{ readonly success: boolean; readonly remainingStock: number }>;
-  restoreRewardStock?(rallyId: string, rewardId: string, count?: number): Promise<void>;
-  rollbackUserState?(
-    rallyId: string,
-    userId: string,
-    previousState: UserRallyState | null,
-  ): Promise<void>;
-  rollbackUserClaim?(
-    rallyId: string,
-    userId: string,
-    rewardId: string,
-    ticketNumber: string,
-  ): Promise<void>;
   getIdempotentResult<T>(rallyId: string, key: string): Promise<T | null>;
   saveIdempotentResult<T>(rallyId: string, key: string, result: T, ttlMs: number): Promise<void>;
   getUserClaimCount(rallyId: string, userId: string, rewardId: string): Promise<number>;
@@ -111,6 +129,77 @@ export class InMemoryServerPersistenceAdapter implements ServerPersistenceAdapte
     const key = this.#stockKey(rallyId, rewardId);
     const current = this.#stocks.get(key);
     if (current !== undefined) this.#stocks.set(key, current + Math.max(0, count));
+  }
+
+  async executeClaimRewardTransaction(
+    params: ClaimRewardTransactionParams,
+    mutation: (current: {
+      readonly stock: number | null;
+      readonly claimCount: number;
+      readonly userState: UserRallyState;
+    }) => ClaimRewardTransactionMutation,
+  ): Promise<{ readonly success: boolean; readonly error?: string }> {
+    try {
+      return await this.runTransaction(params.rallyId, async () => {
+        const userState =
+          (await this.getUserState(params.rallyId, params.userId)) ?? params.initialUserState;
+        if (userState === undefined)
+          return { success: false, error: "A user state is required for this transaction." };
+        const mutationResult = mutation({
+          stock: await this.getRewardStock(params.rallyId, params.rewardId),
+          claimCount: await this.getUserClaimCount(params.rallyId, params.userId, params.rewardId),
+          userState,
+        });
+        const idempotencyKey = params.idempotencyKey;
+        if (mutationResult.error !== undefined) {
+          await this.recordAuditLog(mutationResult.auditLog);
+          if (idempotencyKey !== undefined && mutationResult.result !== undefined)
+            await this.saveIdempotentResult(
+              params.rallyId,
+              idempotencyKey,
+              mutationResult.result,
+              params.idempotencyTtlMs ?? 86_400_000,
+            );
+          return { success: false, error: mutationResult.error };
+        }
+        const currentStock = await this.getRewardStock(params.rallyId, params.rewardId);
+        if (
+          currentStock !== null &&
+          (mutationResult.nextStock === null || mutationResult.nextStock < 0)
+        )
+          throw new Error("The transaction produced an invalid stock value.");
+        if (currentStock === null && mutationResult.nextStock !== null)
+          throw new Error("The transaction changed an unlimited stock to a limited stock.");
+        if (mutationResult.nextStock !== null)
+          this.#stocks.set(
+            this.#stockKey(params.rallyId, params.rewardId),
+            mutationResult.nextStock,
+          );
+        await this.saveUserState(params.rallyId, params.userId, mutationResult.nextUserState);
+        const reward = mutationResult.nextUserState.rewards.find(
+          (item) => item.rewardId === params.rewardId,
+        );
+        if (reward?.claimTicketNumber !== undefined)
+          await this.recordUserClaim({
+            rallyId: params.rallyId,
+            userId: params.userId,
+            rewardId: params.rewardId,
+            ticketNumber: reward.claimTicketNumber,
+            timestamp: params.timestamp,
+          });
+        await this.recordAuditLog(mutationResult.auditLog);
+        if (idempotencyKey !== undefined && mutationResult.result !== undefined)
+          await this.saveIdempotentResult(
+            params.rallyId,
+            idempotencyKey,
+            mutationResult.result,
+            params.idempotencyTtlMs ?? 86_400_000,
+          );
+        return { success: true };
+      });
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
   }
 
   async rollbackUserState(

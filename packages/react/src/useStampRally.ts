@@ -54,6 +54,11 @@ export function useStampRally(
       active = false;
     };
   }, [client, options.initialize]);
+  useEffect(() => {
+    return client.subscribeEvents((event) => {
+      if (event.type === "error") setError(errorFrom(event.error));
+    });
+  }, [client]);
   const onCheckIn = useCallback(
     (spotId: string, proof: unknown, checkInOptions: CheckInOptions = {}) => {
       setError(null);

@@ -11,6 +11,7 @@ import type {
   Validator,
 } from "../domain/index.js";
 import { consumeReward, type RewardConsumeError, reconcileRewardStates } from "../engine/index.js";
+import { resolveRallyStateConflict } from "../engine/sync.js";
 import type { OfflineQueue, SyncState } from "./offlineQueue.js";
 import { cloneState, InMemoryStorage, type StampStorage, storageKey } from "./storage.js";
 
@@ -154,6 +155,7 @@ export class StampRallyClient {
     this.#storage = this.#options.storage ?? new InMemoryStorage();
     this.#userId = this.#options.userId ?? null;
     this.#offlineQueue = this.#options.offlineQueue;
+    this.#offlineQueue?.setSyncResultListener((event) => this.#handleOfflineSyncResult(event));
   }
   getConfig(): RallyConfig {
     return this.#config;
@@ -389,12 +391,22 @@ export class StampRallyClient {
         });
       }
       if (adapter?.sync === undefined) {
-        this.#emitEvent({ type: "sync", state: current });
+        this.#emitEvent({ type: "sync", state: this.#state ?? current });
         return;
       }
-      const next = this.#reconcile(
-        await adapter.sync({ rallyId: this.#config.id, userId: this.#userId, state: current }),
-      );
+      const serverState = await adapter.sync({
+        rallyId: this.#config.id,
+        userId: this.#userId,
+        state: this.#state ?? current,
+      });
+      const localState = this.#state ?? current;
+      const merged =
+        this.#offlineQueue === undefined
+          ? serverState
+          : resolveRallyStateConflict(serverState, localState, {
+              policy: this.#offlineQueue.conflictPolicy,
+            });
+      const next = this.#reconcile(merged);
       await this.#storage.save(next);
       this.#state = next;
       this.#emit(next);
@@ -455,6 +467,18 @@ export class StampRallyClient {
         state.updatedAt,
       ),
     };
+  }
+  async #handleOfflineSyncResult(
+    event: import("./offlineQueue.js").OfflineSyncResultEvent,
+  ): Promise<void> {
+    if (event.state !== undefined) {
+      const next = this.#reconcile(event.state);
+      await this.#storage.save(next);
+      this.#state = next;
+      this.#emit(next);
+    }
+    if ("ok" in event.result && !event.result.ok)
+      this.#emitEvent({ type: "error", error: event.result.error });
   }
   #now(): string {
     return this.#options.clock?.() ?? new Date().toISOString();

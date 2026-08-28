@@ -39,6 +39,8 @@ export interface ServerOptions {
 }
 export type { UserRallyState } from "@stamprally/core";
 export type {
+  ClaimRewardTransactionMutation,
+  ClaimRewardTransactionParams,
   InMemoryServerPersistenceOptions,
   ServerPersistenceAdapter,
   UserClaimRecord,

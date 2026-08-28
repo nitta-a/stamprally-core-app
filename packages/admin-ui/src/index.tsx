@@ -1,14 +1,29 @@
 import type {
   AdminRallyConfig,
   CheckInCondition,
+  ExternalReference,
   LocaleDictionary,
+  LocalizedText,
   Reward,
   RewardUnlockCondition,
+  SheetTheme,
   SpotItem,
   SupportedLocale,
 } from "@stamprally/core";
-import { resolveLocalizedText, safeParseAdminConfig, updateLocalizedField } from "@stamprally/core";
-import { type Dispatch, type ReactElement, type SetStateAction, useState } from "react";
+import {
+  DEFAULT_SHEET_THEME,
+  resolveLocalizedText,
+  safeParseAdminConfig,
+  updateLocalizedField,
+} from "@stamprally/core";
+import {
+  type Dispatch,
+  type ReactElement,
+  type SetStateAction,
+  useCallback,
+  useRef,
+  useState,
+} from "react";
 
 export interface AdminRallyEditorProps<
   TLocale extends string = SupportedLocale,
@@ -35,8 +50,61 @@ export interface UseAdminRallyEditorReturn<
   readonly update: (patch: Partial<AdminRallyConfig<TLocale, TMeta>>) => void;
   readonly updateSpot: (spotId: string, patch: Partial<SpotItem<TLocale, TMeta>>) => void;
   readonly updateReward: (rewardId: string, patch: Partial<Reward<TLocale>>) => void;
+  readonly addSpot: (spotData?: Partial<SpotItem<TLocale, TMeta>>) => void;
+  readonly removeSpot: (spotId: string) => void;
+  readonly reorderSpots: (fromIndex: number, toIndex: number) => void;
+  readonly duplicateSpot: (spotId: string) => void;
+  readonly addReward: (rewardData?: Partial<Reward<TLocale>>) => void;
+  readonly removeReward: (rewardId: string) => void;
+  readonly duplicateReward: (rewardId: string) => void;
+  readonly addCondition: (spotId: string, nextCondition: CheckInCondition) => void;
+  readonly removeCondition: (spotId: string, conditionIndex: number) => void;
+  readonly updateLocalizedField: (path: string, locale: TLocale, value: string) => void;
+  readonly undo: () => void;
+  readonly redo: () => void;
+  readonly canUndo: boolean;
+  readonly canRedo: boolean;
+  readonly resetConfig: (newConfig: AdminRallyConfig<TLocale, TMeta>) => void;
   readonly reset: () => void;
   readonly isDirty: boolean;
+}
+
+type EditorHistory<T> = {
+  readonly past: ReadonlyArray<T>;
+  readonly present: T;
+  readonly future: ReadonlyArray<T>;
+};
+
+function nextEntityId(prefix: string, ids: ReadonlySet<string>): string {
+  let index = ids.size + 1;
+  let candidate = `${prefix}-${index}`;
+  while (ids.has(candidate)) {
+    index += 1;
+    candidate = `${prefix}-${index}`;
+  }
+  return candidate;
+}
+
+function pathParts(path: string): string[] {
+  return path
+    .replaceAll("[", ".")
+    .replaceAll("]", "")
+    .split(".")
+    .filter((part) => part !== "");
+}
+
+function localizedValue<TLocale extends string>(
+  value: unknown,
+  locale: TLocale,
+  nextValue: string,
+): LocalizedText<TLocale> {
+  return updateLocalizedField(
+    typeof value === "string" || (typeof value === "object" && value !== null)
+      ? (value as LocalizedText<TLocale>)
+      : "",
+    locale,
+    nextValue,
+  );
 }
 
 /** Headless state and immutable update helpers for CMS integrations. */
@@ -47,25 +115,181 @@ export function useAdminRallyEditor<
   initialConfig: AdminRallyConfig<TLocale, TMeta>,
   options: UseAdminRallyEditorOptions<TLocale, TMeta> = {},
 ): UseAdminRallyEditorReturn<TLocale, TMeta> {
-  const [config, setConfig] = useState(initialConfig);
-  const update = (patch: Partial<AdminRallyConfig<TLocale, TMeta>>): void => {
-    setConfig((current) => {
-      const next = { ...current, ...patch };
-      options.onChange?.(next);
-      return next;
-    });
-  };
-  const updateSpot = (spotId: string, patch: Partial<SpotItem<TLocale, TMeta>>): void => {
-    update({
-      spots: config.spots.map((spot) => (spot.id === spotId ? { ...spot, ...patch } : spot)),
-    });
-  };
-  const updateReward = (rewardId: string, patch: Partial<Reward<TLocale>>): void => {
-    update({
-      rewards: config.rewards.map((reward) =>
+  const initialRef = useRef(initialConfig);
+  const [history, setHistory] = useState<EditorHistory<AdminRallyConfig<TLocale, TMeta>>>({
+    past: [],
+    present: initialConfig,
+    future: [],
+  });
+  const config = history.present;
+  const commit = useCallback(
+    (value: SetStateAction<AdminRallyConfig<TLocale, TMeta>>): void => {
+      setHistory((current) => {
+        const next = typeof value === "function" ? value(current.present) : value;
+        if (next === current.present) return current;
+        options.onChange?.(next);
+        return { past: [...current.past, current.present], present: next, future: [] };
+      });
+    },
+    [options.onChange],
+  );
+  const setConfig: Dispatch<SetStateAction<AdminRallyConfig<TLocale, TMeta>>> = commit;
+  const update = (patch: Partial<AdminRallyConfig<TLocale, TMeta>>): void =>
+    commit((current) => ({ ...current, ...patch }));
+  const updateSpot = (spotId: string, patch: Partial<SpotItem<TLocale, TMeta>>): void =>
+    commit((current) => ({
+      ...current,
+      spots: current.spots.map((spot) => (spot.id === spotId ? { ...spot, ...patch } : spot)),
+    }));
+  const updateReward = (rewardId: string, patch: Partial<Reward<TLocale>>): void =>
+    commit((current) => ({
+      ...current,
+      rewards: current.rewards.map((reward) =>
         reward.id === rewardId ? { ...reward, ...patch } : reward,
       ),
+    }));
+  const addSpot = (spotData: Partial<SpotItem<TLocale, TMeta>> = {}): void =>
+    commit((current) => {
+      const id = spotData.id ?? nextEntityId("spot", new Set(current.spots.map((spot) => spot.id)));
+      const base = newSpot<TLocale, TMeta>(current.spots.length);
+      return {
+        ...current,
+        spots: [...current.spots, { ...base, ...spotData, id, orderIndex: current.spots.length }],
+      };
     });
+  const removeSpot = (spotId: string): void =>
+    commit((current) => ({
+      ...current,
+      spots: current.spots
+        .filter((spot) => spot.id !== spotId)
+        .map((spot, index) => ({ ...spot, orderIndex: index })),
+    }));
+  const reorderSpots = (fromIndex: number, toIndex: number): void =>
+    commit((current) => ({ ...current, spots: moveTo(current.spots, fromIndex, toIndex) }));
+  const duplicateSpot = (spotId: string): void =>
+    commit((current) => {
+      const source = current.spots.find((spot) => spot.id === spotId);
+      if (source === undefined) return current;
+      const id = nextEntityId("spot-copy", new Set(current.spots.map((spot) => spot.id)));
+      const copy = { ...structuredClone(source), id, orderIndex: current.spots.length };
+      return { ...current, spots: [...current.spots, copy] };
+    });
+  const addReward = (rewardData: Partial<Reward<TLocale>> = {}): void =>
+    commit((current) => {
+      const id =
+        rewardData.id ?? nextEntityId("reward", new Set(current.rewards.map((item) => item.id)));
+      return {
+        ...current,
+        rewards: [...current.rewards, { ...newReward(current.rewards.length), ...rewardData, id }],
+      };
+    });
+  const removeReward = (rewardId: string): void =>
+    commit((current) => ({
+      ...current,
+      rewards: current.rewards.filter((item) => item.id !== rewardId),
+    }));
+  const duplicateReward = (rewardId: string): void =>
+    commit((current) => {
+      const source = current.rewards.find((reward) => reward.id === rewardId);
+      if (source === undefined) return current;
+      const id = nextEntityId("reward-copy", new Set(current.rewards.map((item) => item.id)));
+      return { ...current, rewards: [...current.rewards, { ...structuredClone(source), id }] };
+    });
+  const addCondition = (spotId: string, nextCondition: CheckInCondition): void =>
+    commit((current) => ({
+      ...current,
+      spots: current.spots.map((spot) =>
+        spot.id !== spotId
+          ? spot
+          : { ...spot, conditions: [...spot.conditions, structuredClone(nextCondition)] },
+      ),
+    }));
+  const removeCondition = (spotId: string, conditionIndex: number): void =>
+    commit((current) => ({
+      ...current,
+      spots: current.spots.map((spot) =>
+        spot.id !== spotId
+          ? spot
+          : { ...spot, conditions: spot.conditions.filter((_, index) => index !== conditionIndex) },
+      ),
+    }));
+  const updateLocalized = (path: string, locale: TLocale, value: string): void =>
+    commit((current) => {
+      const parts = pathParts(path);
+      if (parts[0] === "spots" && parts.length >= 3) {
+        const requestedIndex = parts[1];
+        const index =
+          requestedIndex !== undefined && /^\d+$/.test(requestedIndex)
+            ? Number(requestedIndex)
+            : current.spots.findIndex((spot) => spot.id === requestedIndex);
+        const field = parts[2];
+        if (index < 0 || field === undefined || current.spots[index] === undefined) return current;
+        return {
+          ...current,
+          spots: current.spots.map((spot, spotIndex) =>
+            spotIndex === index
+              ? {
+                  ...spot,
+                  [field]: localizedValue(spot[field as keyof typeof spot], locale, value),
+                }
+              : spot,
+          ),
+        };
+      }
+      if (parts[0] === "rewards" && parts.length >= 3) {
+        const requestedIndex = parts[1];
+        const index =
+          requestedIndex !== undefined && /^\d+$/.test(requestedIndex)
+            ? Number(requestedIndex)
+            : current.rewards.findIndex((reward) => reward.id === requestedIndex);
+        const field = parts[2];
+        if (index < 0 || field === undefined || current.rewards[index] === undefined)
+          return current;
+        return {
+          ...current,
+          rewards: current.rewards.map((reward, rewardIndex) =>
+            rewardIndex === index
+              ? {
+                  ...reward,
+                  [field]: localizedValue(reward[field as keyof typeof reward], locale, value),
+                }
+              : reward,
+          ),
+        };
+      }
+      const field = parts[0];
+      if (field === undefined) return current;
+      return {
+        ...current,
+        [field]: localizedValue(current[field as keyof typeof current], locale, value),
+      };
+    });
+  const undo = (): void =>
+    setHistory((current) => {
+      const previous = current.past.at(-1);
+      if (previous === undefined) return current;
+      options.onChange?.(previous);
+      return {
+        past: current.past.slice(0, -1),
+        present: previous,
+        future: [current.present, ...current.future],
+      };
+    });
+  const redo = (): void =>
+    setHistory((current) => {
+      const next = current.future[0];
+      if (next === undefined) return current;
+      options.onChange?.(next);
+      return {
+        past: [...current.past, current.present],
+        present: next,
+        future: current.future.slice(1),
+      };
+    });
+  const resetConfig = (newConfig: AdminRallyConfig<TLocale, TMeta>): void => {
+    initialRef.current = newConfig;
+    setHistory({ past: [], present: newConfig, future: [] });
+    options.onChange?.(newConfig);
   };
   return {
     config,
@@ -73,8 +297,23 @@ export function useAdminRallyEditor<
     update,
     updateSpot,
     updateReward,
-    reset: () => setConfig(initialConfig),
-    isDirty: config !== initialConfig,
+    addSpot,
+    removeSpot,
+    reorderSpots: (fromIndex, toIndex) => reorderSpots(fromIndex, toIndex),
+    duplicateSpot,
+    addReward,
+    removeReward,
+    duplicateReward,
+    addCondition,
+    removeCondition,
+    updateLocalizedField: updateLocalized,
+    undo,
+    redo,
+    canUndo: history.past.length > 0,
+    canRedo: history.future.length > 0,
+    resetConfig,
+    reset: () => resetConfig(initialRef.current),
+    isDirty: config !== initialRef.current,
   };
 }
 
@@ -208,6 +447,25 @@ function move<T>(items: ReadonlyArray<T>, index: number, direction: -1 | 1): Rea
   const [item] = next.splice(index, 1);
   if (item !== undefined) next.splice(target, 0, item);
   return next;
+}
+
+function moveTo<T>(items: ReadonlyArray<T>, fromIndex: number, toIndex: number): ReadonlyArray<T> {
+  if (
+    fromIndex < 0 ||
+    fromIndex >= items.length ||
+    toIndex < 0 ||
+    toIndex >= items.length ||
+    fromIndex === toIndex
+  )
+    return items;
+  const next = [...items];
+  const [item] = next.splice(fromIndex, 1);
+  if (item !== undefined) next.splice(toIndex, 0, item);
+  return next.map((entry, index) =>
+    typeof entry === "object" && entry !== null && "orderIndex" in entry
+      ? ({ ...entry, orderIndex: index } as T)
+      : entry,
+  );
 }
 
 export interface ConditionEditorProps<TLocale extends string = SupportedLocale>
@@ -406,35 +664,17 @@ export function SpotItemForm<
           }
         />
       </label>
-      <label>
-        {field("externalReferences", "External references")}
-        <textarea
-          value={JSON.stringify(spot.externalReferences ?? [], null, 2)}
-          onChange={(event) => {
-            try {
-              const parsed: unknown = JSON.parse(event.target.value);
-              if (Array.isArray(parsed)) update({ externalReferences: parsed });
-            } catch {
-              // Keep the text editable until the JSON is complete.
-            }
-          }}
-        />
-      </label>
-      <label>
-        {field("metadata", "Metadata")}
-        <textarea
-          value={JSON.stringify(spot.metadata ?? {}, null, 2)}
-          onChange={(event) => {
-            try {
-              const parsed: unknown = JSON.parse(event.target.value);
-              if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed))
-                update({ metadata: parsed as TMeta });
-            } catch {
-              // Keep the text editable until the JSON is complete.
-            }
-          }}
-        />
-      </label>
+      <ExternalReferencesEditor
+        references={spot.externalReferences ?? []}
+        onChange={(externalReferences) => update({ externalReferences })}
+        label={field("externalReferences", "External references")}
+      />
+      <MetadataSection
+        name={`spot-${spot.id}`}
+        values={spot.metadata ?? {}}
+        onChange={(metadata) => update({ metadata: metadata as TMeta })}
+        label={field("metadata", "Metadata")}
+      />
       {spot.conditions.map((item, index) => (
         <ConditionEditor
           key={`${spot.id}-condition-${JSON.stringify(item)}`}
@@ -473,19 +713,126 @@ export function SpotItemForm<
   );
 }
 
-function RewardItemForm<TLocale extends string = SupportedLocale>({
+export interface RewardItemFormProps<TLocale extends string = SupportedLocale>
+  extends DictionaryProps<TLocale> {
+  readonly reward: Reward<TLocale>;
+  readonly onChange: (reward: Reward<TLocale>) => void;
+  readonly onRemove: () => void;
+}
+
+function newUnlockCondition(type: RewardUnlockCondition["type"]): RewardUnlockCondition {
+  if (type === "stamp_count") return { type, count: 1 };
+  if (type === "stamps") return { type, stampIds: [] };
+  return { type, conditions: [] };
+}
+
+export interface RewardUnlockConditionEditorProps extends DictionaryProps<SupportedLocale> {
+  readonly condition: RewardUnlockCondition;
+  readonly onChange: (condition: RewardUnlockCondition) => void;
+  readonly onRemove?: () => void;
+}
+
+export function RewardUnlockConditionEditor({
+  condition: unlock,
+  onChange,
+  onRemove,
+}: RewardUnlockConditionEditorProps): ReactElement {
+  return (
+    <fieldset>
+      <legend>Unlock condition</legend>
+      <label>
+        Type
+        <select
+          value={unlock.type}
+          onChange={(event) =>
+            onChange(newUnlockCondition(event.target.value as RewardUnlockCondition["type"]))
+          }
+        >
+          <option value="stamp_count">Stamp count</option>
+          <option value="stamps">Specific stamps</option>
+          <option value="all">All conditions</option>
+          <option value="any">Any condition</option>
+        </select>
+      </label>
+      {unlock.type === "stamp_count" && (
+        <label>
+          Count
+          <input
+            type="number"
+            min={0}
+            value={unlock.count}
+            onChange={(event) => onChange({ ...unlock, count: Number(event.target.value) })}
+          />
+        </label>
+      )}
+      {unlock.type === "stamps" && (
+        <label>
+          Stamp IDs
+          <input
+            value={unlock.stampIds.join(", ")}
+            onChange={(event) =>
+              onChange({
+                ...unlock,
+                stampIds: event.target.value
+                  .split(",")
+                  .map((value) => value.trim())
+                  .filter(Boolean),
+              })
+            }
+          />
+        </label>
+      )}
+      {(unlock.type === "all" || unlock.type === "any") && (
+        <>
+          {unlock.conditions.map((child, index) => (
+            <RewardUnlockConditionEditor
+              key={`${unlock.type}-${JSON.stringify(child)}`}
+              condition={child}
+              onChange={(next) =>
+                onChange({
+                  ...unlock,
+                  conditions: unlock.conditions.map((current, childIndex) =>
+                    childIndex === index ? next : current,
+                  ),
+                })
+              }
+              onRemove={() =>
+                onChange({
+                  ...unlock,
+                  conditions: unlock.conditions.filter((_, childIndex) => childIndex !== index),
+                })
+              }
+            />
+          ))}
+          <button
+            type="button"
+            onClick={() =>
+              onChange({
+                ...unlock,
+                conditions: [...unlock.conditions, newUnlockCondition("stamp_count")],
+              })
+            }
+          >
+            Add nested condition
+          </button>
+        </>
+      )}
+      {onRemove !== undefined && (
+        <button type="button" onClick={onRemove}>
+          Remove condition
+        </button>
+      )}
+    </fieldset>
+  );
+}
+
+export function RewardItemForm<TLocale extends string = SupportedLocale>({
   reward,
   locale,
   dictionary,
   onChange,
   onRemove,
-}: {
-  readonly reward: Reward<TLocale>;
-  readonly locale: TLocale;
-  readonly dictionary?: LocaleDictionary<TLocale>;
-  readonly onChange: (reward: Reward<TLocale>) => void;
-  readonly onRemove: () => void;
-}): ReactElement {
+}: RewardItemFormProps<TLocale> & { readonly locale: TLocale }): ReactElement {
   const field = (key: string, fallback: string): string => text(dictionary, locale, key, fallback);
   return (
     <fieldset>
@@ -558,21 +905,42 @@ function RewardItemForm<TLocale extends string = SupportedLocale>({
           <option value="view_only">{field("redemption.viewOnly", "View only")}</option>
         </select>
       </label>
-      <label>
-        {field("unlockConditions", "Unlock conditions")}
-        <textarea
-          value={JSON.stringify(reward.conditions ?? [], null, 2)}
-          onChange={(event) => {
-            try {
-              const parsed: unknown = JSON.parse(event.target.value);
-              if (Array.isArray(parsed))
-                onChange({ ...reward, conditions: parsed as ReadonlyArray<RewardUnlockCondition> });
-            } catch {
-              // Keep the text editable until the JSON is complete.
+      <fieldset>
+        <legend>{field("unlockConditions", "Unlock conditions")}</legend>
+        {(reward.conditions ?? []).map((unlock, index) => (
+          <RewardUnlockConditionEditor
+            key={`${reward.id}-unlock-${JSON.stringify(unlock)}`}
+            condition={unlock}
+            onChange={(next) =>
+              onChange({
+                ...reward,
+                conditions: (reward.conditions ?? []).map((current, conditionIndex) =>
+                  conditionIndex === index ? next : current,
+                ),
+              })
             }
-          }}
-        />
-      </label>
+            onRemove={() =>
+              onChange({
+                ...reward,
+                conditions: (reward.conditions ?? []).filter(
+                  (_, conditionIndex) => conditionIndex !== index,
+                ),
+              })
+            }
+          />
+        ))}
+        <button
+          type="button"
+          onClick={() =>
+            onChange({
+              ...reward,
+              conditions: [...(reward.conditions ?? []), newUnlockCondition("stamp_count")],
+            })
+          }
+        >
+          {field("addUnlockCondition", "Add unlock condition")}
+        </button>
+      </fieldset>
       {(["stockLimit", "userClaimLimit"] as const).map((key) => (
         <label key={key}>
           {field(key, key)}
@@ -623,6 +991,282 @@ function RewardItemForm<TLocale extends string = SupportedLocale>({
   );
 }
 
+export interface ThemeEditorProps<TLocale extends string = SupportedLocale>
+  extends DictionaryProps<TLocale> {
+  readonly theme: SheetTheme;
+  readonly onChange: (theme: SheetTheme) => void;
+}
+
+export function ThemeEditor<TLocale extends string = SupportedLocale>({
+  theme,
+  onChange,
+  locale,
+  dictionary,
+}: ThemeEditorProps<TLocale>): ReactElement {
+  const activeLocale = locale ?? ("en" as TLocale);
+  const field = (key: string, fallback: string): string =>
+    text(dictionary, activeLocale, key, fallback);
+  const update = <K extends keyof SheetTheme>(key: K, value: SheetTheme[K]): void =>
+    onChange({ ...theme, [key]: value });
+  return (
+    <fieldset>
+      <legend>{field("theme", "Theme")}</legend>
+      {(
+        [
+          "primaryColor",
+          "backgroundColor",
+          "cardBackgroundColor",
+          "textColor",
+          "backgroundImageUrl",
+          "completedStampColor",
+        ] as const
+      ).map((key) => (
+        <label key={key}>
+          {field(key, key)}
+          <input
+            type={key.toLowerCase().includes("color") ? "color" : "url"}
+            value={theme[key] ?? ""}
+            onChange={(event) => update(key, event.target.value)}
+          />
+        </label>
+      ))}
+      <label>
+        {field("slotShape", "Slot shape")}
+        <select
+          value={theme.slotShape}
+          onChange={(event) => update("slotShape", event.target.value as SheetTheme["slotShape"])}
+        >
+          {(["circle", "square", "rounded"] as const).map((shape) => (
+            <option key={shape} value={shape}>
+              {field(`slotShape.${shape}`, shape)}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
+        {field("gridColumns", "Grid columns")}
+        <input
+          type="number"
+          min={1}
+          max={12}
+          value={theme.gridColumns}
+          onChange={(event) => update("gridColumns", Number(event.target.value))}
+        />
+      </label>
+      <label>
+        {field("fontFamily", "Font family")}
+        <select
+          value={theme.fontFamily ?? "system-ui"}
+          onChange={(event) => update("fontFamily", event.target.value as SheetTheme["fontFamily"])}
+        >
+          {(["system-ui", "serif", "rounded-sans", "monospace", "handwritten"] as const).map(
+            (font) => (
+              <option key={font} value={font}>
+                {font}
+              </option>
+            ),
+          )}
+        </select>
+      </label>
+      <label>
+        {field("unclaimedOpacity", "Unclaimed opacity")}
+        <input
+          type="number"
+          min={0}
+          max={1}
+          step={0.05}
+          value={theme.unclaimedOpacity ?? 1}
+          onChange={(event) => update("unclaimedOpacity", Number(event.target.value))}
+        />
+      </label>
+    </fieldset>
+  );
+}
+
+function metadataValue(value: unknown): string {
+  return typeof value === "string" ? value : JSON.stringify(value);
+}
+
+export interface ExternalReferencesEditorProps {
+  readonly references: ReadonlyArray<ExternalReference>;
+  readonly onChange: (references: ReadonlyArray<ExternalReference>) => void;
+  readonly label?: string;
+}
+
+export function ExternalReferencesEditor({
+  references,
+  onChange,
+  label = "External references",
+}: ExternalReferencesEditorProps): ReactElement {
+  return (
+    <fieldset>
+      <legend>{label}</legend>
+      {references.map((reference) => (
+        <div key={`${reference.type}-${reference.id}-${reference.url ?? ""}`}>
+          <label>
+            Type
+            <input
+              value={reference.type}
+              onChange={(event) =>
+                onChange(
+                  references.map((current) =>
+                    current === reference ? { ...current, type: event.target.value } : current,
+                  ),
+                )
+              }
+            />
+          </label>
+          <label>
+            ID
+            <input
+              value={reference.id}
+              onChange={(event) =>
+                onChange(
+                  references.map((current) =>
+                    current === reference ? { ...current, id: event.target.value } : current,
+                  ),
+                )
+              }
+            />
+          </label>
+          <label>
+            URL
+            <input
+              type="url"
+              value={reference.url ?? ""}
+              onChange={(event) =>
+                onChange(
+                  references.map((current) =>
+                    current === reference ? { ...current, url: event.target.value } : current,
+                  ),
+                )
+              }
+            />
+          </label>
+          <button
+            type="button"
+            onClick={() => onChange(references.filter((current) => current !== reference))}
+          >
+            Remove reference
+          </button>
+        </div>
+      ))}
+      <button type="button" onClick={() => onChange([...references, { type: "", id: "" }])}>
+        Add reference
+      </button>
+    </fieldset>
+  );
+}
+
+function MetadataSection({
+  name,
+  values,
+  onChange,
+  label,
+}: {
+  readonly name: string;
+  readonly values: Readonly<Record<string, unknown>>;
+  readonly onChange: (values: Readonly<Record<string, unknown>>) => void;
+  readonly label: string;
+}): ReactElement {
+  const entries = Object.entries(values);
+  return (
+    <fieldset>
+      <legend>{label}</legend>
+      {entries.map(([key, value]) => (
+        <div key={`${name}-${key}`}>
+          <label>
+            Key
+            <input
+              value={key}
+              onChange={(event) => {
+                const next = { ...values };
+                delete next[key];
+                next[event.target.value] = value;
+                onChange(next);
+              }}
+            />
+          </label>
+          <label>
+            Value
+            <input
+              value={metadataValue(value)}
+              onChange={(event) => {
+                let nextValue: unknown = event.target.value;
+                try {
+                  nextValue = JSON.parse(event.target.value) as unknown;
+                } catch {
+                  /* plain text */
+                }
+                onChange({ ...values, [key]: nextValue });
+              }}
+            />
+          </label>
+          <button
+            type="button"
+            onClick={() => {
+              const next = { ...values };
+              delete next[key];
+              onChange(next);
+            }}
+          >
+            Remove
+          </button>
+        </div>
+      ))}
+      <button
+        type="button"
+        onClick={() => {
+          let index = entries.length + 1;
+          let key = `key${index}`;
+          while (key in values) {
+            index += 1;
+            key = `key${index}`;
+          }
+          onChange({ ...values, [key]: "" });
+        }}
+      >
+        Add field
+      </button>
+    </fieldset>
+  );
+}
+
+export interface MetadataEditorProps<TLocale extends string = SupportedLocale>
+  extends DictionaryProps<TLocale> {
+  readonly publicMetadata?: Readonly<Record<string, unknown>>;
+  readonly serverMetadata?: Readonly<Record<string, unknown>>;
+  readonly onPublicMetadataChange: (metadata: Readonly<Record<string, unknown>>) => void;
+  readonly onServerMetadataChange: (metadata: Readonly<Record<string, unknown>>) => void;
+}
+
+export function MetadataEditor<TLocale extends string = SupportedLocale>({
+  publicMetadata = {},
+  serverMetadata = {},
+  onPublicMetadataChange,
+  onServerMetadataChange,
+  locale,
+  dictionary,
+}: MetadataEditorProps<TLocale>): ReactElement {
+  const activeLocale = locale ?? ("en" as TLocale);
+  return (
+    <section aria-label={text(dictionary, activeLocale, "metadata", "Metadata")}>
+      <MetadataSection
+        name="public"
+        values={publicMetadata}
+        onChange={onPublicMetadataChange}
+        label="Public metadata"
+      />
+      <MetadataSection
+        name="server"
+        values={serverMetadata}
+        onChange={onServerMetadataChange}
+        label="Server metadata"
+      />
+    </section>
+  );
+}
+
 export function AdminRallyEditor<
   TLocale extends string = SupportedLocale,
   TMeta extends Record<string, unknown> = Record<string, unknown>,
@@ -661,47 +1305,27 @@ export function AdminRallyEditor<
           }
         />
       </label>
+      <ThemeEditor
+        theme={config.theme ?? DEFAULT_SHEET_THEME}
+        locale={activeLocale}
+        {...(dictionary === undefined ? {} : { dictionary })}
+        onChange={(theme) => update({ theme })}
+      />
       <label>
-        {field("theme", "Theme (JSON)")}
-        <textarea
-          aria-label={field("theme", "Theme (JSON)")}
-          value={JSON.stringify(config.theme ?? {}, null, 2)}
-          onChange={(event) => {
-            try {
-              const parsed: unknown = JSON.parse(event.target.value);
-              if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed))
-                update({ theme: parsed as NonNullable<AdminRallyConfig["theme"]> });
-            } catch {
-              // Keep the text editable until the JSON is complete.
-            }
-          }}
+        {field("serverEndpoint", "Server endpoint")}
+        <input
+          value={config.serverEndpoint ?? ""}
+          onChange={(event) => update({ serverEndpoint: event.target.value })}
         />
       </label>
-      {(["serverEndpoint", "publicMetadata", "serverMetadata"] as const).map((key) => (
-        <label key={key}>
-          {field(key, key)}
-          <textarea
-            value={
-              key === "serverEndpoint"
-                ? (config.serverEndpoint ?? "")
-                : JSON.stringify(config[key] ?? {}, null, 2)
-            }
-            onChange={(event) => {
-              if (key === "serverEndpoint") {
-                update({ serverEndpoint: event.target.value });
-                return;
-              }
-              try {
-                const parsed: unknown = JSON.parse(event.target.value);
-                if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed))
-                  update({ [key]: parsed });
-              } catch {
-                // Keep the text editable until the JSON is complete.
-              }
-            }}
-          />
-        </label>
-      ))}
+      <MetadataEditor
+        publicMetadata={config.publicMetadata ?? config.metadata ?? {}}
+        serverMetadata={config.serverMetadata ?? {}}
+        locale={activeLocale}
+        {...(dictionary === undefined ? {} : { dictionary })}
+        onPublicMetadataChange={(metadata) => update({ publicMetadata: metadata as TMeta })}
+        onServerMetadataChange={(metadata) => update({ serverMetadata: metadata })}
+      />
       <button
         type="button"
         onClick={() => updateSpots([...config.spots, newSpot<TLocale, TMeta>(config.spots.length)])}

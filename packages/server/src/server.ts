@@ -282,18 +282,11 @@ export class StampRallyServer {
   async claimReward(
     request: ClaimRewardRequest & { readonly userId: string },
   ): Promise<ClaimResponse> {
-    if (this.#persistence.runTransaction !== undefined)
-      return this.#persistence.runTransaction(request.rallyId, (transaction) =>
-        this.#claimRewardMutation(request, transaction),
-      );
-    return this.#claimRewardMutation(request, this.#persistence);
-  }
-  async #claimRewardMutation(
-    request: ClaimRewardRequest & { readonly userId: string },
-    persistence: ServerPersistenceAdapter,
-  ): Promise<ClaimResponse> {
     const key = `claim:${request.rallyId}:${request.userId}:${request.rewardId}:${request.idempotencyKey}`;
-    const previous = await persistence.getIdempotentResult<ClaimResponse>(request.rallyId, key);
+    const previous = await this.#persistence.getIdempotentResult<ClaimResponse>(
+      request.rallyId,
+      key,
+    );
     if (previous !== null) return previous;
     const reward = this.#config.rewards.find((item) => item.id === request.rewardId);
     if (reward === undefined)
@@ -302,127 +295,141 @@ export class StampRallyServer {
         { ok: false, code: "REWARD_NOT_FOUND", message: "Reward was not found." },
         request,
         now(this.#options, request.now),
-        persistence,
       );
     const lockKey = `reward:${request.rallyId}:${reward.id}`;
     if (
-      !(await persistence.acquireLock(request.rallyId, lockKey, this.#options.lockTtlMs ?? 5_000))
+      !(await this.#persistence.acquireLock(
+        request.rallyId,
+        lockKey,
+        this.#options.lockTtlMs ?? 5_000,
+      ))
     )
       return { ok: false, code: "CONFLICT", message: "The reward is being claimed." };
     const timestamp = now(this.#options, request.now);
-    let decremented = false;
-    let previousState: UserRallyState | null = null;
-    let recordedTicket: string | null = null;
-    let successAuditId: string | null = null;
     try {
-      const checked = await persistence.getIdempotentResult<ClaimResponse>(request.rallyId, key);
-      if (checked !== null) return checked;
-      const storedState = await persistence.getUserState(request.rallyId, request.userId);
-      previousState = storedState;
-      const current = storedState ?? initialState(this.#config, request.userId, timestamp);
-      const claimCount = await persistence.getUserClaimCount(
+      const checked = await this.#persistence.getIdempotentResult<ClaimResponse>(
         request.rallyId,
-        request.userId,
-        reward.id,
+        key,
       );
-      const storedReward = current.rewards.find((item) => item.rewardId === reward.id) ?? {
-        rewardId: reward.id,
-        status: "LOCKED" as const,
-      };
-      const currentReward =
-        reward.redemptionMethod === "server_claim" &&
-        storedReward.status === "CONSUMED" &&
-        (reward.userClaimLimit === undefined || claimCount < reward.userClaimLimit)
-          ? { ...storedReward, status: "AVAILABLE" as const }
-          : storedReward;
-      const local = consumeReward({
-        reward,
-        currentState: currentReward,
-        now: timestamp,
-        userRedemptionCount: claimCount,
-        ...(request.staffPasscode === undefined ? {} : { inputPasscode: request.staffPasscode }),
-        ...(request.staffId === undefined ? {} : { staffId: request.staffId }),
-      });
-      if (!local.ok)
-        return this.#rememberClaim(
-          key,
-          { ok: false, code: local.error.code, message: "Reward cannot be claimed." },
-          request,
-          timestamp,
-          persistence,
-        );
-      const stock = await persistence.decrementRewardStock(request.rallyId, reward.id);
-      if (!stock.success)
-        return this.#rememberClaim(
-          key,
-          { ok: false, code: "OUT_OF_STOCK", message: "Reward is out of stock." },
-          request,
-          timestamp,
-          persistence,
-        );
-      decremented = true;
-      const next: UserRallyState = {
-        ...current,
-        rewards: current.rewards.map((item) => (item.rewardId === reward.id ? local.value : item)),
-        updatedAt: timestamp,
-      };
-      try {
-        await persistence.saveUserState(request.rallyId, request.userId, next);
-        const response: ClaimResponse =
-          local.value.claimTicketNumber === undefined
-            ? { ok: true, state: next }
-            : { ok: true, state: next, claimTicketNumber: local.value.claimTicketNumber };
-        recordedTicket = local.value.claimTicketNumber ?? "";
-        await persistence.recordUserClaim({
+      if (checked !== null) return checked;
+      const responseHolder: { value: ClaimResponse | null } = { value: null };
+      const result = await this.#persistence.executeClaimRewardTransaction(
+        {
           rallyId: request.rallyId,
           userId: request.userId,
           rewardId: reward.id,
-          ticketNumber: recordedTicket,
+          ticketNumber: request.idempotencyKey,
           timestamp: Number.isNaN(Date.parse(timestamp)) ? Date.now() : Date.parse(timestamp),
-        });
-        const successAudit = audit(
-          request.rallyId,
-          request.userId,
-          "CLAIM_REWARD",
-          reward.id,
-          request.idempotencyKey,
-          "SUCCESS",
-          timestamp,
-        );
-        successAuditId = successAudit.id;
-        await persistence.recordAuditLog(successAudit);
-        await persistence.saveIdempotentResult(
-          request.rallyId,
-          key,
-          response,
-          this.#options.idempotencyTtlMs ?? 86_400_000,
-        );
-        return response;
-      } catch (error) {
-        if (recordedTicket !== null && persistence.rollbackUserClaim !== undefined)
-          await persistence.rollbackUserClaim(
-            request.rallyId,
-            request.userId,
-            reward.id,
-            recordedTicket,
-          );
-        if (persistence.rollbackUserState !== undefined)
-          await persistence.rollbackUserState(request.rallyId, request.userId, previousState);
-        if (successAuditId !== null && persistence.removeAuditLog !== undefined)
-          await persistence.removeAuditLog(successAuditId);
-        await this.#restoreRewardStock(persistence, request.rallyId, reward.id);
-        decremented = false;
-        throw error;
+          idempotencyKey: key,
+          ...(request.staffPasscode === undefined ? {} : { proofData: request.staffPasscode }),
+          ...(this.#options.idempotencyTtlMs === undefined
+            ? {}
+            : { idempotencyTtlMs: this.#options.idempotencyTtlMs }),
+          initialUserState: initialState(this.#config, request.userId, timestamp),
+        },
+        ({ stock, claimCount, userState }) => {
+          const storedReward = userState.rewards.find((item) => item.rewardId === reward.id) ?? {
+            rewardId: reward.id,
+            status: "LOCKED" as const,
+          };
+          const currentReward =
+            reward.redemptionMethod === "server_claim" &&
+            storedReward.status === "CONSUMED" &&
+            (reward.userClaimLimit === undefined || claimCount < reward.userClaimLimit)
+              ? { ...storedReward, status: "AVAILABLE" as const }
+              : storedReward;
+          const makeAudit = (status: "SUCCESS" | "REJECTED", code?: string): AuditLog =>
+            audit(
+              request.rallyId,
+              request.userId,
+              "CLAIM_REWARD",
+              reward.id,
+              request.idempotencyKey,
+              status,
+              timestamp,
+              code,
+            );
+          if (stock !== null && stock <= 0) {
+            responseHolder.value = {
+              ok: false,
+              code: "OUT_OF_STOCK",
+              message: "Reward is out of stock.",
+            };
+            return {
+              nextStock: stock,
+              nextUserState: userState,
+              auditLog: makeAudit("REJECTED", "OUT_OF_STOCK"),
+              result: responseHolder.value,
+              error: "OUT_OF_STOCK",
+            };
+          }
+          const local = consumeReward({
+            reward,
+            currentState: currentReward,
+            now: timestamp,
+            userRedemptionCount: claimCount,
+            ...(request.staffPasscode === undefined
+              ? {}
+              : { inputPasscode: request.staffPasscode }),
+            ...(request.staffId === undefined ? {} : { staffId: request.staffId }),
+          });
+          if (!local.ok) {
+            responseHolder.value = {
+              ok: false,
+              code: local.error.code,
+              message: "Reward cannot be claimed.",
+            };
+            return {
+              nextStock: stock,
+              nextUserState: userState,
+              auditLog: makeAudit("REJECTED", local.error.code),
+              result: responseHolder.value,
+              error: local.error.code,
+            };
+          }
+          const nextRewards = userState.rewards.some((item) => item.rewardId === reward.id)
+            ? userState.rewards.map((item) => (item.rewardId === reward.id ? local.value : item))
+            : [...userState.rewards, local.value];
+          const next: UserRallyState = {
+            ...userState,
+            rewards: nextRewards,
+            updatedAt: timestamp,
+          };
+          responseHolder.value =
+            local.value.claimTicketNumber === undefined
+              ? { ok: true, state: next }
+              : { ok: true, state: next, claimTicketNumber: local.value.claimTicketNumber };
+          return {
+            nextStock: stock === null ? null : stock - 1,
+            nextUserState: next,
+            auditLog: makeAudit("SUCCESS"),
+            result: responseHolder.value,
+          };
+        },
+      );
+      const response = responseHolder.value;
+      if (!result.success) {
+        if (response !== null && !response.ok && response.code === result.error) return response;
+        return {
+          ok: false,
+          code: "PERSISTENCE_FAILED",
+          message: result.error ?? "Reward claim failed.",
+        };
       }
+      if (response !== null && result.success) return response;
+      return {
+        ok: false,
+        code: "PERSISTENCE_FAILED",
+        message: result.error ?? "Reward claim failed.",
+      };
     } catch (error) {
-      if (decremented) await this.#restoreRewardStock(persistence, request.rallyId, reward.id);
       return {
         ok: false,
         code: "PERSISTENCE_FAILED",
         message: error instanceof Error ? error.message : "Reward claim failed.",
       };
     } finally {
-      await persistence.releaseLock(request.rallyId, lockKey);
+      await this.#persistence.releaseLock(request.rallyId, lockKey);
     }
   }
   async sync(rallyId: string, userId: string): Promise<UserRallyState> {
@@ -479,9 +486,8 @@ export class StampRallyServer {
     result: ClaimResponse,
     request: ClaimRewardRequest & { readonly userId: string },
     timestamp: string,
-    persistence: ServerPersistenceAdapter = this.#persistence,
   ): Promise<ClaimResponse> {
-    await persistence.recordAuditLog(
+    await this.#persistence.recordAuditLog(
       audit(
         request.rallyId,
         request.userId,
@@ -493,20 +499,12 @@ export class StampRallyServer {
         result.ok ? undefined : result.code,
       ),
     );
-    await persistence.saveIdempotentResult(
+    await this.#persistence.saveIdempotentResult(
       request.rallyId,
       key,
       result,
       this.#options.idempotencyTtlMs ?? 86_400_000,
     );
     return result;
-  }
-  async #restoreRewardStock(
-    persistence: ServerPersistenceAdapter,
-    rallyId: string,
-    rewardId: string,
-  ): Promise<void> {
-    if (persistence.restoreRewardStock !== undefined)
-      await persistence.restoreRewardStock(rallyId, rewardId);
   }
 }

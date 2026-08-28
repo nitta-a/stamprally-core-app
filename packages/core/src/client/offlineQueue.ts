@@ -1,4 +1,5 @@
 import type { UserRallyState } from "../domain/index.js";
+import { resolveRallyStateConflict } from "../engine/sync.js";
 import type { CheckInRequest, CheckInResult, ClaimRequest, ClaimResult } from "./client.js";
 
 export type OfflineOperation =
@@ -42,6 +43,12 @@ export interface OfflineConflict {
 export type OfflineSender = (
   operation: OfflineOperation,
 ) => Promise<OfflineResult | OfflineConflictResult>;
+export interface OfflineSyncResultEvent {
+  readonly operation: OfflineOperation;
+  readonly result: OfflineResult | OfflineConflictResult;
+  readonly state?: UserRallyState;
+}
+export type OfflineSyncResultListener = (event: OfflineSyncResultEvent) => void | Promise<void>;
 
 class MemoryQueueStorage implements OfflineQueueStorage {
   readonly #values = new Map<string, ReadonlyArray<OfflineOperation>>();
@@ -165,6 +172,7 @@ export class OfflineQueue {
   #error: Error | null = null;
   #sender: OfflineSender | undefined;
   #syncPromise: Promise<void> | null = null;
+  #syncResultListener: OfflineSyncResultListener | undefined;
 
   constructor(options: OfflineQueueOptions = {}) {
     if (options.storage !== undefined) this.#storage = options.storage;
@@ -187,6 +195,13 @@ export class OfflineQueue {
   }
   get operations(): ReadonlyArray<OfflineOperation> {
     return this.#operations;
+  }
+  get conflictPolicy(): SyncConflictPolicy {
+    return this.#conflictPolicy;
+  }
+
+  setSyncResultListener(listener: OfflineSyncResultListener | undefined): void {
+    this.#syncResultListener = listener;
   }
 
   async initialize(): Promise<void> {
@@ -249,8 +264,17 @@ export class OfflineQueue {
         } catch (cause) {
           throw cause instanceof Error ? cause : new Error(String(cause));
         }
-        if ("conflict" in result && result.conflict === true)
-          await this.resolveConflict(operation, result.localState, result.serverState);
+        const state =
+          "conflict" in result && result.conflict === true
+            ? await this.resolveConflict(operation, result.localState, result.serverState)
+            : "ok" in result && result.ok
+              ? result.value.state
+              : undefined;
+        await this.#syncResultListener?.({
+          operation,
+          result,
+          ...(state === undefined ? {} : { state }),
+        });
         this.#operations = this.#operations.slice(1);
         await this.#storage.save(this.#key, this.#operations);
       }
@@ -266,17 +290,13 @@ export class OfflineQueue {
     operation: OfflineOperation,
     localState: UserRallyState,
     serverState: UserRallyState,
-  ): Promise<void> {
+  ): Promise<UserRallyState> {
     const configured = this.#onSyncConflict;
     const policy =
       (typeof configured === "function"
         ? await configured({ operation, localState, serverState })
         : configured) ?? this.#conflictPolicy;
-    if (policy === "merge") {
-      // Merge is intentionally represented by the callback's selected policy. The
-      // server remains authoritative for fields not present in the local event.
-      return;
-    }
+    return resolveRallyStateConflict(serverState, localState, { policy });
   }
 }
 
