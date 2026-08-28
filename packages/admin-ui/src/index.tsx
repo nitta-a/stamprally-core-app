@@ -8,7 +8,7 @@ import type {
   SupportedLocale,
 } from "@stamprally/core";
 import { resolveLocalizedText, safeParseAdminConfig, updateLocalizedField } from "@stamprally/core";
-import { type ReactElement, useState } from "react";
+import { type Dispatch, type ReactElement, type SetStateAction, useState } from "react";
 
 export interface AdminRallyEditorProps<
   TLocale extends string = SupportedLocale,
@@ -18,6 +18,156 @@ export interface AdminRallyEditorProps<
   readonly onChange: (config: AdminRallyConfig<TLocale, TMeta>) => void;
   readonly locale?: string;
   readonly dictionary?: LocaleDictionary<TLocale>;
+}
+
+export interface UseAdminRallyEditorOptions<
+  TLocale extends string = SupportedLocale,
+  TMeta extends Record<string, unknown> = Record<string, unknown>,
+> {
+  readonly onChange?: (config: AdminRallyConfig<TLocale, TMeta>) => void;
+}
+export interface UseAdminRallyEditorReturn<
+  TLocale extends string = SupportedLocale,
+  TMeta extends Record<string, unknown> = Record<string, unknown>,
+> {
+  readonly config: AdminRallyConfig<TLocale, TMeta>;
+  readonly setConfig: Dispatch<SetStateAction<AdminRallyConfig<TLocale, TMeta>>>;
+  readonly update: (patch: Partial<AdminRallyConfig<TLocale, TMeta>>) => void;
+  readonly updateSpot: (spotId: string, patch: Partial<SpotItem<TLocale, TMeta>>) => void;
+  readonly updateReward: (rewardId: string, patch: Partial<Reward<TLocale>>) => void;
+  readonly reset: () => void;
+  readonly isDirty: boolean;
+}
+
+/** Headless state and immutable update helpers for CMS integrations. */
+export function useAdminRallyEditor<
+  TLocale extends string = SupportedLocale,
+  TMeta extends Record<string, unknown> = Record<string, unknown>,
+>(
+  initialConfig: AdminRallyConfig<TLocale, TMeta>,
+  options: UseAdminRallyEditorOptions<TLocale, TMeta> = {},
+): UseAdminRallyEditorReturn<TLocale, TMeta> {
+  const [config, setConfig] = useState(initialConfig);
+  const update = (patch: Partial<AdminRallyConfig<TLocale, TMeta>>): void => {
+    setConfig((current) => {
+      const next = { ...current, ...patch };
+      options.onChange?.(next);
+      return next;
+    });
+  };
+  const updateSpot = (spotId: string, patch: Partial<SpotItem<TLocale, TMeta>>): void => {
+    update({
+      spots: config.spots.map((spot) => (spot.id === spotId ? { ...spot, ...patch } : spot)),
+    });
+  };
+  const updateReward = (rewardId: string, patch: Partial<Reward<TLocale>>): void => {
+    update({
+      rewards: config.rewards.map((reward) =>
+        reward.id === rewardId ? { ...reward, ...patch } : reward,
+      ),
+    });
+  };
+  return {
+    config,
+    setConfig,
+    update,
+    updateSpot,
+    updateReward,
+    reset: () => setConfig(initialConfig),
+    isDirty: config !== initialConfig,
+  };
+}
+
+export interface EntityEditorOptions<
+  TLocale extends string = SupportedLocale,
+  TMeta extends Record<string, unknown> = Record<string, unknown>,
+> extends UseAdminRallyEditorOptions<TLocale, TMeta> {
+  readonly config?: AdminRallyConfig<TLocale, TMeta>;
+  readonly initialConfig?: AdminRallyConfig<TLocale, TMeta>;
+}
+export interface SpotEditorReturn<
+  TLocale extends string = SupportedLocale,
+  TMeta extends Record<string, unknown> = Record<string, unknown>,
+> {
+  readonly config: AdminRallyConfig<TLocale, TMeta> | undefined;
+  readonly spot: SpotItem<TLocale, TMeta> | undefined;
+  readonly setConfig: Dispatch<SetStateAction<AdminRallyConfig<TLocale, TMeta> | undefined>>;
+  readonly update: (patch: Partial<SpotItem<TLocale, TMeta>>) => void;
+  readonly remove: () => void;
+}
+
+export function useSpotEditor<
+  TLocale extends string = SupportedLocale,
+  TMeta extends Record<string, unknown> = Record<string, unknown>,
+>(
+  spotId: string,
+  options: EntityEditorOptions<TLocale, TMeta> = {},
+): SpotEditorReturn<TLocale, TMeta> {
+  const [config, setConfig] = useState<AdminRallyConfig<TLocale, TMeta> | undefined>(
+    options.config ?? options.initialConfig,
+  );
+  const commit = (next: AdminRallyConfig<TLocale, TMeta>): void => {
+    setConfig(next);
+    options.onChange?.(next);
+  };
+  const spot = config?.spots.find((item) => item.id === spotId);
+  return {
+    config,
+    spot,
+    setConfig,
+    update: (patch) => {
+      if (config === undefined || spot === undefined) return;
+      commit({
+        ...config,
+        spots: config.spots.map((item) => (item.id === spotId ? { ...item, ...patch } : item)),
+      });
+    },
+    remove: () => {
+      if (config === undefined || spot === undefined) return;
+      commit({ ...config, spots: config.spots.filter((item) => item.id !== spotId) });
+    },
+  };
+}
+
+export function useRewardEditor<
+  TLocale extends string = SupportedLocale,
+  TMeta extends Record<string, unknown> = Record<string, unknown>,
+>(
+  rewardId: string,
+  options: EntityEditorOptions<TLocale, TMeta> = {},
+): {
+  readonly config: AdminRallyConfig<TLocale, TMeta> | undefined;
+  readonly reward: Reward<TLocale> | undefined;
+  readonly setConfig: Dispatch<SetStateAction<AdminRallyConfig<TLocale, TMeta> | undefined>>;
+  readonly update: (patch: Partial<Reward<TLocale>>) => void;
+  readonly remove: () => void;
+} {
+  const [config, setConfig] = useState<AdminRallyConfig<TLocale, TMeta> | undefined>(
+    options.config ?? options.initialConfig,
+  );
+  const reward = config?.rewards.find((item) => item.id === rewardId);
+  const commit = (next: AdminRallyConfig<TLocale, TMeta>): void => {
+    setConfig(next);
+    options.onChange?.(next);
+  };
+  return {
+    config,
+    reward,
+    setConfig,
+    update: (patch) => {
+      if (config === undefined || reward === undefined) return;
+      commit({
+        ...config,
+        rewards: config.rewards.map((item) =>
+          item.id === rewardId ? { ...item, ...patch } : item,
+        ),
+      });
+    },
+    remove: () => {
+      if (config === undefined || reward === undefined) return;
+      commit({ ...config, rewards: config.rewards.filter((item) => item.id !== rewardId) });
+    },
+  };
 }
 
 type DictionaryProps<TLocale extends string> = {
@@ -220,6 +370,19 @@ export function SpotItemForm<
           }
         />
       </label>
+      {(["description", "hint"] as const).map((key) => (
+        <label key={key}>
+          {field(key, key)}
+          <textarea
+            value={resolveLocalizedText(spot[key] ?? "", activeLocale)}
+            onChange={(event) =>
+              update({
+                [key]: updateLocalizedField(spot[key] ?? "", activeLocale, event.target.value),
+              })
+            }
+          />
+        </label>
+      ))}
       {(["imageUrl", "iconUrl", "redirectUrlAfterClaim"] as const).map((key) => (
         <label key={key}>
           {field(key, key)}
@@ -340,6 +503,22 @@ function RewardItemForm<TLocale extends string = SupportedLocale>({
         />
       </label>
       <label>
+        {field("description", "Description")}
+        <textarea
+          value={resolveLocalizedText(reward.description ?? "", locale)}
+          onChange={(event) =>
+            onChange({
+              ...reward,
+              description: updateLocalizedField(
+                reward.description ?? "",
+                locale,
+                event.target.value,
+              ),
+            })
+          }
+        />
+      </label>
+      <label>
         {field("requiredSpotCount", "Required spot count")}
         <input
           type="number"
@@ -411,6 +590,13 @@ function RewardItemForm<TLocale extends string = SupportedLocale>({
         </label>
       ))}
       <label>
+        {field("digitalContentUrl", "Digital content URL")}
+        <input
+          value={reward.digitalContentUrl ?? ""}
+          onChange={(event) => onChange({ ...reward, digitalContentUrl: event.target.value })}
+        />
+      </label>
+      <label>
         {field("staffPasscode", "Staff passcode")}
         <input
           value={reward.staffPasscode ?? ""}
@@ -460,6 +646,62 @@ export function AdminRallyEditor<
           }
         />
       </label>
+      <label>
+        {field("description", "Description")}
+        <textarea
+          value={resolveLocalizedText(config.description ?? "", activeLocale)}
+          onChange={(event) =>
+            update({
+              description: updateLocalizedField(
+                config.description ?? "",
+                activeLocale,
+                event.target.value,
+              ),
+            })
+          }
+        />
+      </label>
+      <label>
+        {field("theme", "Theme (JSON)")}
+        <textarea
+          aria-label={field("theme", "Theme (JSON)")}
+          value={JSON.stringify(config.theme ?? {}, null, 2)}
+          onChange={(event) => {
+            try {
+              const parsed: unknown = JSON.parse(event.target.value);
+              if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed))
+                update({ theme: parsed as NonNullable<AdminRallyConfig["theme"]> });
+            } catch {
+              // Keep the text editable until the JSON is complete.
+            }
+          }}
+        />
+      </label>
+      {(["serverEndpoint", "publicMetadata", "serverMetadata"] as const).map((key) => (
+        <label key={key}>
+          {field(key, key)}
+          <textarea
+            value={
+              key === "serverEndpoint"
+                ? (config.serverEndpoint ?? "")
+                : JSON.stringify(config[key] ?? {}, null, 2)
+            }
+            onChange={(event) => {
+              if (key === "serverEndpoint") {
+                update({ serverEndpoint: event.target.value });
+                return;
+              }
+              try {
+                const parsed: unknown = JSON.parse(event.target.value);
+                if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed))
+                  update({ [key]: parsed });
+              } catch {
+                // Keep the text editable until the JSON is complete.
+              }
+            }}
+          />
+        </label>
+      ))}
       <button
         type="button"
         onClick={() => updateSpots([...config.spots, newSpot<TLocale, TMeta>(config.spots.length)])}

@@ -4,6 +4,33 @@ import { describe, expect, it, vi } from "vitest";
 import { RallyViewer } from "../src/index.js";
 
 describe("RallyViewer", () => {
+  it("renders spot and feedback slots with the deepest style hooks", () => {
+    render(
+      <RallyViewer
+        locale="en"
+        config={{
+          id: "r",
+          version: "1",
+          title: "Rally",
+          spots: [{ id: "s", orderIndex: 0, name: "Spot", conditions: [] }],
+          rewards: [],
+        }}
+        classNames={{ root: "root", card: "card", badge: "badge", slot: "slot", button: "button" }}
+        styles={{ slot: { color: "red" } }}
+        renderSpotCard={({ spot, children }) => (
+          <div data-testid="custom-card">
+            {spot.id}
+            {children}
+          </div>
+        )}
+      />,
+    );
+    expect(screen.getByTestId("custom-card").textContent).toContain("s");
+    expect(screen.getByRole("region", { name: "Stamp rally" }).classList.contains("root")).toBe(
+      true,
+    );
+  });
+
   it("allows replacing a condition renderer", () => {
     const onCheckIn = vi.fn(async () => ({
       ok: true as const,

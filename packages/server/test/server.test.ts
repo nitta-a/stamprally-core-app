@@ -23,6 +23,48 @@ const config: AdminRallyConfig = {
   ],
 };
 describe("StampRallyServer", () => {
+  it("compensates stock and user state when the success audit write fails", async () => {
+    class FailingAuditPersistence extends InMemoryServerPersistenceAdapter {
+      #auditCalls = 0;
+      override async recordAuditLog(): Promise<void> {
+        this.#auditCalls += 1;
+        if (this.#auditCalls > 1) throw new Error("audit unavailable");
+        await super.recordAuditLog({
+          id: "check-in-audit",
+          timestamp: "2026-01-01T00:00:00.000Z",
+          rallyId: "rally",
+          userId: "alice",
+          action: "CHECK_IN",
+          resourceId: "s1",
+          status: "SUCCESS",
+          idempotencyKey: "check-compensation",
+        });
+      }
+    }
+    const persistence = new FailingAuditPersistence({ stocks: { r1: 1 } });
+    const server = new StampRallyServer(config, persistence);
+    await server.checkIn({
+      rallyId: "rally",
+      userId: "alice",
+      spotId: "s1",
+      context: { type: "passcode", code: "OPEN" },
+      idempotencyKey: "check-compensation",
+    });
+    const result = await server.claimReward({
+      rallyId: "rally",
+      userId: "alice",
+      rewardId: "r1",
+      idempotencyKey: "claim-compensation",
+    });
+    expect(result).toMatchObject({ ok: false, code: "PERSISTENCE_FAILED" });
+    expect(await persistence.getRewardStock("rally", "r1")).toBe(1);
+    expect(await persistence.getUserClaimCount("rally", "alice", "r1")).toBe(0);
+    expect(persistence.getClaimRecords()).toHaveLength(0);
+    expect((await persistence.getUserState("rally", "alice"))?.rewards[0]?.status).toBe(
+      "AVAILABLE",
+    );
+  });
+
   it("claims one stocked reward atomically and is idempotent", async () => {
     const persistence = new InMemoryServerPersistenceAdapter({ stocks: { r1: 1 } });
     const server = new StampRallyServer(config, persistence);

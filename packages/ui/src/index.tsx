@@ -6,9 +6,9 @@ import type {
   LocaleDictionary,
   PublicCheckInCondition,
   PublicRallyConfig,
+  PublicReward,
   PublicSpotItem,
   RallyConfig,
-  Reward,
   RewardState,
   StampRallyClient,
   StampRallyProgress,
@@ -27,8 +27,8 @@ import {
 import {
   type ComponentType,
   type CSSProperties,
-  type FormEvent,
   type ReactElement,
+  type ReactNode,
   useCallback,
   useEffect,
   useMemo,
@@ -36,22 +36,73 @@ import {
   useState,
 } from "react";
 
+export type ViewerClassName =
+  | "root"
+  | "header"
+  | "card"
+  | "condition"
+  | "slot"
+  | "badge"
+  | "modal"
+  | "button"
+  | "action"
+  | "feedback"
+  | "reward"
+  | "footer";
+export type ViewerStyle = CSSProperties & {
+  readonly [key: `--${string}`]: string | number | undefined;
+};
+export type ViewerStyles = Partial<Record<ViewerClassName, ViewerStyle>>;
+export type ViewerClassNames = Partial<Record<ViewerClassName, string>>;
+export type SpotStatus = "locked" | "available" | "claimed" | "verifying" | "error";
+
 export interface ConditionRendererProps<TLocale extends string = string> {
   readonly spot: PublicSpotItem<TLocale>;
   readonly condition: PublicCheckInCondition;
   readonly locale: TLocale;
   readonly dictionary?: LocaleDictionary<TLocale>;
   readonly disabled: boolean;
+  readonly classNames?: ViewerClassNames;
+  readonly styles?: ViewerStyles;
   // biome-ignore lint/suspicious/noConfusingVoidType: custom renderers may fire-and-forget while built-ins await feedback.
   readonly onSubmit: (proof: unknown) => void | Promise<unknown>;
 }
 export type ConditionRenderer<TLocale extends string = string> = ComponentType<
   ConditionRendererProps<TLocale>
 >;
-export type ViewerClassName = "root" | "condition" | "action" | "feedback" | "reward";
-export type ViewerStyle = CSSProperties & {
-  readonly [key: `--${string}`]: string | number | undefined;
-};
+
+export interface SpotCardProps<TLocale extends string = string> {
+  readonly spot: PublicSpotItem<TLocale>;
+  readonly state: UserRallyState;
+  readonly status: SpotStatus;
+  readonly locale: TLocale;
+  readonly dictionary?: LocaleDictionary<TLocale>;
+  readonly children: ReactNode;
+}
+export interface RewardCardProps<TLocale extends string = string> {
+  readonly reward: PublicReward<TLocale>;
+  readonly state: RewardState | undefined;
+  readonly locale: TLocale;
+  readonly dictionary?: LocaleDictionary<TLocale>;
+  readonly onClaim:
+    | ((rewardId: string, options?: ClaimOptions) => Promise<ClaimResult>)
+    | undefined;
+}
+export interface RallyViewerSlots<TLocale extends string = string> {
+  readonly headerSlot?:
+    | ReactNode
+    | ((props: {
+        readonly config: PublicRallyConfig<TLocale>;
+        readonly state: UserRallyState;
+      }) => ReactNode);
+  readonly footerSlot?: ReactNode;
+  readonly renderSpotCard?: (props: SpotCardProps<TLocale>) => ReactNode;
+  readonly renderRewardCard?: (props: RewardCardProps<TLocale>) => ReactNode;
+  readonly renderStatusBadge?: (props: { readonly status: SpotStatus }) => ReactNode;
+  readonly renderVerifyingState?: () => ReactNode;
+  readonly renderSuccessFeedback?: (result: CheckInResult) => ReactNode;
+  readonly renderErrorFeedback?: (error: string) => ReactNode;
+}
 
 export interface RallyViewerAdapter<TLocale extends string = string> {
   readonly config: PublicRallyConfig<TLocale>;
@@ -62,13 +113,15 @@ export interface RallyViewerAdapter<TLocale extends string = string> {
   ) => Promise<CheckInResult>;
   readonly onClaimReward?: (rewardId: string, options?: ClaimOptions) => Promise<ClaimResult>;
 }
-export interface RallyViewerProps<TLocale extends string = string> {
+export interface RallyViewerProps<TLocale extends string = string>
+  extends RallyViewerSlots<TLocale> {
   readonly config?: PublicRallyConfig<TLocale>;
   readonly client?: StampRallyClient;
   readonly adapter?: RallyViewerAdapter<TLocale>;
   readonly locale: TLocale;
   readonly dictionary?: LocaleDictionary<TLocale>;
-  readonly classNames?: Partial<Record<ViewerClassName, string>>;
+  readonly classNames?: ViewerClassNames;
+  readonly styles?: ViewerStyles;
   readonly style?: ViewerStyle;
   readonly customConditionRenderers?: Partial<
     Record<PublicCheckInCondition["type"], ConditionRenderer<TLocale>>
@@ -81,7 +134,10 @@ const label = <TLocale extends string>(
   key: string,
   fallback: string,
 ): string => dictionary?.[locale]?.[key] ?? fallback;
-
+const join = (...names: ReadonlyArray<string | undefined>): string | undefined => {
+  const value = names.filter((name): name is string => name !== undefined && name !== "").join(" ");
+  return value === "" ? undefined : value;
+};
 type VerificationStatus = "idle" | "loading" | "success" | "error";
 
 function DefaultCondition<TLocale extends string>({
@@ -89,6 +145,8 @@ function DefaultCondition<TLocale extends string>({
   dictionary,
   locale,
   disabled,
+  classNames,
+  styles,
   onSubmit,
 }: ConditionRendererProps<TLocale>): ReactElement {
   const [value, setValue] = useState("");
@@ -116,27 +174,8 @@ function DefaultCondition<TLocale extends string>({
       setError(text("verificationFailed", "Verification failed."));
     }
   };
-  const submit = (event: FormEvent): void => {
-    event.preventDefault();
-    if (condition.type === "gps") return;
-    if (condition.type === "nfc") return;
-    void verify(condition.type === "passcode" ? value : value);
-  };
-  const scanQr = (): void => {
-    if (videoRef.current === null) return;
-    setStatus("loading");
-    setError(null);
-    void readQrContext(videoRef.current).then((result) => {
-      if (result.ok) void verify(result.value);
-      else {
-        setStatus("error");
-        setError(result.error.message);
-      }
-    });
-  };
   const readLocation = (): void => {
     setStatus("loading");
-    setError(null);
     void getCurrentGeoContext().then((result) => {
       if (result.ok) void verify(result.value);
       else {
@@ -147,8 +186,18 @@ function DefaultCondition<TLocale extends string>({
   };
   const readNfc = (): void => {
     setStatus("loading");
-    setError(null);
     void readNfcContext().then((result) => {
+      if (result.ok) void verify(result.value);
+      else {
+        setStatus("error");
+        setError(result.error.message);
+      }
+    });
+  };
+  const scanQr = (): void => {
+    if (videoRef.current === null) return;
+    setStatus("loading");
+    void readQrContext(videoRef.current).then((result) => {
       if (result.ok) void verify(result.value);
       else {
         setStatus("error");
@@ -178,7 +227,8 @@ function DefaultCondition<TLocale extends string>({
           </video>
           <button
             type="button"
-            className="sry-action"
+            className={join("sry-action", classNames?.action, classNames?.button)}
+            style={styles?.button ?? styles?.action}
             disabled={disabled || !isQrSupported()}
             onClick={scanQr}
           >
@@ -187,14 +237,21 @@ function DefaultCondition<TLocale extends string>({
         </>
       )}
       {condition.type === "gps" && (
-        <button type="button" className="sry-action" disabled={disabled} onClick={readLocation}>
+        <button
+          type="button"
+          className={join("sry-action", classNames?.action, classNames?.button)}
+          style={styles?.button ?? styles?.action}
+          disabled={disabled}
+          onClick={readLocation}
+        >
           {text("checkLocation", "Check location")}
         </button>
       )}
       {condition.type === "nfc" && (
         <button
           type="button"
-          className="sry-action"
+          className={join("sry-action", classNames?.action, classNames?.button)}
+          style={styles?.button ?? styles?.action}
           disabled={disabled || !isNfcSupported()}
           onClick={readNfc}
         >
@@ -204,7 +261,12 @@ function DefaultCondition<TLocale extends string>({
       {(condition.type === "passcode" ||
         condition.type === "custom" ||
         condition.type === "qr") && (
-        <form onSubmit={submit}>
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            void verify(value);
+          }}
+        >
           <label>
             {text(
               condition.type === "passcode" ? "passcode" : "proof",
@@ -216,13 +278,19 @@ function DefaultCondition<TLocale extends string>({
               onChange={(event) => setValue(event.target.value)}
             />
           </label>
-          <button type="submit" className="sry-action" disabled={disabled || value.trim() === ""}>
+          <button
+            type="submit"
+            className={join("sry-action", classNames?.action, classNames?.button)}
+            style={styles?.button ?? styles?.action}
+            disabled={disabled || value.trim() === ""}
+          >
             {text("checkIn", "Check in")}
           </button>
         </form>
       )}
       <div
-        className="sry-feedback"
+        className={join("sry-feedback", classNames?.feedback)}
+        style={styles?.feedback}
         aria-live="polite"
         role={status === "error" ? "alert" : undefined}
       >
@@ -234,6 +302,35 @@ function DefaultCondition<TLocale extends string>({
   );
 }
 
+function DefaultRewardCard<TLocale extends string>({
+  reward,
+  state,
+  locale,
+  dictionary,
+  onClaim,
+  classNames,
+  styles,
+}: RewardCardProps<TLocale> & {
+  readonly classNames?: ViewerClassNames;
+  readonly styles?: ViewerStyles;
+}): ReactElement {
+  const status = state?.status ?? "LOCKED";
+  return (
+    <button
+      type="button"
+      className={join(classNames?.reward, classNames?.button)}
+      style={styles?.reward ?? styles?.button}
+      disabled={status !== "AVAILABLE" || onClaim === undefined}
+      onClick={() => {
+        if (onClaim !== undefined) void onClaim(reward.id);
+      }}
+    >
+      {resolveLocalizedText(reward.title, locale)} (
+      {label(dictionary, locale, `status.${status.toLowerCase()}`, status)})
+    </button>
+  );
+}
+
 export function RallyViewer<TLocale extends string = string>({
   config: providedConfig,
   client,
@@ -241,12 +338,22 @@ export function RallyViewer<TLocale extends string = string>({
   locale,
   dictionary,
   classNames = {},
+  styles = {},
   style,
   customConditionRenderers = {},
+  headerSlot,
+  footerSlot,
+  renderSpotCard,
+  renderRewardCard,
+  renderStatusBadge,
+  renderVerifyingState,
+  renderSuccessFeedback,
+  renderErrorFeedback,
 }: RallyViewerProps<TLocale>): ReactElement {
   const config = providedConfig ?? client?.getConfig() ?? adapter?.config;
   const [state, setState] = useState<UserRallyState | null>(() => client?.getState() ?? null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<CheckInResult | null>(null);
   useEffect(() => {
     if (client === undefined) return;
     const unsubscribe = client.subscribe(setState);
@@ -254,13 +361,16 @@ export function RallyViewer<TLocale extends string = string>({
     return unsubscribe;
   }, [client]);
   if (config === undefined) throw new Error("RallyViewer requires config, client, or adapter.");
+  const currentState = state ?? {
+    rallyId: config.id,
+    userId: null,
+    records: [],
+    rewards: [],
+    updatedAt: "",
+  };
   const progress = useMemo<StampRallyProgress>(
-    () =>
-      calculateProgress(
-        state ?? { rallyId: config.id, userId: null, records: [], rewards: [], updatedAt: "" },
-        config,
-      ),
-    [config, state],
+    () => calculateProgress(currentState, config),
+    [config, currentState],
   );
   const checkIn =
     adapter?.onCheckIn ??
@@ -274,108 +384,130 @@ export function RallyViewer<TLocale extends string = string>({
       ? undefined
       : (rewardId: string, options?: ClaimOptions) => client.claimReward(rewardId, options));
   const submit = useCallback(
-    (spotId: string, proof: unknown): Promise<CheckInResult | undefined> => {
-      if (checkIn === undefined) return Promise.resolve(undefined);
+    async (spotId: string, proof: unknown): Promise<CheckInResult | undefined> => {
+      if (checkIn === undefined) return undefined;
       setBusy(spotId);
-      return checkIn(spotId, proof).finally(() => setBusy(null));
+      const result = await checkIn(spotId, proof).finally(() => setBusy(null));
+      setFeedback(result);
+      return result;
     },
     [checkIn],
   );
   return (
     <section
       className={classNames.root}
-      style={style}
+      style={styles.root ?? style}
       aria-label={label(dictionary, locale, "viewer", "Stamp rally")}
     >
-      <h1>{resolveLocalizedText(config.title, locale) || config.id}</h1>
-      <progress
-        aria-label={label(dictionary, locale, "progress", "Progress")}
-        max={100}
-        value={progress.percentage}
-      />{" "}
-      <span>
-        {progress.acquired}/{progress.total}
-      </span>
+      <header className={classNames.header} style={styles.header}>
+        {typeof headerSlot === "function"
+          ? headerSlot({ config, state: currentState })
+          : headerSlot}
+        {headerSlot === undefined && (
+          <h1>{resolveLocalizedText(config.title, locale) || config.id}</h1>
+        )}
+        <progress
+          aria-label={label(dictionary, locale, "progress", "Progress")}
+          max={100}
+          value={progress.percentage}
+        />
+        <span>
+          {progress.acquired}/{progress.total}
+        </span>
+      </header>
+      {busy !== null && renderVerifyingState?.()}
+      {feedback?.ok === true && renderSuccessFeedback?.(feedback)}
+      {feedback?.ok === false &&
+        renderErrorFeedback?.(
+          "message" in feedback.error ? feedback.error.message : feedback.error.code,
+        )}
       <div>
-        {config.spots.map((spot) =>
-          spot.conditions.map((condition) => {
+        {config.spots.map((spot) => {
+          const claimed = currentState.records.some((record) => record.stampId === spot.id);
+          const status: SpotStatus =
+            busy === spot.id ? "verifying" : claimed ? "claimed" : "available";
+          const children = spot.conditions.map((condition) => {
             const Renderer = customConditionRenderers[condition.type] ?? DefaultCondition;
             return (
-              <article
+              <div
                 className={classNames.condition}
+                style={styles.condition}
                 key={`${spot.id}-${condition.type}-${JSON.stringify(condition)}`}
               >
-                <h2>{resolveLocalizedText(spot.name, locale)}</h2>
                 <Renderer
                   spot={spot}
                   condition={condition}
                   locale={locale}
                   {...(dictionary === undefined ? {} : { dictionary })}
-                  disabled={busy !== null}
+                  disabled={busy !== null || claimed}
+                  {...(Object.keys(classNames).length === 0 ? {} : { classNames })}
+                  {...(Object.keys(styles).length === 0 ? {} : { styles })}
                   onSubmit={(proof) => submit(spot.id, proof)}
                 />
-              </article>
+              </div>
             );
-          }),
-        )}
+          });
+          const props: SpotCardProps<TLocale> = {
+            spot,
+            state: currentState,
+            status,
+            locale,
+            ...(dictionary === undefined ? {} : { dictionary }),
+            children,
+          };
+          return (
+            <div key={spot.id} className={classNames.card} style={styles.card}>
+              {renderSpotCard?.(props) ?? (
+                <article>
+                  <h2>{resolveLocalizedText(spot.name, locale)}</h2>
+                  {renderStatusBadge?.({ status }) ?? (
+                    <span className={classNames.badge} style={styles.badge}>
+                      {status}
+                    </span>
+                  )}
+                  {children}
+                </article>
+              )}
+            </div>
+          );
+        })}
       </div>
       <section aria-label={label(dictionary, locale, "rewards", "Rewards")}>
-        {config.rewards.map((reward) => (
-          <RewardButton
-            key={reward.id}
-            reward={reward}
-            state={state?.rewards.find((item) => item.rewardId === reward.id)}
-            locale={locale}
-            {...(dictionary === undefined ? {} : { dictionary })}
-            {...(classNames.reward === undefined ? {} : { className: classNames.reward })}
-            onClaim={claim}
-          />
-        ))}
+        {config.rewards.map((reward) => {
+          const props: RewardCardProps<TLocale> = {
+            reward,
+            state: currentState.rewards.find((item) => item.rewardId === reward.id),
+            locale,
+            ...(dictionary === undefined ? {} : { dictionary }),
+            onClaim: claim,
+          };
+          return (
+            <div key={reward.id} className={classNames.reward} style={styles.reward}>
+              {renderRewardCard?.(props) ?? (
+                <DefaultRewardCard {...props} classNames={classNames} styles={styles} />
+              )}
+            </div>
+          );
+        })}
       </section>
+      <footer className={classNames.footer} style={styles.footer}>
+        {footerSlot}
+      </footer>
     </section>
   );
 }
 
-function RewardButton<TLocale extends string>({
-  reward,
-  state,
-  locale,
-  dictionary,
-  className,
-  onClaim,
-}: {
-  readonly reward: Reward<TLocale>;
-  readonly state: RewardState | undefined;
-  readonly locale: TLocale;
-  readonly dictionary?: LocaleDictionary<TLocale>;
-  readonly className?: string;
-  readonly onClaim:
-    | ((rewardId: string, options?: ClaimOptions) => Promise<ClaimResult>)
-    | undefined;
-}): ReactElement {
-  const status = state?.status ?? "LOCKED";
-  return (
-    <button
-      type="button"
-      className={className}
-      disabled={status !== "AVAILABLE" || onClaim === undefined}
-      onClick={() => {
-        if (onClaim !== undefined) void onClaim(reward.id);
-      }}
-    >
-      {resolveLocalizedText(reward.title, locale)} (
-      {label(dictionary, locale, `status.${status.toLowerCase()}`, status)})
-    </button>
-  );
-}
-
-export interface StampSheetProps<TLocale extends string = string> {
+export interface StampSheetProps<TLocale extends string = string>
+  extends RallyViewerSlots<TLocale> {
   readonly config: RallyConfig<TLocale>;
   readonly state?: StampRallyState | null;
   readonly title?: string;
   readonly progress?: StampRallyProgress;
   readonly locale?: TLocale;
   readonly dictionary?: LocaleDictionary<TLocale>;
+  readonly classNames?: ViewerClassNames;
+  readonly styles?: ViewerStyles;
+  readonly style?: ViewerStyle;
 }
 export function StampSheet<TLocale extends string = string>({
   config,
@@ -384,24 +516,65 @@ export function StampSheet<TLocale extends string = string>({
   progress,
   locale = "en" as TLocale,
   dictionary,
+  classNames = {},
+  styles = {},
+  style,
+  headerSlot,
+  footerSlot,
+  renderSpotCard,
+  renderStatusBadge,
 }: StampSheetProps<TLocale>): ReactElement {
-  const current =
-    progress ??
-    calculateProgress(
-      state ?? { rallyId: config.id, userId: null, records: [], rewards: [], updatedAt: "" },
-      config,
-    );
+  const currentState = state ?? {
+    rallyId: config.id,
+    userId: null,
+    records: [],
+    rewards: [],
+    updatedAt: "",
+  };
+  const current = progress ?? calculateProgress(currentState, config);
   return (
-    <section aria-label={title ?? label(dictionary, locale, "stampSheet", "Stamp sheet")}>
-      <h2>{title ?? resolveLocalizedText(config.title, locale)}</h2>
-      <progress max={100} value={current.percentage} />
+    <section
+      className={classNames.root}
+      style={styles.root ?? style}
+      aria-label={title ?? label(dictionary, locale, "stampSheet", "Stamp sheet")}
+    >
+      <header className={classNames.header} style={styles.header}>
+        {typeof headerSlot === "function"
+          ? headerSlot({ config, state: currentState })
+          : (headerSlot ?? <h2>{title ?? resolveLocalizedText(config.title, locale)}</h2>)}
+        <progress max={100} value={current.percentage} />
+      </header>
       <div>
-        {config.spots.map((spot) => (
-          <span key={spot.id}>
-            {state?.records.some((record) => record.stampId === spot.id) ? "✓" : "○"}
-          </span>
-        ))}
+        {config.spots.map((spot) => {
+          const claimed = currentState.records.some((record) => record.stampId === spot.id);
+          const status: SpotStatus = claimed ? "claimed" : "available";
+          const props: SpotCardProps<TLocale> = {
+            spot,
+            state: currentState,
+            status,
+            locale,
+            ...(dictionary === undefined ? {} : { dictionary }),
+            children: (
+              <span className={classNames.slot} style={styles.slot}>
+                {claimed ? "✓" : "○"}
+              </span>
+            ),
+          };
+          return (
+            <div key={spot.id} className={classNames.card} style={styles.card}>
+              {renderSpotCard?.(props) ?? (
+                <span className={classNames.slot} style={styles.slot}>
+                  {resolveLocalizedText(spot.name, locale)}{" "}
+                  {renderStatusBadge?.({ status }) ?? (claimed ? "✓" : "○")}
+                </span>
+              )}
+            </div>
+          );
+        })}
       </div>
+      <footer className={classNames.footer} style={styles.footer}>
+        {footerSlot}
+      </footer>
     </section>
   );
 }

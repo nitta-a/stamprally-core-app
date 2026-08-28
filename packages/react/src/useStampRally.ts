@@ -4,6 +4,7 @@ import type {
   ClaimOptions,
   ClaimResult,
   StampRallyClient,
+  SyncState,
   UserRallyState,
 } from "@stamprally/core";
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
@@ -23,6 +24,9 @@ export interface UseStampRallyReturn {
   ) => Promise<CheckInResult>;
   readonly onClaimReward: (rewardId: string, options?: ClaimOptions) => Promise<ClaimResult>;
   readonly onSync: () => Promise<void>;
+  readonly retrySync: () => Promise<void>;
+  readonly syncState: SyncState;
+  readonly pendingCount: number;
   readonly switchUser: (userId: string | null) => Promise<UserRallyState>;
   readonly clearUserState: (userId?: string) => Promise<void>;
 }
@@ -86,6 +90,9 @@ export function useStampRally(
     onCheckIn,
     onClaimReward,
     onSync,
+    retrySync: onSync,
+    syncState: client.syncState,
+    pendingCount: client.pendingCount,
     switchUser: client.switchUser.bind(client),
     clearUserState: client.clearUserState.bind(client),
   };

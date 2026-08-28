@@ -11,6 +11,7 @@ import type {
   Validator,
 } from "../domain/index.js";
 import { consumeReward, type RewardConsumeError, reconcileRewardStates } from "../engine/index.js";
+import type { OfflineQueue, SyncState } from "./offlineQueue.js";
 import { cloneState, InMemoryStorage, type StampStorage, storageKey } from "./storage.js";
 
 export type CheckInOptions = {
@@ -91,6 +92,7 @@ export interface ClientOptions {
   readonly customValidators?: Readonly<Record<string, Validator>>;
   readonly clock?: () => string;
   readonly userId?: string | null;
+  readonly offlineQueue?: OfflineQueue;
 }
 type StorageOrOptions = StampStorage | ClientOptions;
 function isStorage(value: StorageOrOptions): value is StampStorage {
@@ -141,6 +143,7 @@ export class StampRallyClient {
   readonly #storage: StampStorage;
   readonly #options: ClientOptions;
   readonly #config: PublicRallyConfig;
+  readonly #offlineQueue: OfflineQueue | undefined;
   #userId: string | null;
   #state: UserRallyState | null = null;
   #initialization: Promise<UserRallyState> | null = null;
@@ -150,6 +153,7 @@ export class StampRallyClient {
     this.#options = isStorage(storageOrOptions) ? { storage: storageOrOptions } : storageOrOptions;
     this.#storage = this.#options.storage ?? new InMemoryStorage();
     this.#userId = this.#options.userId ?? null;
+    this.#offlineQueue = this.#options.offlineQueue;
   }
   getConfig(): RallyConfig {
     return this.#config;
@@ -159,6 +163,12 @@ export class StampRallyClient {
   }
   getUserId(): string | null {
     return this.#userId;
+  }
+  get syncState(): SyncState {
+    return this.#offlineQueue?.syncState ?? "idle";
+  }
+  get pendingCount(): number {
+    return this.#offlineQueue?.pendingCount ?? 0;
   }
   subscribe(listener: ClientListener): () => void {
     this.#listeners.add(listener);
@@ -281,8 +291,21 @@ export class StampRallyClient {
       };
       const remote = this.#options.syncAdapter?.checkIn;
       if (options.sync !== false && remote !== undefined) {
-        const result = await remote(request);
-        return result.ok ? this.#commitCheckIn(result) : this.#fail(result.error);
+        try {
+          const result = await remote(request);
+          return result.ok ? this.#commitCheckIn(result) : this.#fail(result.error);
+        } catch (error) {
+          if (this.#offlineQueue === undefined) throw error;
+          await this.#offlineQueue.enqueueCheckIn(request);
+          const record = { stampId: spotId, acquiredAt: now };
+          const next = this.#reconcile({
+            ...current,
+            records: [...current.records, record],
+            updatedAt: now,
+          });
+          await this.#storage.save(next);
+          return this.#commitCheckIn({ ok: true, value: { state: next, record } });
+        }
       }
       const record = { stampId: spotId, acquiredAt: now };
       const next = this.#reconcile({
@@ -324,8 +347,22 @@ export class StampRallyClient {
       };
       const remote = this.#options.syncAdapter?.claimReward;
       if (options.sync !== false && remote !== undefined) {
-        const result = await remote(request);
-        return result.ok ? this.#commitClaim(result) : this.#fail(result.error);
+        try {
+          const result = await remote(request);
+          return result.ok ? this.#commitClaim(result) : this.#fail(result.error);
+        } catch (error) {
+          if (this.#offlineQueue === undefined) throw error;
+          await this.#offlineQueue.enqueueClaimReward(request);
+          const next = {
+            ...current,
+            rewards: current.rewards.map((item) =>
+              item.rewardId === rewardId ? local.value : item,
+            ),
+            updatedAt: now,
+          };
+          await this.#storage.save(next);
+          return this.#commitClaim({ ok: true, value: { state: next, reward: local.value } });
+        }
       }
       const next = {
         ...current,
@@ -339,6 +376,18 @@ export class StampRallyClient {
   sync(adapter = this.#options.syncAdapter): Promise<void> {
     return this.#enqueue(async () => {
       const current = await this.initialize();
+      if (this.#offlineQueue !== undefined && adapter !== undefined) {
+        await this.#offlineQueue.sync(async (operation) => {
+          if (operation.kind === "checkIn") {
+            if (adapter.checkIn === undefined)
+              throw new Error("No check-in sync adapter is configured.");
+            return adapter.checkIn(operation.request);
+          }
+          if (adapter.claimReward === undefined)
+            throw new Error("No reward sync adapter is configured.");
+          return adapter.claimReward(operation.request);
+        });
+      }
       if (adapter?.sync === undefined) {
         this.#emitEvent({ type: "sync", state: current });
         return;
@@ -351,6 +400,9 @@ export class StampRallyClient {
       this.#emit(next);
       this.#emitEvent({ type: "sync", state: next });
     });
+  }
+  retrySync(): Promise<void> {
+    return this.sync();
   }
   reset(): Promise<UserRallyState> {
     return this.#enqueue(async () => {

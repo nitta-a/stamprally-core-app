@@ -10,6 +10,11 @@ export interface UserClaimRecord {
 }
 
 export interface ServerPersistenceAdapter {
+  /** Runs the callback in a storage-native transaction when supported. */
+  runTransaction?<T>(
+    rallyId: string,
+    operation: (transaction: ServerPersistenceAdapter) => Promise<T>,
+  ): Promise<T>;
   acquireLock(rallyId: string, lockKey: string, ttlMs: number): Promise<boolean>;
   releaseLock(rallyId: string, lockKey: string): Promise<void>;
   getRewardStock(rallyId: string, rewardId: string): Promise<number | null>;
@@ -17,7 +22,18 @@ export interface ServerPersistenceAdapter {
     rallyId: string,
     rewardId: string,
   ): Promise<{ readonly success: boolean; readonly remainingStock: number }>;
-  restoreRewardStock?(rallyId: string, rewardId: string): Promise<void>;
+  restoreRewardStock?(rallyId: string, rewardId: string, count?: number): Promise<void>;
+  rollbackUserState?(
+    rallyId: string,
+    userId: string,
+    previousState: UserRallyState | null,
+  ): Promise<void>;
+  rollbackUserClaim?(
+    rallyId: string,
+    userId: string,
+    rewardId: string,
+    ticketNumber: string,
+  ): Promise<void>;
   getIdempotentResult<T>(rallyId: string, key: string): Promise<T | null>;
   saveIdempotentResult<T>(rallyId: string, key: string, result: T, ttlMs: number): Promise<void>;
   getUserClaimCount(rallyId: string, userId: string, rewardId: string): Promise<number>;
@@ -27,6 +43,7 @@ export interface ServerPersistenceAdapter {
   getUserState(rallyId: string, userId: string): Promise<UserRallyState | null>;
   saveUserState(rallyId: string, userId: string, state: UserRallyState): Promise<void>;
   recordAuditLog(log: AuditLog): Promise<void>;
+  removeAuditLog?(auditId: string): Promise<void>;
 }
 interface TimedValue<T> {
   readonly value: T;
@@ -90,10 +107,20 @@ export class InMemoryServerPersistenceAdapter implements ServerPersistenceAdapte
     this.#stocks.set(key, current - 1);
     return { success: true, remainingStock: current - 1 };
   }
-  async restoreRewardStock(rallyId: string, rewardId: string): Promise<void> {
+  async restoreRewardStock(rallyId: string, rewardId: string, count = 1): Promise<void> {
     const key = this.#stockKey(rallyId, rewardId);
     const current = this.#stocks.get(key);
-    if (current !== undefined) this.#stocks.set(key, current + 1);
+    if (current !== undefined) this.#stocks.set(key, current + Math.max(0, count));
+  }
+
+  async rollbackUserState(
+    rallyId: string,
+    userId: string,
+    previousState: UserRallyState | null,
+  ): Promise<void> {
+    const key = `${rallyId}:${userId}`;
+    if (previousState === null) this.#states.delete(key);
+    else this.#states.set(key, structuredClone(previousState));
   }
   async getIdempotentResult<T>(rallyId: string, key: string): Promise<T | null> {
     const value = this.#idempotent.get(this.#key(rallyId, key));
@@ -127,6 +154,10 @@ export class InMemoryServerPersistenceAdapter implements ServerPersistenceAdapte
   async recordAuditLog(log: AuditLog): Promise<void> {
     this.#auditLogs.push(structuredClone(log));
   }
+  async removeAuditLog(auditId: string): Promise<void> {
+    const index = this.#auditLogs.findIndex((log) => log.id === auditId);
+    if (index >= 0) this.#auditLogs.splice(index, 1);
+  }
   getAuditLogs(): ReadonlyArray<AuditLog> {
     return structuredClone(this.#auditLogs);
   }
@@ -135,6 +166,25 @@ export class InMemoryServerPersistenceAdapter implements ServerPersistenceAdapte
     const key = `${rallyId}:${userId}:${rewardId}`;
     this.#claims.set(key, (this.#claims.get(key) ?? 0) + 1);
     this.#claimRecords.push(structuredClone(params));
+  }
+  async rollbackUserClaim(
+    rallyId: string,
+    userId: string,
+    rewardId: string,
+    ticketNumber: string,
+  ): Promise<void> {
+    const key = `${rallyId}:${userId}:${rewardId}`;
+    const count = this.#claims.get(key) ?? 0;
+    if (count <= 1) this.#claims.delete(key);
+    else this.#claims.set(key, count - 1);
+    const index = this.#claimRecords.findIndex(
+      (record) =>
+        record.rallyId === rallyId &&
+        record.userId === userId &&
+        record.rewardId === rewardId &&
+        record.ticketNumber === ticketNumber,
+    );
+    if (index >= 0) this.#claimRecords.splice(index, 1);
   }
   async incrementUserClaimCount(rallyId: string, userId: string, rewardId: string): Promise<void> {
     const key = `${rallyId}:${userId}:${rewardId}`;
@@ -162,5 +212,35 @@ export class InMemoryServerPersistenceAdapter implements ServerPersistenceAdapte
           }
         : paramsOrRallyId;
     return this.recordUserClaim(params);
+  }
+
+  async runTransaction<T>(
+    _rallyId: string,
+    operation: (transaction: ServerPersistenceAdapter) => Promise<T>,
+  ): Promise<T> {
+    const snapshot = {
+      stocks: new Map(this.#stocks),
+      idempotent: new Map(this.#idempotent),
+      states: new Map(this.#states),
+      claims: new Map(this.#claims),
+      claimRecords: structuredClone(this.#claimRecords),
+      auditLogs: structuredClone(this.#auditLogs),
+    };
+    try {
+      return await operation(this);
+    } catch (error) {
+      this.#stocks.clear();
+      for (const [key, value] of snapshot.stocks) this.#stocks.set(key, value);
+      this.#idempotent.clear();
+      for (const [key, value] of snapshot.idempotent)
+        this.#idempotent.set(key, structuredClone(value));
+      this.#states.clear();
+      for (const [key, value] of snapshot.states) this.#states.set(key, structuredClone(value));
+      this.#claims.clear();
+      for (const [key, value] of snapshot.claims) this.#claims.set(key, value);
+      this.#claimRecords.splice(0, this.#claimRecords.length, ...snapshot.claimRecords);
+      this.#auditLogs.splice(0, this.#auditLogs.length, ...snapshot.auditLogs);
+      throw error;
+    }
   }
 }

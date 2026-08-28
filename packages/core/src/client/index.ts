@@ -16,6 +16,23 @@ export type {
 } from "./client.js";
 export { StampRallyClient } from "./client.js";
 export type {
+  IndexedDBOfflineQueueOptions,
+  OfflineConflict,
+  OfflineConflictResult,
+  OfflineOperation,
+  OfflineQueueOptions,
+  OfflineQueueStorage,
+  OfflineResult,
+  OfflineSender,
+  SyncConflictPolicy,
+  SyncState,
+} from "./offlineQueue.js";
+export {
+  IndexedDBOfflineQueueStorage,
+  InMemoryOfflineQueueStorage,
+  OfflineQueue,
+} from "./offlineQueue.js";
+export type {
   IndexedDBAdapterOptions,
   LocalStorageAdapterOptions,
   LocalStorageFailureMode,

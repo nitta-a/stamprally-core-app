@@ -353,6 +353,12 @@ function validate(value: unknown, isPublic: boolean): ReadonlyArray<ValidationEr
       !isRecord(value.serverMetadata)
     )
       add(errors, "$.serverMetadata", "Expected an object.", "invalid_type");
+    if (
+      hasOwn(value, "publicMetadata") &&
+      value.publicMetadata !== undefined &&
+      !isRecord(value.publicMetadata)
+    )
+      add(errors, "$.publicMetadata", "Expected an object.", "invalid_type");
     optionalString(value, "serverEndpoint", "$", errors);
   } else {
     for (const key of ["staffPasscode", "serverMetadata", "inventory"])

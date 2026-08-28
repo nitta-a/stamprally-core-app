@@ -1,3 +1,5 @@
+export type { PublicConfigSafety } from "./configTransform.js";
+export { sanitizeAdminConfig, validatePublicConfigSafety } from "./configTransform.js";
 export type {
   CompositeConditionFailure,
   ConditionMatch,

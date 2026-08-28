@@ -138,6 +138,8 @@ export interface AdminRallyConfig<
   readonly inventory?: Readonly<Record<string, number>>;
   readonly serverMetadata?: Readonly<Record<string, unknown>>;
   readonly metadata?: TMeta;
+  /** Explicit public metadata name. `metadata` remains supported for compatibility. */
+  readonly publicMetadata?: TMeta;
   readonly serverEndpoint?: string;
 }
 export interface PublicRallyConfig<
@@ -196,7 +198,11 @@ export function toPublicConfig<TLocale extends string, TMeta extends Record<stri
     rewards: config.rewards.map(
       ({ digitalContentUrl: _content, staffPasscode: _passcode, ...reward }) => reward,
     ),
-    ...(config.metadata === undefined ? {} : { metadata: config.metadata }),
+    ...(config.publicMetadata !== undefined
+      ? { metadata: config.publicMetadata }
+      : config.metadata === undefined
+        ? {}
+        : { metadata: config.metadata }),
     ...(config.serverEndpoint === undefined ? {} : { serverEndpoint: config.serverEndpoint }),
   };
 }
