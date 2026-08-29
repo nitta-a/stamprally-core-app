@@ -75,11 +75,12 @@ describe("OfflineQueue", () => {
     expect(restored.syncState).toBe("idle");
   });
 
-  it("prevents two instances from draining the same queue concurrently", async () => {
+  it("disables automatic multi-tab synchronization without Web Locks", async () => {
     const storage = new InMemoryOfflineQueueStorage();
-    const first = new OfflineQueue({ storage, key: "shared" });
-    const second = new OfflineQueue({ storage, key: "shared" });
-    await first.enqueueCheckIn({
+    const warnings: string[] = [];
+    const queue = new OfflineQueue({ storage, key: "shared" });
+    queue.setCapabilityWarningListener((warning) => warnings.push(warning.message));
+    await queue.enqueueCheckIn({
       rallyId: "r",
       userId: "u",
       spotId: "s",
@@ -88,28 +89,10 @@ describe("OfflineQueue", () => {
       now: "",
       state: { rallyId: "r", userId: "u", records: [], rewards: [], updatedAt: "" },
     });
-    await second.initialize();
-    let sends = 0;
-    let release: (() => void) | undefined;
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    const sender = async () => {
-      sends += 1;
-      await gate;
-      return {
-        ok: true as const,
-        value: {
-          state: { rallyId: "r", userId: "u", records: [], rewards: [], updatedAt: "" },
-          record: { stampId: "s", acquiredAt: "" },
-        },
-      };
-    };
-    const running = first.sync(sender);
-    await Promise.resolve();
-    await second.sync(sender);
-    release?.();
-    await running;
-    expect(sends).toBe(1);
+    expect(queue.queueCapability.multiTabSync).toBe("disabled_unsafe_environment");
+    await queue.initialize();
+    expect(warnings).toContain(
+      "Web Locks is unavailable; automatic cross-tab synchronization is disabled. Sync must be triggered by the foreground tab.",
+    );
   });
 });

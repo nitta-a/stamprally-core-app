@@ -1,4 +1,4 @@
-# @stamprally/react v0.19.0
+# @stamprally/react v0.20.0
 
 React integration for `@stamprally/core`. `useStampRally` subscribes to immutable client state and exposes check-in, reward-claim, synchronization, and user-switching operations.
 
@@ -9,7 +9,7 @@ import { useStampRally } from "@stamprally/react";
 
 const config: PublicRallyConfig = {
   id: "city-tour",
-  version: "0.19.0",
+  version: "0.20.0",
   title: "City Tour",
   spots: [{ id: "station", orderIndex: 0, name: "Station", conditions: [{ type: "passcode" }] }],
   rewards: [],
@@ -28,6 +28,12 @@ The hook return value includes `state`, `isLoading`, `error`, `onCheckIn`, `onCl
 Offline queue responses are reflected immediately in `state`. Permanent server
 rejections are delivered through `error`, while retryable transport failures
 remain pending for `retrySync`.
+
+For a batch endpoint, configure the client's `sync` adapter to return the
+`SyncProgressResponse` from `@stamprally/core`. The hook keeps accepted results in
+state, removes permanently rejected operations, and retains `FAILED_RETRYABLE`
+operations for retry. `syncState.storageCapability` and
+`syncState.rejectedHistory` can be passed to a status component.
 
 ## License
 

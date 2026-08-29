@@ -1,4 +1,4 @@
-# @stamprally/ui v0.19.0
+# @stamprally/ui v0.20.0
 
 Participant-facing React components for `@stamprally/core`.
 
@@ -39,3 +39,25 @@ Standard cards render localized descriptions and hints, spot imagery and externa
 reference badges, plus reward descriptions, stock, expiry, and status. Spot cards
 with incomplete prerequisites show a lock and disable verification controls.
 The status badge values are `UNCLAIMED`, `CLAIMED`, `LOCKED`, and `VERIFYING`.
+
+## Synchronization status
+
+`RallyViewer` displays `SyncStatusBanner` by default. Set `showSyncStatus={false}`
+to hide it, or use `renderSyncStatus` for a custom renderer:
+
+```tsx
+<RallyViewer
+  config={publicConfig}
+  client={client}
+  showSyncStatus
+  renderSyncStatus={(status) => (
+    <aside data-sync-state={status.syncState}>
+      {status.pendingCount} pending; {status.rejectedHistory.length} rejected
+    </aside>
+  )}
+/>
+```
+
+`SyncStatusBanner` accepts the same `SyncStateContext` directly, so applications
+can place it outside the viewer. The context exposes pending work, rejected
+history, persistence capability, and whether synchronization is active.

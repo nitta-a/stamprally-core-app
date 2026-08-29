@@ -60,7 +60,7 @@ jobs:
         run: |
           set -euo pipefail
           version="${RELEASE_VERSION#v}"
-          for package_name in @stamprally/core @stamprally/react @stamprally/ui @stamprally/admin-ui @stamprally/server; do
+          for package_name in @stamprally/core @stamprally/server @stamprally/react @stamprally/ui @stamprally/admin-ui; do
             if npm view "${package_name}@${version}" version --registry=https://registry.npmjs.org >/dev/null 2>&1; then
               echo "${package_name}@${version} is already published; skipping."
               continue
@@ -71,6 +71,11 @@ jobs:
               --provenance \
               --no-git-checks
           done
+
+      - name: Verify published packages resolve from npm
+        env:
+          RELEASE_VERSION: ${{ github.ref_name }}
+        run: pnpm release:verify-install "${RELEASE_VERSION#v}"
 
       - name: Create GitHub Release
         env:

@@ -3,6 +3,36 @@ import { reconcileRewardStates } from "../engine/transition.js";
 import type { OfflineOperation } from "./offlineQueue.js";
 import { cloneState } from "./storage.js";
 
+export type SyncOperationAction = "CHECK_IN" | "CLAIM_REWARD";
+
+export type SyncOperationResult =
+  | {
+      readonly operationId: string;
+      readonly status: "ACCEPTED";
+      readonly resourceId: string;
+      readonly action: SyncOperationAction;
+      readonly appliedAt: number;
+    }
+  | {
+      readonly operationId: string;
+      readonly status: "REJECTED_PERMANENT";
+      readonly resourceId: string;
+      readonly errorCode: string;
+      readonly reason: string;
+    }
+  | {
+      readonly operationId: string;
+      readonly status: "FAILED_RETRYABLE";
+      readonly resourceId: string;
+      readonly error: string;
+    };
+
+export interface SyncProgressResponse {
+  readonly results: ReadonlyArray<SyncOperationResult>;
+  readonly currentState: UserRallyState;
+  readonly syncTimestamp: number;
+}
+
 export interface RebuildUserStateOptions {
   readonly baseline: UserRallyState;
   readonly operations: ReadonlyArray<OfflineOperation>;

@@ -59,8 +59,8 @@ describe("StampRallyServer", () => {
       { rallyId: "rally", userId: "attacker" },
       { authenticatedUserId: "trusted-user" },
     );
-    expect(result.userId).toBe("trusted-user");
-    expect(result.records).toHaveLength(1);
+    expect(result.currentState.userId).toBe("trusted-user");
+    expect(result.currentState.records).toHaveLength(1);
     expect(await persistence.getUserState("rally", "attacker")).toBeNull();
   });
 
@@ -86,9 +86,76 @@ describe("StampRallyServer", () => {
       },
       { authenticatedUserId: "trusted-user" },
     );
-    expect(result.userId).toBe("trusted-user");
-    expect(result.records).toHaveLength(1);
+    expect(result.currentState.userId).toBe("trusted-user");
+    expect(result.currentState.records).toHaveLength(1);
     expect(await persistence.getUserState("rally", "attacker")).toBeNull();
+  });
+
+  it("returns per-operation results and continues independent operations after rejection", async () => {
+    const batchConfig = {
+      ...config,
+      spots: [
+        {
+          id: "s1",
+          orderIndex: 0,
+          name: "First",
+          conditions: [{ type: "passcode", code: "OPEN" }],
+        },
+        { id: "s2", orderIndex: 1, name: "Independent", conditions: [] },
+        { id: "s3", orderIndex: 2, name: "Dependent", prerequisites: ["s1"], conditions: [] },
+      ],
+    } satisfies AdminRallyConfig;
+    const server = new StampRallyServer(batchConfig, new InMemoryServerPersistenceAdapter());
+    const result = await server.syncProgress(
+      {
+        rallyId: "rally",
+        operations: [
+          {
+            kind: "checkIn",
+            request: {
+              rallyId: "rally",
+              spotId: "s1",
+              context: { type: "passcode", code: "WRONG" },
+              idempotencyKey: "reject-first",
+            },
+          },
+          {
+            kind: "checkIn",
+            request: {
+              rallyId: "rally",
+              spotId: "s2",
+              context: { type: "passcode", code: "ANY" },
+              idempotencyKey: "accept-independent",
+            },
+          },
+          {
+            kind: "checkIn",
+            request: {
+              rallyId: "rally",
+              spotId: "s3",
+              context: { type: "passcode", code: "ANY" },
+              idempotencyKey: "reject-dependent",
+            },
+          },
+        ],
+      },
+      { authenticatedUserId: "user" },
+    );
+    expect(result.results.map((item) => item.status)).toEqual([
+      "REJECTED_PERMANENT",
+      "ACCEPTED",
+      "REJECTED_PERMANENT",
+    ]);
+    expect(result.results[0]).toMatchObject({
+      resourceId: "s1",
+      errorCode: "INVALID_PROOF",
+    });
+    expect(result.results[2]).toMatchObject({
+      resourceId: "s3",
+      errorCode: "REJECTED_PREREQUISITE_FAILED",
+    });
+    expect(result.currentState.records.map((record) => record.stampId)).toEqual(["s2"]);
+    expect(result.syncTimestamp).toBeTypeOf("number");
   });
 
   it("throws when a configured secondary stock key is unsupported", async () => {

@@ -82,6 +82,94 @@ describe("rebuildUserStateFromLog", () => {
 });
 
 describe("OfflineQueue conflict synchronization", () => {
+  it("applies batch results by operation and keeps accepted state after rejection", async () => {
+    const config = toPublicConfig({
+      id: "rally",
+      version: "1",
+      title: "Rally",
+      spots: [
+        { id: "s1", orderIndex: 0, name: "One", conditions: [] },
+        { id: "s2", orderIndex: 1, name: "Two", conditions: [] },
+      ],
+      rewards: [],
+    });
+    const queue = new OfflineQueue({
+      storage: new InMemoryOfflineQueueStorage(),
+      rallyId: "rally",
+      userId: "user",
+    });
+    const client = new StampRallyClient(config, {
+      offlineQueue: queue,
+      userId: "user",
+      syncAdapter: {
+        sync: async () => ({
+          results: [
+            {
+              operationId: "checkIn:rally:user:accepted",
+              status: "ACCEPTED" as const,
+              resourceId: "s1",
+              action: "CHECK_IN" as const,
+              appliedAt: 1,
+            },
+            {
+              operationId: "checkIn:rally:user:rejected",
+              status: "REJECTED_PERMANENT" as const,
+              resourceId: "s2",
+              errorCode: "INVALID_PROOF",
+              reason: "The proof was rejected.",
+            },
+          ],
+          currentState: {
+            rallyId: "rally",
+            userId: "user",
+            records: [{ stampId: "s1", acquiredAt: "2026-01-01T00:00:01.000Z" }],
+            rewards: [],
+            updatedAt: "2026-01-01T00:00:01.000Z",
+          },
+          syncTimestamp: 1,
+        }),
+      },
+    });
+    const initial = await client.init();
+    const accepted = {
+      ...initial,
+      records: [...initial.records, { stampId: "s1", acquiredAt: "2026-01-01T00:00:01.000Z" }],
+    };
+    const optimistic = {
+      ...accepted,
+      records: [...accepted.records, { stampId: "s2", acquiredAt: "2026-01-01T00:00:02.000Z" }],
+    };
+    await client.restore(optimistic);
+    await queue.enqueueCheckIn(
+      {
+        rallyId: "rally",
+        userId: "user",
+        spotId: "s1",
+        proofData: "proof",
+        idempotencyKey: "accepted",
+        now: "2026-01-01T00:00:01.000Z",
+        state: initial,
+      },
+      accepted,
+    );
+    await queue.enqueueCheckIn(
+      {
+        rallyId: "rally",
+        userId: "user",
+        spotId: "s2",
+        proofData: "proof",
+        idempotencyKey: "rejected",
+        now: "2026-01-01T00:00:02.000Z",
+        state: accepted,
+      },
+      optimistic,
+    );
+    await client.sync();
+    expect(client.getState()?.records.map((record) => record.stampId)).toEqual(["s1"]);
+    expect(queue.pendingCount).toBe(0);
+    expect(queue.rejectedHistory).toHaveLength(1);
+  });
+
   it("rolls back an optimistic reward claim to its previous state", () => {
     const previous = state([], "AVAILABLE");
     const operation = {

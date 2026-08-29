@@ -1,4 +1,4 @@
-# @stamprally/admin-ui v0.19.0
+# @stamprally/admin-ui v0.20.0
 
 Accessible authoring forms and a headless editor for rally management screens.
 
@@ -35,3 +35,7 @@ paths such as `title`, `description`, `spots.0.name`, or `spots.spot-1.name`.
 Updates use functional React state transitions, so consecutive updates are not
 lost. External configuration changes replace a clean draft automatically; call
 `resetConfig(newConfig)` to explicitly accept a conflicting external draft.
+
+The editor preserves inventory configuration fields such as `stockKey` and
+`secondaryStockKey`; the server adapter remains responsible for enforcing the
+atomic secondary-stock contract and its fail-closed behavior.

@@ -7,6 +7,7 @@ import type {
   ClientError,
 } from "./client.js";
 import { cloneState } from "./storage.js";
+import type { SyncOperationResult, SyncProgressResponse } from "./sync.js";
 
 export type QueueOperationStatus =
   | "PENDING"
@@ -14,8 +15,18 @@ export type QueueOperationStatus =
   | "ACCEPTED"
   | "REJECTED_PERMANENT"
   | "FAILED_RETRYABLE";
-export type OfflineQueueCapability = "indexeddb" | "localstorage" | "memory" | "custom";
-export type OfflineStorageCapability = OfflineQueueCapability | "volatile_single_tab";
+export type OfflineStorageCapability =
+  | "indexeddb"
+  | "localstorage"
+  | "memory"
+  | "custom"
+  | "volatile_single_tab";
+export type MultiTabSyncCapability = "supported_web_locks" | "disabled_unsafe_environment";
+export interface OfflineQueueCapability {
+  readonly storage: OfflineStorageCapability;
+  readonly multiTabSync: MultiTabSyncCapability;
+}
+type OfflineQueueStorageCapability = Exclude<OfflineStorageCapability, "volatile_single_tab">;
 
 export type OfflineOperation =
   | {
@@ -54,6 +65,7 @@ export interface OfflineQueueStorage {
 export interface OfflineQueueCapabilityWarning {
   readonly type: "STORAGE_CAPABILITY_WARNING";
   readonly storageCapability: "volatile_single_tab" | "memory";
+  readonly multiTabSync: "disabled_unsafe_environment";
   readonly isStoragePersistent: boolean;
   readonly message: string;
 }
@@ -337,7 +349,7 @@ function availableLocalStorage(): NonNullable<OfflineQueueOptions["storageLike"]
 
 function defaultStorage(databaseName?: string): {
   readonly storage: OfflineQueueStorage;
-  readonly capability: OfflineQueueCapability;
+  readonly capability: OfflineQueueStorageCapability;
 } {
   try {
     const indexedDB = (globalThis as { readonly indexedDB?: IDBFactory }).indexedDB;
@@ -383,8 +395,6 @@ function errorValue(value: unknown, fallbackCode: string): OfflineOperationError
   return { code: fallbackCode, message: "Offline operation was rejected." };
 }
 
-const syncLocks = new Map<string, { readonly owner: string; readonly expiresAt: number }>();
-const SYNC_LOCK_TTL_MS = 30_000;
 const DEFAULT_RETRY_OPTIONS: Required<SyncRetryOptions> = {
   maxRetries: 0,
   initialIntervalMs: 250,
@@ -400,7 +410,7 @@ function randomId(): string {
 /** Durable, sequential retry queue for operations created while disconnected. */
 export class OfflineQueue {
   #storage: OfflineQueueStorage;
-  #queueCapability: OfflineQueueCapability;
+  #queueCapability: OfflineQueueStorageCapability;
   readonly #configuredKey: string | undefined;
   #rallyId: string | undefined;
   #userId: string | null;
@@ -416,12 +426,7 @@ export class OfflineQueue {
   readonly #synchronizeInstances: boolean;
   readonly #retryOptions: Required<SyncRetryOptions>;
   readonly #instanceId = randomId();
-  readonly #lockStorage: NonNullable<OfflineQueueOptions["storageLike"]> | null;
-  readonly #observedLocks = new Map<
-    string,
-    { readonly owner: string; readonly expiresAt: number }
-  >();
-  #warnedMemoryLock = false;
+  readonly #warnedCapabilityMessages = new Set<string>();
   #capabilityWarningListener: ((event: OfflineQueueCapabilityWarning) => void) | undefined;
   #replayConfig: AdminRallyConfig | PublicRallyConfig | undefined;
   #storageListener: ((event: StorageEvent) => void) | undefined;
@@ -452,8 +457,7 @@ export class OfflineQueue {
       initialIntervalMs: Math.max(0, retryOptions.initialIntervalMs),
       backoffMultiplier: Math.max(1, retryOptions.backoffMultiplier),
     };
-    this.#lockStorage = options.storageLike ?? availableLocalStorage();
-    if (this.#synchronizeInstances) this.#subscribeToExternalChanges();
+    if (this.#synchronizeInstances && this.#hasWebLocks()) this.#subscribeToExternalChanges();
   }
 
   get syncState(): SyncState {
@@ -463,15 +467,14 @@ export class OfflineQueue {
     return this.#operations.length;
   }
   get queueCapability(): OfflineQueueCapability {
-    return this.#queueCapability;
+    return {
+      storage: this.#queueCapability,
+      multiTabSync: this.#hasWebLocks() ? "supported_web_locks" : "disabled_unsafe_environment",
+    };
   }
   get storageCapability(): OfflineStorageCapability {
     if (this.#queueCapability === "memory") return "memory";
-    const locks = (globalThis as { readonly navigator?: { readonly locks?: unknown } }).navigator
-      ?.locks;
-    return locks !== undefined || this.#lockStorage !== null
-      ? this.#queueCapability
-      : "volatile_single_tab";
+    return this.#hasWebLocks() ? this.#queueCapability : "volatile_single_tab";
   }
   get isStoragePersistent(): boolean {
     return this.#queueCapability !== "memory";
@@ -529,12 +532,16 @@ export class OfflineQueue {
       this.#queueCapability = "memory";
       this.#operations = [];
       this.#rejectedHistory = [];
-      this.#warnMemoryLock(
+      this.#warnCapability(
         `Offline queue persistence is unavailable; queued data can be lost after reload (${String(error)}).`,
       );
     }
     if (this.#queueCapability === "memory")
-      this.#warnMemoryLock("Offline queue persistence is unavailable; queued data is memory-only.");
+      this.#warnCapability("Offline queue persistence is unavailable; queued data is memory-only.");
+    if (this.queueCapability.multiTabSync === "disabled_unsafe_environment")
+      this.#warnCapability(
+        "Web Locks is unavailable; automatic cross-tab synchronization is disabled. Sync must be triggered by the foreground tab.",
+      );
     this.#loaded = true;
   }
 
@@ -546,7 +553,6 @@ export class OfflineQueue {
     this.#storageListener = undefined;
     this.#channel?.close();
     this.#channel = null;
-    this.#releaseSyncLock();
   }
 
   /** Selects a rally/user queue scope and loads its pending operations. */
@@ -673,6 +679,13 @@ export class OfflineQueue {
     return this.sync(sender);
   }
 
+  /** Applies a server-side batch response while preserving retryable operations. */
+  async applySyncProgress(response: SyncProgressResponse): Promise<void> {
+    await this.initialize();
+    for (const result of response.results)
+      await this.#applySyncOperationResult(result, response.currentState);
+  }
+
   async #run(sender: OfflineSender): Promise<void> {
     const locks = (
       globalThis as {
@@ -701,7 +714,7 @@ export class OfflineQueue {
               return false;
             }
             callbackStarted = true;
-            await this.#runWithStorageLock(sender);
+            await this.#runSingleTab(sender);
             return true;
           },
         );
@@ -712,23 +725,13 @@ export class OfflineQueue {
         if (callbackStarted) throw error;
       }
     }
-    if (this.storageCapability === "volatile_single_tab")
-      this.#warnMemoryLock(
-        "No cross-tab storage lock is available; offline sync is single-tab only.",
-      );
-    await this.#runWithStorageLock(sender);
+    await this.#runSingleTab(sender);
   }
 
-  async #runWithStorageLock(sender: OfflineSender): Promise<void> {
+  async #runSingleTab(sender: OfflineSender): Promise<void> {
     this.#state = "syncing";
     this.#error = null;
     this.#changeListener?.();
-    if (!this.#acquireSyncLock()) {
-      await this.#reloadFromStorage();
-      this.#state = "idle";
-      this.#changeListener?.();
-      return;
-    }
     try {
       while (this.#operations.length > 0) {
         const operation = this.#operations[0];
@@ -818,8 +821,6 @@ export class OfflineQueue {
       this.#error = cause instanceof Error ? cause : new Error(String(cause));
       this.#changeListener?.();
       throw this.#error;
-    } finally {
-      this.#releaseSyncLock();
     }
   }
 
@@ -829,6 +830,66 @@ export class OfflineQueue {
     this.#operations = [{ ...operation, status, attempts }, ...this.#operations.slice(1)];
     await this.#storage.save(this.#storageKey(), this.#operations);
     this.#announceChange();
+  }
+
+  async #applySyncOperationResult(
+    result: SyncOperationResult,
+    currentState: UserRallyState,
+  ): Promise<void> {
+    const operationIndex = this.#operations.findIndex(
+      (operation) => offlineOperationId(operation) === result.operationId,
+    );
+    const operation = operationIndex < 0 ? undefined : this.#operations[operationIndex];
+    if (operation === undefined) return;
+    if (result.status === "FAILED_RETRYABLE") {
+      const attempts = (operation.attempts ?? 0) + 1;
+      this.#operations = [
+        ...this.#operations.slice(0, operationIndex),
+        { ...operation, status: "FAILED_RETRYABLE", attempts },
+        ...this.#operations.slice(operationIndex + 1),
+      ];
+      await this.#storage.save(this.#storageKey(), this.#operations);
+      this.#announceChange();
+      await this.#syncResultListener?.({
+        operation,
+        status: "RETRYABLE_ERROR",
+        error: { code: "FAILED_RETRYABLE", message: result.error },
+      });
+      return;
+    }
+
+    this.#operations = [
+      ...this.#operations.slice(0, operationIndex),
+      ...this.#operations.slice(operationIndex + 1),
+    ];
+    if (result.status === "REJECTED_PERMANENT") {
+      const attempts = (operation.attempts ?? 0) + 1;
+      const error: OfflineOperationError = {
+        code: result.errorCode,
+        message: result.reason,
+      };
+      this.#rejectedHistory = [
+        ...this.#rejectedHistory,
+        {
+          operation: { ...operation, status: "REJECTED_PERMANENT", attempts },
+          reason: error,
+          errorCode: result.errorCode,
+          rejectedAt: new Date().toISOString(),
+          attempts,
+        },
+      ];
+      await this.#saveRejectedHistory();
+    }
+    await this.#storage.save(this.#storageKey(), this.#operations);
+    this.#announceChange();
+    await this.#syncResultListener?.({
+      operation,
+      status: result.status,
+      state: currentState,
+      ...(result.status === "REJECTED_PERMANENT"
+        ? { error: { code: result.errorCode, message: result.reason } }
+        : {}),
+    });
   }
 
   async #rejectFailedPrerequisite(operation: OfflineOperation): Promise<boolean> {
@@ -892,25 +953,6 @@ export class OfflineQueue {
       try {
         this.#channel = new Channel("stamprally:queue-sync");
         this.#channel.addEventListener("message", (event: MessageEvent<unknown>) => {
-          if (typeof event.data === "object" && event.data !== null) {
-            const data = event.data as {
-              readonly type?: unknown;
-              readonly lockKey?: unknown;
-              readonly owner?: unknown;
-              readonly expiresAt?: unknown;
-            };
-            if (data.type === "lock" && data.lockKey === this.#lockKey()) {
-              this.#observedLocks.set(data.lockKey, {
-                owner: typeof data.owner === "string" ? data.owner : "unknown",
-                expiresAt: typeof data.expiresAt === "number" ? data.expiresAt : 0,
-              });
-              return;
-            }
-            if (data.type === "unlock" && data.lockKey === this.#lockKey()) {
-              this.#observedLocks.delete(data.lockKey);
-              return;
-            }
-          }
           if (
             typeof event.data === "object" &&
             event.data !== null &&
@@ -948,70 +990,6 @@ export class OfflineQueue {
     }
   }
 
-  #lockKey(): string {
-    return `${this.#storageKey()}:sync-lock`;
-  }
-
-  #acquireSyncLock(): boolean {
-    const key = this.#lockKey();
-    const now = Date.now();
-    const local = syncLocks.get(key);
-    if (local !== undefined && local.expiresAt > now && local.owner !== this.#instanceId)
-      return false;
-    const observed = this.#observedLocks.get(key);
-    if (observed !== undefined && observed.expiresAt > now && observed.owner !== this.#instanceId)
-      return false;
-    if (this.#lockStorage !== null) {
-      try {
-        const existing = this.#lockStorage.getItem(key);
-        if (existing !== null) {
-          const parsed: unknown = JSON.parse(existing);
-          if (
-            typeof parsed === "object" &&
-            parsed !== null &&
-            typeof (parsed as { readonly expiresAt?: unknown }).expiresAt === "number" &&
-            (parsed as { readonly expiresAt: number }).expiresAt > now &&
-            (parsed as { readonly owner?: unknown }).owner !== this.#instanceId
-          )
-            return false;
-        }
-        this.#lockStorage.setItem(
-          key,
-          JSON.stringify({ owner: this.#instanceId, expiresAt: now + SYNC_LOCK_TTL_MS }),
-        );
-        this.#channel?.postMessage({
-          type: "lock",
-          lockKey: key,
-          owner: this.#instanceId,
-          expiresAt: now + SYNC_LOCK_TTL_MS,
-        });
-      } catch {
-        this.#warnMemoryLock("Persistent lock access failed; offline sync is single-tab only.");
-      }
-    }
-    syncLocks.set(key, { owner: this.#instanceId, expiresAt: now + SYNC_LOCK_TTL_MS });
-    return true;
-  }
-
-  #releaseSyncLock(): void {
-    const key = this.#lockKey();
-    const current = syncLocks.get(key);
-    if (current?.owner === this.#instanceId) syncLocks.delete(key);
-    if (this.#lockStorage !== null) {
-      try {
-        const value = this.#lockStorage.getItem(key);
-        if (
-          value !== null &&
-          (JSON.parse(value) as { readonly owner?: unknown }).owner === this.#instanceId
-        )
-          this.#lockStorage.removeItem?.(key);
-        this.#channel?.postMessage({ type: "unlock", lockKey: key, owner: this.#instanceId });
-      } catch {
-        // Lock expiry protects against an unreadable lock record.
-      }
-    }
-  }
-
   #storageKey(): string {
     if (this.#configuredKey !== undefined) return this.#configuredKey;
     return `stamprally:queue:${this.#rallyId ?? "unscoped"}:${this.#userId ?? "anonymous"}`;
@@ -1043,16 +1021,28 @@ export class OfflineQueue {
     await this.#storage.saveRejectedHistory?.(this.#storageKey(), this.#rejectedHistory);
   }
 
-  #warnMemoryLock(message: string): void {
-    if (this.#warnedMemoryLock) return;
-    this.#warnedMemoryLock = true;
+  #warnCapability(message: string): void {
+    if (this.#warnedCapabilityMessages.has(message)) return;
+    this.#warnedCapabilityMessages.add(message);
     console.warn(`[@stamprally/core] ${message}`);
     this.#capabilityWarningListener?.({
       type: "STORAGE_CAPABILITY_WARNING",
       storageCapability: this.storageCapability === "memory" ? "memory" : "volatile_single_tab",
+      multiTabSync: "disabled_unsafe_environment",
       isStoragePersistent: this.isStoragePersistent,
       message,
     });
+  }
+
+  #hasWebLocks(): boolean {
+    const locks = (
+      globalThis as {
+        readonly navigator?: {
+          readonly locks?: { readonly request?: unknown };
+        };
+      }
+    ).navigator?.locks;
+    return locks !== undefined && typeof locks.request === "function";
   }
 }
 

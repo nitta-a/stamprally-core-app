@@ -29,7 +29,7 @@ import {
   type StampStorage,
   storageKey,
 } from "./storage.js";
-import { rebuildUserStateFromLog } from "./sync.js";
+import { rebuildUserStateFromLog, type SyncProgressResponse } from "./sync.js";
 
 export type CheckInOptions = {
   readonly now?: string;
@@ -130,7 +130,8 @@ export interface SyncAdapter {
     readonly userId: string | null;
     readonly state: UserRallyState;
     readonly anonymousSessionId?: string;
-  }) => Promise<UserRallyState>;
+    readonly operations?: ReadonlyArray<import("./offlineQueue.js").OfflineOperation>;
+  }) => Promise<UserRallyState | SyncProgressResponse>;
 }
 export interface ClientOptions {
   readonly storage?: StampStorage;
@@ -226,6 +227,19 @@ function errorMessage(
     : fallback;
 }
 
+function isSyncProgressResponse(
+  value: UserRallyState | SyncProgressResponse,
+): value is SyncProgressResponse {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "results" in value &&
+    Array.isArray(value.results) &&
+    "currentState" in value &&
+    "syncTimestamp" in value
+  );
+}
+
 export class StampRallyClient {
   readonly #listeners = new Set<ClientListener>();
   readonly #eventListeners = new Set<ClientEventListener>();
@@ -283,7 +297,12 @@ export class StampRallyClient {
     return this.#syncRevision;
   }
   get queueCapability(): OfflineQueueCapability {
-    return this.#offlineQueue?.queueCapability ?? "custom";
+    return (
+      this.#offlineQueue?.queueCapability ?? {
+        storage: "custom",
+        multiTabSync: "disabled_unsafe_environment",
+      }
+    );
   }
   get storageCapability(): OfflineStorageCapability {
     return this.#offlineQueue?.storageCapability ?? "custom";
@@ -521,7 +540,10 @@ export class StampRallyClient {
       this.#syncMetrics = { processed: 0, failed: 0 };
       try {
         const current = await this.initialize();
-        if (this.#offlineQueue !== undefined && adapter !== undefined) {
+        const queuedOperations = this.#offlineQueue?.operations ?? [];
+        const hasPerOperationAdapters =
+          adapter?.checkIn !== undefined || adapter?.claimReward !== undefined;
+        if (this.#offlineQueue !== undefined && adapter !== undefined && hasPerOperationAdapters) {
           await this.#offlineQueue.sync(async (operation) => {
             if (operation.kind === "checkIn") {
               if (adapter.checkIn === undefined)
@@ -538,14 +560,24 @@ export class StampRallyClient {
           return;
         }
         const localState = this.#state ?? current;
-        const serverState = await adapter.sync({
+        const syncResult = await adapter.sync({
           rallyId: this.#config.id,
           userId: this.#userId,
           state: localState,
           ...(this.#userId === this.#anonymousSessionId
             ? { anonymousSessionId: this.#anonymousSessionId }
             : {}),
+          ...(this.#offlineQueue !== undefined &&
+          !hasPerOperationAdapters &&
+          queuedOperations.length > 0
+            ? { operations: queuedOperations }
+            : {}),
         });
+        const progress = isSyncProgressResponse(syncResult) ? syncResult : undefined;
+        if (progress !== undefined) await this.#offlineQueue?.applySyncProgress(progress);
+        const serverState = isSyncProgressResponse(syncResult)
+          ? syncResult.currentState
+          : syncResult;
         const resolved = rebuildUserStateFromLog(
           serverState,
           this.#offlineQueue?.operations ?? [],

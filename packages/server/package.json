@@ -1,6 +1,6 @@
 {
   "name": "@stamprally/server",
-  "version": "0.19.0",
+  "version": "0.20.0",
   "description": "Web Standard server handlers for stamp rally verification and claims.",
   "license": "MIT",
   "repository": {

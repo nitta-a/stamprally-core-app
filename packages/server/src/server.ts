@@ -14,8 +14,11 @@ import type {
   CheckInResponse,
   ClaimRewardRequest,
   ServerOptions,
+  SyncOperationResult,
   SyncOperationStatus,
+  SyncProgressOperation,
   SyncProgressRequest,
+  SyncProgressResponse,
 } from "./index.js";
 import type { ServerPersistenceAdapter } from "./persistence.js";
 import {
@@ -63,6 +66,16 @@ function now(options: ServerOptions): string {
 function timestampMillis(timestamp: string): number {
   const value = Date.parse(timestamp);
   return Number.isFinite(value) ? value : Date.now();
+}
+
+function operationTimestamp(operation: SyncProgressOperation): number {
+  const value = operation.request.now;
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Date.parse(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return Number.MAX_SAFE_INTEGER;
 }
 function validationResponse(
   errors: ReadonlyArray<{ readonly path: string; readonly message: string; readonly code: string }>,
@@ -201,6 +214,45 @@ function operationStatus(result: {
   return result.code === "CONFLICT" || result.code === "PERSISTENCE_FAILED"
     ? "RETRYABLE_ERROR"
     : "REJECTED_PERMANENT";
+}
+
+function syncOperationId(operation: SyncProgressOperation, userId: string): string {
+  return `${operation.kind}:${operation.request.rallyId}:${userId}:${operation.request.idempotencyKey}`;
+}
+
+function syncOperationResult(
+  operation: SyncProgressOperation,
+  userId: string,
+  result: CheckInResponse | ClaimResponse,
+): SyncOperationResult {
+  const operationId = syncOperationId(operation, userId);
+  const resourceId =
+    operation.kind === "checkIn" ? operation.request.spotId : operation.request.rewardId;
+  const action = operation.kind === "checkIn" ? "CHECK_IN" : "CLAIM_REWARD";
+  const status = operationStatus(result);
+  if (status === "ACCEPTED") {
+    return {
+      operationId,
+      status,
+      resourceId,
+      action,
+      appliedAt: timestampMillis(result.ok ? result.state.updatedAt : ""),
+    };
+  }
+  if (status === "RETRYABLE_ERROR")
+    return {
+      operationId,
+      status: "FAILED_RETRYABLE",
+      resourceId,
+      error: result.ok ? "The operation can be retried." : result.message,
+    };
+  return {
+    operationId,
+    status,
+    resourceId,
+    errorCode: result.ok ? "REJECTED_PERMANENT" : result.code,
+    reason: result.ok ? "The operation was rejected." : result.message,
+  };
 }
 
 function withDirectIdentity<
@@ -342,16 +394,17 @@ export class StampRallyServer {
       ...(sessionId === null ? {} : { isAnonymous: true, sessionId }),
     };
     try {
+      const progress = await this.syncProgress(
+        {
+          rallyId: body.data.rallyId,
+          ...(body.data.operations === undefined ? {} : { operations: body.data.operations }),
+          ...(sessionId === null ? {} : { anonymousSessionId: sessionId }),
+        },
+        authContext,
+      );
       return json({
         ok: true,
-        state: await this.syncProgress(
-          {
-            rallyId: body.data.rallyId,
-            ...(body.data.operations === undefined ? {} : { operations: body.data.operations }),
-            ...(sessionId === null ? {} : { anonymousSessionId: sessionId }),
-          },
-          authContext,
-        ),
+        ...progress,
       });
     } catch (error) {
       if (error instanceof RequestValidationException) return validationResponse(error.errors);
@@ -753,14 +806,51 @@ export class StampRallyServer {
   async syncProgress(
     request: SyncProgressRequest,
     authContext: TrustedAuthContext,
-  ): Promise<UserRallyState> {
+  ): Promise<SyncProgressResponse> {
     const directRequest = withDirectIdentity(request, authContext);
     assertValidSyncParams(directRequest, this.#config);
-    for (const operation of request.operations ?? []) {
-      if (operation.kind === "checkIn") await this.checkIn(operation.request, authContext);
-      else await this.claimReward(operation.request, authContext);
+    const results: SyncOperationResult[] = [];
+    const rejectedCheckIns = new Set<string>();
+    const operations = [...(request.operations ?? [])]
+      .map((operation, index) => ({ operation, index }))
+      .sort(
+        (left, right) =>
+          operationTimestamp(left.operation) - operationTimestamp(right.operation) ||
+          left.index - right.index,
+      )
+      .map(({ operation }) => operation);
+    for (const operation of operations) {
+      const resourceId =
+        operation.kind === "checkIn" ? operation.request.spotId : operation.request.rewardId;
+      if (operation.kind === "checkIn") {
+        const spot = this.#config.spots.find((candidate) => candidate.id === resourceId);
+        if (spot?.prerequisites?.some((prerequisite) => rejectedCheckIns.has(prerequisite))) {
+          results.push({
+            operationId: syncOperationId(operation, directRequest.userId),
+            status: "REJECTED_PERMANENT",
+            resourceId,
+            errorCode: "REJECTED_PREREQUISITE_FAILED",
+            reason: "A prerequisite operation was rejected by the server.",
+          });
+          rejectedCheckIns.add(resourceId);
+          continue;
+        }
+      }
+      const result =
+        operation.kind === "checkIn"
+          ? await this.checkIn(operation.request, authContext)
+          : await this.claimReward(operation.request, authContext);
+      const operationResult = syncOperationResult(operation, directRequest.userId, result);
+      results.push(operationResult);
+      if (operation.kind === "checkIn" && operationResult.status === "REJECTED_PERMANENT")
+        rejectedCheckIns.add(resourceId);
     }
-    return this.sync(directRequest.rallyId, authContext);
+    const currentState = await this.sync(directRequest.rallyId, authContext);
+    return {
+      results,
+      currentState,
+      syncTimestamp: timestampMillis(now(this.#options)),
+    };
   }
   async #attachInventory(state: UserRallyState): Promise<UserRallyState> {
     const rewardRemaining: Record<string, number> = {};

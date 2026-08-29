@@ -51,3 +51,8 @@ jobs:
 
       - name: Check package entry points
         run: pnpm package:check
+
+      - name: Check synchronized package versions
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          node scripts/check-release-version.mjs "v${version}"

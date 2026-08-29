@@ -1,5 +1,7 @@
 import type { UserRallyState } from "@stamprally/core";
 import type { TrustedAuthContext } from "./types.js";
+
+export type { SyncOperationResult, SyncProgressResponse } from "@stamprally/core";
 export interface AuditLog {
   readonly id: string;
   readonly timestamp: string;

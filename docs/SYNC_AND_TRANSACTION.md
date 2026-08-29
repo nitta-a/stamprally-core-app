@@ -70,7 +70,10 @@ Transport or explicitly retryable failures remain queued for `retrySync`.
 results are visible immediately.
 
 The queue marks every persisted operation `PENDING`, `IN_FLIGHT`, `ACCEPTED`, or
-`REJECTED`. Web Locks is used when available; the storage lock is the fallback.
+`REJECTED`. Web Locks is used when available. When it is unavailable,
+`queueCapability.multiTabSync` is `disabled_unsafe_environment`; automatic
+cross-tab synchronization is disabled and the foreground tab must trigger sync
+explicitly. A localStorage entry is never treated as an inter-tab lock.
 `retryOptions` supports bounded retries with `maxRetries`, `initialIntervalMs`, and
 `backoffMultiplier`.
 
