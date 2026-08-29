@@ -1,4 +1,4 @@
-# @stamprally/core v0.20.0
+# @stamprally/core v0.20.1
 
 Dependency-free domain models, immutable state transitions, storage adapters, browser detectors, and safe configuration parsers.
 
@@ -7,7 +7,7 @@ import { InMemoryStorage, StampRallyClient, type PublicRallyConfig } from "@stam
 
 const config: PublicRallyConfig = {
   id: "city-tour",
-  version: "0.20.0",
+  version: "0.20.1",
   title: "City Tour",
   spots: [{ id: "station", orderIndex: 0, name: "Central Station", conditions: [{ type: "passcode" }] }],
   rewards: [],
@@ -35,7 +35,7 @@ When no authenticated user is supplied, the client creates a persistent UUID v4
 `anonymousSessionId` and includes it in sync requests. Queue replay uses Web Locks
 when available and supports bounded exponential backoff through `retryOptions`.
 
-### v0.20.0 batch sync and storage capability
+### v0.20.1 batch sync and storage capability
 
 An adapter can return `SyncProgressResponse` from `sync` when it sends queued
 operations to a server-side `syncProgress` endpoint. The adapter passes queued

@@ -1,4 +1,4 @@
-# @stamprally/react v0.20.0
+# @stamprally/react v0.20.1
 
 React integration for `@stamprally/core`. `useStampRally` subscribes to immutable client state and exposes check-in, reward-claim, synchronization, and user-switching operations.
 
@@ -9,7 +9,7 @@ import { useStampRally } from "@stamprally/react";
 
 const config: PublicRallyConfig = {
   id: "city-tour",
-  version: "0.20.0",
+  version: "0.20.1",
   title: "City Tour",
   spots: [{ id: "station", orderIndex: 0, name: "Station", conditions: [{ type: "passcode" }] }],
   rewards: [],
