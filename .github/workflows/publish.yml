@@ -72,11 +72,6 @@ jobs:
               --no-git-checks
           done
 
-      - name: Verify published packages resolve from npm
-        env:
-          RELEASE_VERSION: ${{ github.ref_name }}
-        run: pnpm release:verify-install "${RELEASE_VERSION#v}"
-
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -89,3 +84,22 @@ jobs:
               --title "${{ github.ref_name }}" \
               --generate-notes
           fi
+
+  verify-npm:
+    name: Verify published npm packages
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22.x
+          registry-url: https://registry.npmjs.org
+
+      - name: Install and verify latest published packages
+        run: bash scripts/verify-npm-packages.sh

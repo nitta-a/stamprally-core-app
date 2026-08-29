@@ -17,6 +17,7 @@ import type {
   OfflineQueueCapabilityWarning,
   OfflineStorageCapability,
   OfflineSyncResultEvent,
+  QueueCapabilitiesDetail,
   QueueCapability,
   RejectedOperationHistoryEntry,
   SyncState,
@@ -141,7 +142,7 @@ export interface ClientOptions {
   readonly clock?: () => string;
   readonly userId?: string | null;
   readonly anonymousSessionId?: string;
-  readonly offlineQueue?: OfflineQueue;
+  readonly offlineQueue?: OfflineQueue | false;
 }
 type StorageOrOptions = StampStorage | ClientOptions;
 function isStorage(value: StorageOrOptions): value is StampStorage {
@@ -261,7 +262,8 @@ export class StampRallyClient {
     this.#storage = this.#options.storage ?? new InMemoryStorage();
     this.#anonymousSessionId = this.#options.anonymousSessionId ?? createAnonymousSessionId();
     this.#userId = this.#options.userId ?? this.#anonymousSessionId;
-    this.#offlineQueue = this.#options.offlineQueue;
+    this.#offlineQueue =
+      this.#options.offlineQueue === false ? undefined : this.#options.offlineQueue;
     this.#offlineQueue?.setReplayConfig(config);
     this.#offlineQueue?.setSyncResultListener((event) => this.#handleOfflineSyncResult(event));
     this.#offlineQueue?.setCapabilityWarningListener((warning) =>
@@ -297,21 +299,22 @@ export class StampRallyClient {
     return this.#syncRevision;
   }
   get queueCapability(): QueueCapability {
+    return this.#offlineQueue?.queueCapability ?? "disabled";
+  }
+  get queueCapabilities(): QueueCapabilitiesDetail {
     return (
-      this.#offlineQueue?.queueCapability ?? {
-        storage: "custom",
-        mode: "persistent",
+      this.#offlineQueue?.queueCapabilities ?? {
+        storageType: "none",
+        isPersistent: false,
         multiTabSync: "disabled_unsafe_environment",
-        isPersistent: true,
-        legacy: "persistent",
       }
     );
   }
   get storageCapability(): OfflineStorageCapability {
-    return this.#offlineQueue?.storageCapability ?? "custom";
+    return this.#offlineQueue?.storageCapability ?? "disabled";
   }
   get isStoragePersistent(): boolean {
-    return this.#offlineQueue?.isStoragePersistent ?? true;
+    return this.#offlineQueue?.isStoragePersistent ?? false;
   }
   discardRejected(operationId: string): Promise<boolean> {
     return this.#offlineQueue?.discardRejected(operationId) ?? Promise.resolve(false);

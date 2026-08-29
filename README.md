@@ -1,4 +1,4 @@
-# stamprally-core-app v0.21.0
+# stamprally-core-app v0.22.0
 
 A headless, storage-agnostic stamp rally engine with React, participant UI, authoring UI, and Web Standard server integration.
 
@@ -34,7 +34,7 @@ import { RallyViewer } from "@stamprally/ui";
 
 const adminConfig: AdminRallyConfig = {
   id: "city-tour",
-  version: "0.21.0",
+  version: "0.22.0",
   title: { ja: "街歩きラリー", en: "City Tour" },
   spots: [
     {
@@ -100,8 +100,9 @@ the required all-or-nothing reward claim writes.
 Batch Sync returns one result per operation. Successful operations are applied,
 permanent rejections are removed from the queue, and unexpected operation
 exceptions are returned as `FAILED_RETRYABLE` so independent operations can
-continue. `queueCapability` exposes `mode`, `multiTabSync`, `isPersistent`, and
-`storage`; use the object properties in new code.
+continue. Operations are ordered deterministically by timestamp and operation
+ID. `queueCapability` remains a legacy storage string; use `queueCapabilities`
+for `storageType`, `isPersistent`, and `multiTabSync`.
 
 Direct server APIs accept a verified `TrustedAuthContext`, `{ userId: string }`,
 or a string `userId` for simplified trusted calls. Production code should pass

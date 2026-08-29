@@ -20,6 +20,7 @@ export { StampRallyClient } from "./client.js";
 export type {
   IndexedDBOfflineQueueOptions,
   LegacyQueueCapability,
+  LegacyQueueCapabilityString,
   MultiTabSyncCapability,
   OfflineConflictResult,
   OfflineOperation,
@@ -37,6 +38,7 @@ export type {
   OfflineStorageCapability,
   OfflineSyncResultEvent,
   OfflineSyncResultListener,
+  QueueCapabilitiesDetail,
   QueueCapability,
   QueueCapabilityMode,
   QueueOperationStatus,

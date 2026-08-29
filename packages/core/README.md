@@ -1,4 +1,4 @@
-# @stamprally/core v0.21.0
+# @stamprally/core v0.22.0
 
 Dependency-free domain models, immutable state transitions, storage adapters, browser detectors, and safe configuration parsers.
 
@@ -7,7 +7,7 @@ import { InMemoryStorage, StampRallyClient, type PublicRallyConfig } from "@stam
 
 const config: PublicRallyConfig = {
   id: "city-tour",
-  version: "0.21.0",
+  version: "0.22.0",
   title: "City Tour",
   spots: [{ id: "station", orderIndex: 0, name: "Central Station", conditions: [{ type: "passcode" }] }],
   rewards: [],
@@ -23,7 +23,7 @@ The browser detectors `getCurrentGeoContext`, `readNfcContext`, and `readQrConte
 
 `InMemoryStorage`, `LocalStorageAdapter`, and `IndexedDBAdapter` implement `StampStorage`. `updateLocalizedField` updates one locale without dropping existing translations.
 
-## v0.21.0 offline synchronization
+## v0.22.0 offline synchronization
 
 Configure `OfflineQueue` with `rallyId` and `userId` to persist pending work under
 `stamprally:queue:<rallyId>:<userId-or-anonymous>`. `switchUser` loads the other
@@ -35,7 +35,7 @@ When no authenticated user is supplied, the client creates a persistent UUID v4
 `anonymousSessionId` and includes it in sync requests. Queue replay uses Web Locks
 when available and supports bounded exponential backoff through `retryOptions`.
 
-### v0.21.0 batch sync, queue capability, and storage capability
+### v0.22.0 batch sync, queue capability, and storage capability
 
 An adapter can return `SyncProgressResponse` from `sync` when it sends queued
 operations to a server-side `syncProgress` endpoint. The adapter passes queued
@@ -56,16 +56,18 @@ results are removed from the queue; permanent reasons are added to
 permanent prerequisite failure does not prevent later independent operations from
 being evaluated.
 
-`client.queueCapability.multiTabSync` is `"supported_web_locks"` when the Web
+`client.queueCapabilities.multiTabSync` is `"supported_web_locks"` when the Web
 Locks API is available. Otherwise it is `"disabled_unsafe_environment"`:
 cross-tab automatic synchronization is disabled, the foreground tab must trigger
 sync explicitly, and a `storageCapabilityWarning` event is emitted. localStorage
 may still be used for durable queue data, but it is never used as a lock.
 
-`client.queueCapability` also exposes `mode` (`"persistent"` or
-`"volatile_memory"`), `isPersistent`, and the actual `storage` type. The
-deprecated `legacy` property and `getLegacyQueueCapability` helper expose
-`"persistent"` or `"volatile"` while callers migrate to `mode`.
+`client.queueCapability` remains the legacy storage string (`"indexeddb"`,
+`"localstorage"`, `"memory"`, `"custom"`, or `"disabled"`) so string comparisons
+such as `client.queueCapability === "indexeddb"` remain valid. New code can use
+`client.queueCapabilities`, which provides `storageType`, `isPersistent`, and
+`multiTabSync`. An omitted or `false` `offlineQueue` is reported as
+`disabled` with `storageType: "none"`.
 
 `evaluateSpotStatus` derives `UNCLAIMED`, `CLAIMED`, `LOCKED`, or `VERIFYING`
 without mutating state. A spot with incomplete `prerequisites` is `LOCKED` and

@@ -46,6 +46,46 @@ describe("resolveRallyStateConflict", () => {
 });
 
 describe("rebuildUserStateFromLog", () => {
+  it("replays operations by timestamp and operation id, regardless of input order", () => {
+    const baseline = state([], "LOCKED");
+    const config = {
+      id: "rally",
+      version: "1",
+      title: "Rally",
+      spots: [
+        { id: "a", orderIndex: 0, name: "A", conditions: [] },
+        { id: "b", orderIndex: 1, name: "B", conditions: [] },
+        { id: "c", orderIndex: 2, name: "C", conditions: [] },
+      ],
+      rewards: [],
+    } as const;
+    const operation = (spotId: "a" | "b" | "c", idempotencyKey: string, now: string) => ({
+      kind: "checkIn" as const,
+      status: "PENDING" as const,
+      request: {
+        rallyId: "rally",
+        userId: "user",
+        spotId,
+        proofData: "proof",
+        idempotencyKey,
+        now,
+        state: baseline,
+      },
+    });
+
+    const rebuilt = rebuildUserStateFromLog(
+      baseline,
+      [
+        operation("c", "z", "2026-01-01T00:00:02.000Z"),
+        operation("b", "b", "2026-01-01T00:00:01.000Z"),
+        operation("a", "a", "2026-01-01T00:00:01.000Z"),
+      ],
+      config,
+    );
+
+    expect(rebuilt.records.map((record) => record.stampId)).toEqual(["a", "b", "c"]);
+  });
+
   it("keeps independent optimistic operations and removes failed prerequisite chains", () => {
     const baseline = state([], "LOCKED");
     const config = {

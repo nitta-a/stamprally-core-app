@@ -20,38 +20,41 @@ export type OfflineStorageCapability =
   | "localstorage"
   | "memory"
   | "custom"
+  | "disabled"
   | "volatile_single_tab";
 export type MultiTabSyncCapability = "supported_web_locks" | "disabled_unsafe_environment";
 export type QueueCapabilityMode = "persistent" | "volatile_memory";
 export type LegacyQueueCapability = "persistent" | "volatile";
+export type LegacyQueueCapabilityString =
+  | "indexeddb"
+  | "localstorage"
+  | "memory"
+  | "custom"
+  | "disabled";
 
-export interface QueueCapability {
-  /** 永続性の状態。永続ストレージの種類は `storage` で確認できます。 */
-  readonly mode: QueueCapabilityMode;
-  /** 複数タブ排他同期の対応レベル。 */
-  readonly multiTabSync: MultiTabSyncCapability;
-  /**
-   * @deprecated `mode === "persistent"` を使用してください。永続ストレージを利用できるかを
-   * 示す移行用の互換フラグです。
-   */
+export interface QueueCapabilitiesDetail {
+  readonly storageType: "indexeddb" | "localstorage" | "memory" | "custom" | "none";
   readonly isPersistent: boolean;
-  /**
-   * @deprecated `mode` と `multiTabSync` を使用してください。`persistent` は
-   * `mode === "persistent"`、`volatile` は `mode === "volatile_memory"` に対応します。
-   */
-  readonly legacy: LegacyQueueCapability;
-  /** 実際に選択されたストレージの種類。 */
-  readonly storage: OfflineStorageCapability;
+  readonly multiTabSync: MultiTabSyncCapability;
 }
-/** @deprecated Use QueueCapability. */
-export type OfflineQueueCapability = QueueCapability;
+/** The legacy string exposed by `queueCapability`. */
+export type QueueCapability = LegacyQueueCapabilityString;
+/** @deprecated Use LegacyQueueCapabilityString. */
+export type OfflineQueueCapability = LegacyQueueCapabilityString;
 
-/** @deprecated Use `capability.mode` and `capability.multiTabSync`. */
-export function getLegacyQueueCapability(capability: QueueCapability): LegacyQueueCapability {
+/** @deprecated Use the string value of `queueCapability` directly. */
+export function getLegacyQueueCapability(
+  capability: LegacyQueueCapabilityString | QueueCapabilitiesDetail,
+): LegacyQueueCapability {
+  if (typeof capability === "string")
+    return capability === "memory" || capability === "disabled" ? "volatile" : "persistent";
   return capability.isPersistent ? "persistent" : "volatile";
 }
 
-type OfflineQueueStorageCapability = Exclude<OfflineStorageCapability, "volatile_single_tab">;
+type OfflineQueueStorageCapability = Exclude<
+  OfflineStorageCapability,
+  "volatile_single_tab" | "disabled"
+>;
 
 export type OfflineOperation =
   | {
@@ -492,13 +495,15 @@ export class OfflineQueue {
     return this.#operations.length;
   }
   get queueCapability(): QueueCapability {
-    const isPersistent = this.#queueCapability !== "memory";
+    return this.#queueCapability;
+  }
+  get queueCapabilities(): QueueCapabilitiesDetail {
+    const storageType = this.#queueCapability;
+    const isPersistent = storageType !== "memory";
     return {
-      storage: this.#queueCapability,
-      mode: isPersistent ? "persistent" : "volatile_memory",
-      multiTabSync: this.#hasWebLocks() ? "supported_web_locks" : "disabled_unsafe_environment",
+      storageType,
       isPersistent,
-      legacy: isPersistent ? "persistent" : "volatile",
+      multiTabSync: this.#hasWebLocks() ? "supported_web_locks" : "disabled_unsafe_environment",
     };
   }
   get storageCapability(): OfflineStorageCapability {
@@ -567,7 +572,7 @@ export class OfflineQueue {
     }
     if (this.#queueCapability === "memory")
       this.#warnCapability("Offline queue persistence is unavailable; queued data is memory-only.");
-    if (this.queueCapability.multiTabSync === "disabled_unsafe_environment")
+    if (this.queueCapabilities.multiTabSync === "disabled_unsafe_environment")
       this.#warnCapability(
         "Web Locks is unavailable; automatic cross-tab synchronization is disabled. Sync must be triggered by the foreground tab.",
       );

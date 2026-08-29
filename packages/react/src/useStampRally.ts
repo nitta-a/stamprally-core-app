@@ -3,8 +3,9 @@ import type {
   CheckInResult,
   ClaimOptions,
   ClaimResult,
+  LegacyQueueCapabilityString,
   OfflineStorageCapability,
-  QueueCapability,
+  QueueCapabilitiesDetail,
   RejectedOperationHistoryEntry,
   StampRallyClient,
   SyncEventListener,
@@ -23,6 +24,7 @@ export interface UseStampRallySyncState {
   readonly rejectedHistory: ReadonlyArray<RejectedOperationHistoryEntry>;
   readonly storageCapability: OfflineStorageCapability;
   readonly isStoragePersistent: boolean;
+  readonly queueCapabilities: QueueCapabilitiesDetail;
 }
 export interface UseStampRallyReturn {
   readonly state: UserRallyState | null;
@@ -41,7 +43,8 @@ export interface UseStampRallyReturn {
   readonly syncStatus: SyncState;
   readonly isSyncing: boolean;
   readonly pendingCount: number;
-  readonly queueCapability: QueueCapability;
+  readonly queueCapability: LegacyQueueCapabilityString;
+  readonly queueCapabilities: QueueCapabilitiesDetail;
   readonly storageCapability: OfflineStorageCapability;
   readonly isStoragePersistent: boolean;
   readonly rejectedHistory: ReadonlyArray<RejectedOperationHistoryEntry>;
@@ -144,11 +147,13 @@ export function useStampRally(
       rejectedHistory: client.rejectedHistory,
       storageCapability: client.storageCapability,
       isStoragePersistent: client.isStoragePersistent,
+      queueCapabilities: client.queueCapabilities,
     },
     syncStatus: client.syncState,
     isSyncing: client.syncState === "syncing",
     pendingCount: client.pendingCount,
     queueCapability: client.queueCapability,
+    queueCapabilities: client.queueCapabilities,
     storageCapability: client.storageCapability,
     isStoragePersistent: client.isStoragePersistent,
     rejectedHistory: client.rejectedHistory,

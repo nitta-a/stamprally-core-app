@@ -138,15 +138,15 @@ describe("StampRallyServer", () => {
 
     expect(result.results).toEqual([
       expect.objectContaining({
+        operationId: "checkIn:rally:user:succeeds",
+        status: "ACCEPTED",
+        resourceId: "s2",
+      }),
+      expect.objectContaining({
         operationId: "checkIn:rally:user:throws",
         status: "FAILED_RETRYABLE",
         resourceId: "s1",
         error: "database connection lost",
-      }),
-      expect.objectContaining({
-        operationId: "checkIn:rally:user:succeeds",
-        status: "ACCEPTED",
-        resourceId: "s2",
       }),
     ]);
     expect(result.currentState.records.map((record) => record.stampId)).toEqual(["s2"]);
@@ -194,6 +194,61 @@ describe("StampRallyServer", () => {
       error: "Request validation failed.",
     });
     expect(result.currentState.records.map((record) => record.stampId)).toEqual(["s2"]);
+  });
+
+  it("sorts a sync batch by timestamp and operation id", async () => {
+    const batchConfig = {
+      ...config,
+      spots: [
+        { id: "s1", orderIndex: 0, name: "First", conditions: [] },
+        { id: "s2", orderIndex: 1, name: "Second", conditions: [] },
+        { id: "s3", orderIndex: 2, name: "Third", conditions: [] },
+      ],
+    } satisfies AdminRallyConfig;
+    const server = new StampRallyServer(batchConfig, new InMemoryServerPersistenceAdapter(), {
+      now: () => "2026-01-01T00:00:03.000Z",
+    });
+    const result = await server.syncProgress(
+      {
+        rallyId: "rally",
+        operations: [
+          {
+            kind: "checkIn",
+            request: {
+              rallyId: "rally",
+              spotId: "s3",
+              context: { type: "passcode", code: "ANY" },
+              idempotencyKey: "z",
+              now: "2026-01-01T00:00:02.000Z",
+            },
+          },
+          {
+            kind: "checkIn",
+            request: {
+              rallyId: "rally",
+              spotId: "s2",
+              context: { type: "passcode", code: "ANY" },
+              idempotencyKey: "b",
+              now: "2026-01-01T00:00:01.000Z",
+            },
+          },
+          {
+            kind: "checkIn",
+            request: {
+              rallyId: "rally",
+              spotId: "s1",
+              context: { type: "passcode", code: "ANY" },
+              idempotencyKey: "a",
+              now: "2026-01-01T00:00:01.000Z",
+            },
+          },
+        ],
+      },
+      "user",
+    );
+
+    expect(result.results.map((item) => item.resourceId)).toEqual(["s1", "s2", "s3"]);
+    expect(result.currentState.records.map((record) => record.stampId)).toEqual(["s1", "s2", "s3"]);
   });
 
   it("normalizes string and object auth inputs like a trusted context", async () => {
@@ -263,18 +318,19 @@ describe("StampRallyServer", () => {
       { authenticatedUserId: "user" },
     );
     expect(result.results.map((item) => item.status)).toEqual([
-      "REJECTED_PERMANENT",
       "ACCEPTED",
+      "REJECTED_PERMANENT",
       "REJECTED_PERMANENT",
     ]);
     expect(result.results[0]).toMatchObject({
-      resourceId: "s1",
-      errorCode: "INVALID_PROOF",
+      resourceId: "s2",
+      action: "CHECK_IN",
     });
-    expect(result.results[2]).toMatchObject({
+    expect(result.results[1]).toMatchObject({
       resourceId: "s3",
-      errorCode: "REJECTED_PREREQUISITE_FAILED",
+      errorCode: "PREREQUISITES_NOT_MET",
     });
+    expect(result.results[2]).toMatchObject({ resourceId: "s1", errorCode: "INVALID_PROOF" });
     expect(result.currentState.records.map((record) => record.stampId)).toEqual(["s2"]);
     expect(result.syncTimestamp).toBeTypeOf("number");
   });

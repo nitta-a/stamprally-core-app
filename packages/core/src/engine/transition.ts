@@ -12,6 +12,21 @@ import type {
 import { evaluateConditionDetailed } from "./evaluate.js";
 import { createUniqueClaimTicketNumber } from "./rewards.js";
 
+export interface DeterministicallySortableOperation {
+  readonly operationId: string;
+  readonly timestamp: number;
+}
+
+/** Sorts operations independently of queue insertion order or network arrival order. */
+export function sortOperationsDeterministically<T extends DeterministicallySortableOperation>(
+  operations: ReadonlyArray<T>,
+): T[] {
+  return [...operations].sort((left, right) => {
+    if (left.timestamp !== right.timestamp) return left.timestamp - right.timestamp;
+    return left.operationId.localeCompare(right.operationId);
+  });
+}
+
 export type RewardConsumeError =
   | {
       readonly code: "NOT_AVAILABLE" | "ALREADY_CONSUMED" | "OUT_OF_STOCK" | "REWARD_NOT_FOUND";

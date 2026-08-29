@@ -1,4 +1,4 @@
-# @stamprally/server v0.21.0
+# @stamprally/server v0.22.0
 
 Web Standard `Request` / `Response` handlers for server-authoritative check-ins and reward claims.
 

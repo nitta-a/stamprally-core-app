@@ -423,8 +423,8 @@ export function RallyViewer<TLocale extends string = string>({
     isSyncing: client?.syncState === "syncing",
     pendingCount: client?.pendingCount ?? 0,
     rejectedHistory: client?.rejectedHistory ?? [],
-    storageCapability: client?.storageCapability ?? "custom",
-    isStoragePersistent: client?.isStoragePersistent ?? true,
+    storageCapability: client?.storageCapability ?? "disabled",
+    isStoragePersistent: client?.isStoragePersistent ?? false,
   }));
   useEffect(() => {
     if (client === undefined) return;

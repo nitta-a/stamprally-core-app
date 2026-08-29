@@ -1,8 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { indexedDB } from "fake-indexeddb";
+import { describe, expect, it, vi } from "vitest";
 import {
   getLegacyQueueCapability,
   InMemoryOfflineQueueStorage,
   OfflineQueue,
+  StampRallyClient,
   sanitizeAdminConfig,
   validatePublicConfigSafety,
 } from "../src/index.js";
@@ -47,15 +49,58 @@ describe("v0.11 public configuration contract", () => {
 });
 
 describe("OfflineQueue", () => {
-  it("exposes object capabilities and legacy persistence access", async () => {
+  it("reports disabled when the client has no offline queue", () => {
+    const config = {
+      id: "rally",
+      version: "1",
+      title: "Rally",
+      spots: [],
+      rewards: [],
+    } as const;
+    const notConfigured = new StampRallyClient(config);
+    const disabled = new StampRallyClient(config, { offlineQueue: false });
+
+    expect(notConfigured.queueCapability).toBe("disabled");
+    expect(notConfigured.queueCapabilities).toEqual({
+      storageType: "none",
+      isPersistent: false,
+      multiTabSync: "disabled_unsafe_environment",
+    });
+    expect(disabled.queueCapability === "indexeddb").toBe(false);
+    expect(disabled.queueCapability).toBe("disabled");
+    expect(disabled.isStoragePersistent).toBe(false);
+  });
+
+  it("keeps indexeddb string comparisons compatible", () => {
+    vi.stubGlobal("indexedDB", indexedDB);
+    try {
+      const config = {
+        id: "rally",
+        version: "1",
+        title: "Rally",
+        spots: [],
+        rewards: [],
+      } as const;
+      const client = new StampRallyClient(config, {
+        offlineQueue: new OfflineQueue({ key: "queue" }),
+      });
+
+      expect(client.queueCapability === "indexeddb").toBe(true);
+      expect(client.queueCapabilities.storageType).toBe("indexeddb");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("exposes a legacy storage string and detailed capabilities separately", async () => {
     const persistent = new OfflineQueue({
       storage: new InMemoryOfflineQueueStorage(),
       key: "queue",
     });
-    expect(persistent.queueCapability).toMatchObject({
-      mode: "persistent",
+    expect(persistent.queueCapability).toBe("custom");
+    expect(persistent.queueCapabilities).toMatchObject({
+      storageType: "custom",
       isPersistent: true,
-      legacy: "persistent",
     });
     expect(getLegacyQueueCapability(persistent.queueCapability)).toBe("persistent");
 
@@ -69,10 +114,10 @@ describe("OfflineQueue", () => {
       key: "queue",
     });
     await volatile.initialize();
-    expect(volatile.queueCapability).toMatchObject({
-      mode: "volatile_memory",
+    expect(volatile.queueCapability).toBe("memory");
+    expect(volatile.queueCapabilities).toMatchObject({
+      storageType: "memory",
       isPersistent: false,
-      legacy: "volatile",
     });
     expect(getLegacyQueueCapability(volatile.queueCapability)).toBe("volatile");
   });
@@ -120,7 +165,7 @@ describe("OfflineQueue", () => {
       now: "",
       state: { rallyId: "r", userId: "u", records: [], rewards: [], updatedAt: "" },
     });
-    expect(queue.queueCapability.multiTabSync).toBe("disabled_unsafe_environment");
+    expect(queue.queueCapabilities.multiTabSync).toBe("disabled_unsafe_environment");
     await queue.initialize();
     expect(warnings).toContain(
       "Web Locks is unavailable; automatic cross-tab synchronization is disabled. Sync must be triggered by the foreground tab.",

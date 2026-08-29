@@ -1,6 +1,6 @@
 import type { AdminRallyConfig, PublicRallyConfig, UserRallyState } from "../domain/index.js";
-import { reconcileRewardStates } from "../engine/transition.js";
-import type { OfflineOperation } from "./offlineQueue.js";
+import { reconcileRewardStates, sortOperationsDeterministically } from "../engine/transition.js";
+import { type OfflineOperation, offlineOperationId } from "./offlineQueue.js";
 import { cloneState } from "./storage.js";
 
 export type SyncOperationAction = "CHECK_IN" | "CLAIM_REWARD";
@@ -55,8 +55,12 @@ function isReplayable(operation: OfflineOperation): boolean {
 }
 
 function operationId(operation: OfflineOperation): string {
-  const identity = operation.request.userId ?? operation.request.anonymousSessionId ?? "anonymous";
-  return `${operation.kind}:${operation.request.rallyId}:${identity}:${operation.request.idempotencyKey}`;
+  return offlineOperationId(operation);
+}
+
+function operationTimestamp(operation: OfflineOperation): number {
+  const parsed = Date.parse(operation.request.now);
+  return Number.isFinite(parsed) ? parsed : Number.MAX_SAFE_INTEGER;
 }
 
 function applyInventoryDelta(
@@ -179,15 +183,22 @@ export function rebuildUserStateLog(
 ): RebuildUserStateResult {
   let state = cloneState(baseline);
   const rejectedOperationIds: string[] = [];
+  const sortedOperations = sortOperationsDeterministically(
+    operations.map((operation) => ({
+      operation,
+      operationId: offlineOperationId(operation),
+      timestamp: operationTimestamp(operation),
+    })),
+  ).map(({ operation }) => operation);
   const rejectedCheckIns = new Set(
-    operations
+    sortedOperations
       .filter(
         (operation) => operation.status === "REJECTED_PERMANENT" && operation.kind === "checkIn",
       )
       .map((operation) => (operation.kind === "checkIn" ? operation.request.spotId : undefined))
       .filter((spotId): spotId is string => spotId !== undefined),
   );
-  for (const operation of operations) {
+  for (const operation of sortedOperations) {
     if (operation.status === "REJECTED_PERMANENT") {
       if (operation.kind === "checkIn") rejectedCheckIns.add(operation.request.spotId);
       continue;

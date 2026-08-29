@@ -19,7 +19,13 @@ export { resolveRallyStateConflict } from "./sync.js";
 export type {
   ConsumeResult,
   ConsumeRewardParams,
+  DeterministicallySortableOperation,
   ProcessStampValue,
   RewardConsumeError,
 } from "./transition.js";
-export { consumeReward, processStamp, reconcileRewardStates } from "./transition.js";
+export {
+  consumeReward,
+  processStamp,
+  reconcileRewardStates,
+  sortOperationsDeterministically,
+} from "./transition.js";

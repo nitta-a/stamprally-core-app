@@ -4,6 +4,7 @@ import {
   consumeReward,
   evaluateConditionDetailed,
   reconcileRewardStates,
+  sortOperationsDeterministically,
   type UserRallyState,
   type Validator,
   type VerificationContext,
@@ -830,14 +831,13 @@ export class StampRallyServer {
     );
     const results: SyncOperationResult[] = [];
     const rejectedCheckIns = new Set<string>();
-    const operations = [...(request.operations ?? [])]
-      .map((operation, index) => ({ operation, index }))
-      .sort(
-        (left, right) =>
-          operationTimestamp(left.operation) - operationTimestamp(right.operation) ||
-          left.index - right.index,
-      )
-      .map(({ operation }) => operation);
+    const operations = sortOperationsDeterministically(
+      [...(request.operations ?? [])].map((operation) => ({
+        operation,
+        operationId: syncOperationId(operation, directRequest.userId),
+        timestamp: operationTimestamp(operation),
+      })),
+    ).map(({ operation }) => operation);
     for (const operation of operations) {
       try {
         const resourceId =
