@@ -1,12 +1,12 @@
 {
-  "name": "@stamprally/react",
+  "name": "@stamprally/mui",
   "version": "0.23.0",
-  "description": "React hooks for @stamprally/core.",
+  "description": "Material UI adapters for stamp rally viewers and editors.",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/nitta-a/stamprally-core-app.git",
-    "directory": "packages/react"
+    "url": "https://github.com/nitta-a/stamprally-core-app.git",
+    "directory": "packages/mui"
   },
   "bugs": {
     "url": "https://github.com/nitta-a/stamprally-core-app/issues"
@@ -40,18 +40,30 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@stamprally/core": "workspace:*"
+    "@stamprally/admin-ui": "workspace:*",
+    "@stamprally/core": "workspace:*",
+    "@stamprally/react": "workspace:*"
   },
   "peerDependencies": {
+    "@emotion/react": "^11.0.0",
+    "@emotion/styled": "^11.0.0",
+    "@mui/icons-material": "^5.0.0 || ^6.0.0",
+    "@mui/material": "^5.0.0 || ^6.0.0",
     "react": "^18.0.0 || ^19.0.0",
     "react-dom": "^18.0.0 || ^19.0.0"
   },
   "devDependencies": {
+    "@emotion/react": "^11.14.0",
+    "@emotion/styled": "^11.14.0",
+    "@mui/icons-material": "^6.4.12",
+    "@mui/material": "^6.4.12",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/react": "^16.3.2",
     "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.3",
     "jsdom": "^30.0.1",
     "react": "^19.2.8",
+    "react-dom": "^19.2.8",
     "tsup": "^8.5.1",
     "typescript": "^6.0.3",
     "vitest": "^4.1.11"

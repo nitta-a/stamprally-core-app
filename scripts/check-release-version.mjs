@@ -12,6 +12,7 @@ const packageFiles = [
   "packages/ui/package.json",
   "packages/admin-ui/package.json",
   "packages/server/package.json",
+  "packages/mui/package.json",
 ];
 
 let expectedVersion;

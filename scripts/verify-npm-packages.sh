@@ -14,6 +14,7 @@ package_install_args=(
   @stamprally/react@latest
   @stamprally/ui@latest
   @stamprally/admin-ui@latest
+  @stamprally/mui@latest
 )
 for attempt in {1..12}; do
   if npm install "${package_install_args[@]}"; then
@@ -28,7 +29,7 @@ for attempt in {1..12}; do
 done
 npm install --no-package-lock --save-dev typescript @types/node
 
-for package_name in core server react ui admin-ui; do
+for package_name in core server react ui admin-ui mui; do
   declaration_file="node_modules/@stamprally/${package_name}/dist/index.d.ts"
   if [[ ! -f "$declaration_file" ]]; then
     echo "Missing declaration file: $declaration_file" >&2
@@ -47,6 +48,7 @@ import { StampRallyServer } from "@stamprally/server";
 import { useStampRally } from "@stamprally/react";
 import { RallyViewer } from "@stamprally/ui";
 import { AdminRallyEditor } from "@stamprally/admin-ui";
+import { MuiRallyViewer } from "@stamprally/mui";
 
 console.log(
   "All packages imported successfully.",
@@ -55,6 +57,7 @@ console.log(
   useStampRally,
   RallyViewer,
   AdminRallyEditor,
+  MuiRallyViewer,
 );
 EOF
 

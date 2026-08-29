@@ -1,4 +1,4 @@
-# stamprally-core-app v0.22.0
+# stamprally-core-app v0.23.0
 
 A headless, storage-agnostic stamp rally engine with React, participant UI, authoring UI, and Web Standard server integration.
 
@@ -9,6 +9,7 @@ A headless, storage-agnostic stamp rally engine with React, participant UI, auth
 - `@stamprally/ui`: Accessible participant components including `RallyViewer` and `StampSheet`.
 - `@stamprally/admin-ui`: Authoring forms for rally settings, spots, rewards, conditions, localization, and JSON import.
 - `@stamprally/server`: Server-authoritative check-in and reward-claim handlers using Web Standard `Request`/`Response`.
+- `@stamprally/mui`: Material UI adapters for participant views and authoring forms.
 
 ## Requirements and commands
 
@@ -34,7 +35,7 @@ import { RallyViewer } from "@stamprally/ui";
 
 const adminConfig: AdminRallyConfig = {
   id: "city-tour",
-  version: "0.22.0",
+  version: "0.23.0",
   title: { ja: "街歩きラリー", en: "City Tour" },
   spots: [
     {

@@ -18,6 +18,7 @@ const packageNames = [
   "@stamprally/react",
   "@stamprally/ui",
   "@stamprally/admin-ui",
+  "@stamprally/mui",
 ];
 const installTargets = packageNames.map((name) => `${name}@${version}`);
 const directory = await mkdtemp(join(tmpdir(), "stamprally-publish-verification-"));
