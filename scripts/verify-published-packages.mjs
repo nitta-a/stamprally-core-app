@@ -21,7 +21,7 @@ const packageNames = [
 ];
 const installTargets = packageNames.map((name) => `${name}@${version}`);
 const directory = await mkdtemp(join(tmpdir(), "stamprally-publish-verification-"));
-const maxAttempts = 8;
+const maxAttempts = 20;
 const initialDelayMs = 5_000;
 
 function isRegistryPropagationError(error) {
