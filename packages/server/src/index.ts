@@ -31,6 +31,15 @@ export interface ClaimRewardRequest {
   readonly staffId?: string;
   readonly now?: string | number;
 }
+export type SyncProgressOperation =
+  | { readonly kind: "checkIn"; readonly request: CheckInRequest }
+  | { readonly kind: "claimReward"; readonly request: ClaimRewardRequest };
+export interface SyncProgressRequest {
+  readonly rallyId: string;
+  readonly userId?: string;
+  readonly anonymousSessionId?: string;
+  readonly operations?: ReadonlyArray<SyncProgressOperation>;
+}
 export type CheckInResponse =
   | { readonly ok: true; readonly state: UserRallyState; readonly status?: "ACCEPTED" }
   | {

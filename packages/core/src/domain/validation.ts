@@ -501,7 +501,11 @@ export function validateRallyConfigRelations(
       ["stockKey", reward.stockKey],
       ["secondaryStockKey", reward.secondaryStockKey],
     ] as const) {
-      if (key !== undefined && key !== "__shared__" && inventory?.[key] === undefined)
+      if (
+        key !== undefined &&
+        ((key === "__shared__" && inventory?.sharedStock === undefined) ||
+          (key !== "__shared__" && inventory?.[key] === undefined))
+      )
         add(
           errors,
           `rewards[${index}].${field}`,
@@ -509,13 +513,6 @@ export function validateRallyConfigRelations(
           "missing_inventory_key",
         );
     }
-    if (reward.stockKey === "__shared__" && inventory?.sharedStock === undefined)
-      add(
-        errors,
-        `rewards[${index}].stockKey`,
-        "sharedStock is not defined.",
-        "missing_inventory_key",
-      );
   });
 
   const visiting = new Set<string>();

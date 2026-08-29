@@ -15,6 +15,7 @@ import type {
   ClaimRewardRequest,
   ServerOptions,
   SyncOperationStatus,
+  SyncProgressRequest,
 } from "./index.js";
 import type { ServerPersistenceAdapter } from "./persistence.js";
 import {
@@ -346,6 +347,7 @@ export class StampRallyServer {
         state: await this.syncProgress(
           {
             rallyId: body.data.rallyId,
+            ...(body.data.operations === undefined ? {} : { operations: body.data.operations }),
             ...(sessionId === null ? {} : { anonymousSessionId: sessionId }),
           },
           authContext,
@@ -749,15 +751,15 @@ export class StampRallyServer {
     return this.#attachInventory(state);
   }
   async syncProgress(
-    request: {
-      readonly rallyId: string;
-      readonly userId?: string;
-      readonly anonymousSessionId?: string;
-    },
+    request: SyncProgressRequest,
     authContext: TrustedAuthContext,
   ): Promise<UserRallyState> {
     const directRequest = withDirectIdentity(request, authContext);
     assertValidSyncParams(directRequest, this.#config);
+    for (const operation of request.operations ?? []) {
+      if (operation.kind === "checkIn") await this.checkIn(operation.request, authContext);
+      else await this.claimReward(operation.request, authContext);
+    }
     return this.sync(directRequest.rallyId, authContext);
   }
   async #attachInventory(state: UserRallyState): Promise<UserRallyState> {

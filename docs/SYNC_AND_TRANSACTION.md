@@ -36,12 +36,10 @@ independent network writes.
 
 ## Offline conflict policy
 
-`OfflineQueue` supports `server_wins` and `merge`. Normal client synchronization is
-server-authoritative: the server snapshot is the base and locally optimistic values
-are never merged into it. Merge is available only for explicit conflict responses.
-Merge keeps the server state as
-the base, adds locally acquired stamps that are absent on the server, preserves
-server reward values, and gives a consumed reward priority if either side consumed it.
+`OfflineQueue` uses `authoritative_replay` as its only conflict policy. The server
+snapshot is the immutable baseline, and the durable operation log is replayed on
+top of it. Rejected operations are skipped while independent pending operations
+remain optimistic.
 
 ```mermaid
 sequenceDiagram
@@ -59,7 +57,7 @@ sequenceDiagram
     Q->>Q: discard operation and emit error event
   else conflict
     S-->>Q: local state + server state
-    Q->>Q: apply merge or server_wins
+    Q->>Q: replay pending operations authoritatively
     Q->>D: save resolved state
   end
 ```
@@ -68,7 +66,7 @@ Each replay response is classified as `ACCEPTED`, `REJECTED_PERMANENT`, or
 `RETRYABLE_ERROR`. Accepted and permanent responses are removed after the response
 is durably handled; permanent reasons are emitted as client error events.
 Transport or explicitly retryable failures remain queued for `retrySync`.
-`useStampRally` observes the client state and error events, so accepted and merged
+`useStampRally` observes the client state and error events, so accepted and replayed
 results are visible immediately.
 
 The queue marks every persisted operation `PENDING`, `IN_FLIGHT`, `ACCEPTED`, or

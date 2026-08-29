@@ -60,7 +60,6 @@ pass it to `StampRallyClient`, and retry after connectivity returns:
 ```ts
 const offlineQueue = new OfflineQueue({
   key: "rally:offline",
-  conflictPolicy: "server_wins",
 });
 const client = new StampRallyClient(publicConfig, { syncAdapter, offlineQueue });
 await client.retrySync();
@@ -68,8 +67,8 @@ console.log(client.syncState, client.pendingCount);
 ```
 
 Failed check-ins and claims are retained by idempotency key and replayed in
-order. Applications that need custom conflict presentation can provide
-`onSyncConflict` and select `server_wins` or `merge`.
+order on top of the authoritative server snapshot. Rejected prerequisite
+operations also invalidate dependent queued check-ins.
 
 ## Server persistence
 

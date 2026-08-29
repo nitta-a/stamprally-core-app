@@ -838,11 +838,12 @@ export class OfflineQueue {
     );
     if (spot === undefined) return false;
     const failedSpots = new Set(
-      this.#rejectedHistory
-        .filter((entry) => entry.operation.kind === "checkIn")
-        .map((entry) =>
-          entry.operation.kind === "checkIn" ? entry.operation.request.spotId : undefined,
-        )
+      [
+        ...this.#rejectedHistory.map((entry) => entry.operation),
+        ...this.#operations.filter((candidate) => candidate.status === "REJECTED_PERMANENT"),
+      ]
+        .filter((candidate) => candidate.kind === "checkIn")
+        .map((candidate) => (candidate.kind === "checkIn" ? candidate.request.spotId : undefined))
         .filter((spotId): spotId is string => spotId !== undefined),
     );
     if (!spot.prerequisites?.some((prerequisite) => failedSpots.has(prerequisite))) return false;

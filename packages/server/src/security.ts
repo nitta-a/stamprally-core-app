@@ -1,5 +1,5 @@
 import type { AdminRallyConfig } from "@stamprally/core";
-import type { CheckInRequest, ClaimRewardRequest } from "./index.js";
+import type { CheckInRequest, ClaimRewardRequest, SyncProgressRequest } from "./index.js";
 
 export interface RequestValidationError {
   readonly path: string;
@@ -274,6 +274,7 @@ export function validateSyncRequest(value: unknown): RequestValidationResult<{
   readonly rallyId: string;
   readonly userId?: string;
   readonly anonymousSessionId?: string;
+  readonly operations?: SyncProgressRequest["operations"];
 }> {
   const required = requiredErrors(value, ["rallyId"]);
   if (required.length > 0) return errors(...required);
@@ -281,12 +282,50 @@ export function validateSyncRequest(value: unknown): RequestValidationResult<{
     return errors({ path: "$", message: "Expected an object.", code: "INVALID_TYPE" });
   if (value.userId !== undefined && !nonEmpty(value.userId))
     return errors({ path: "userId", message: "userId must be non-empty.", code: "INVALID_TYPE" });
+  if (value.operations !== undefined) {
+    if (!Array.isArray(value.operations))
+      return errors({
+        path: "operations",
+        message: "operations must be an array.",
+        code: "INVALID_TYPE",
+      });
+    const operationErrors: RequestValidationError[] = [];
+    value.operations.forEach((operation, index) => {
+      const path = `operations[${index}]`;
+      if (!record(operation)) {
+        operationErrors.push({
+          path,
+          message: "Expected an operation object.",
+          code: "INVALID_TYPE",
+        });
+        return;
+      }
+      if (operation.kind !== "checkIn" && operation.kind !== "claimReward") {
+        operationErrors.push({
+          path: `${path}.kind`,
+          message: "Unknown sync operation.",
+          code: "INVALID_ENUM",
+        });
+        return;
+      }
+      const result =
+        operation.kind === "checkIn"
+          ? validateCheckInRequest(operation.request)
+          : validateClaimRewardRequest(operation.request);
+      if (!result.success)
+        operationErrors.push(
+          ...result.errors.map((error) => ({ ...error, path: `${path}.request.${error.path}` })),
+        );
+    });
+    if (operationErrors.length > 0) return errors(...operationErrors);
+  }
   return {
     success: true,
     data: value as {
       readonly rallyId: string;
       readonly userId?: string;
       readonly anonymousSessionId?: string;
+      readonly operations?: SyncProgressRequest["operations"];
     },
   };
 }

@@ -53,25 +53,33 @@ function applyInventoryDelta(
     if (before !== undefined && after !== undefined)
       rewardRemaining[key] = Math.max(0, (currentRewards[key] ?? before) + after - before);
   }
-  return {
-    ...state,
-    inventory: {
-      ...(currentInventory.sharedRemaining === undefined || sharedDelta === undefined
+  const nextInventory: {
+    readonly sharedRemaining?: number;
+    readonly rewardRemaining?: Readonly<Record<string, number>>;
+  } = {
+    ...(currentInventory.sharedRemaining === undefined || sharedDelta === undefined
+      ? optimisticInventory.sharedRemaining === undefined || sharedDelta === undefined
         ? {}
-        : { sharedRemaining: Math.max(0, currentInventory.sharedRemaining + sharedDelta) }),
-      ...(Object.keys(rewardRemaining).length === 0 ? {} : { rewardRemaining }),
-    },
+        : { sharedRemaining: Math.max(0, optimisticInventory.sharedRemaining) }
+      : { sharedRemaining: Math.max(0, currentInventory.sharedRemaining + sharedDelta) }),
+    ...(Object.keys(rewardRemaining).length === 0 ? {} : { rewardRemaining }),
   };
+  return { ...state, inventory: nextInventory };
 }
 
 function applyOperation(
   state: UserRallyState,
   operation: OfflineOperation,
   config: AdminRallyConfig | PublicRallyConfig | undefined,
+  rejectedCheckIns: ReadonlySet<string>,
 ): { readonly state: UserRallyState; readonly prerequisiteFailed: boolean } {
   if (operation.kind === "checkIn") {
     const spot = config?.spots.find((candidate) => candidate.id === operation.request.spotId);
-    if (spot?.prerequisites?.some((id) => !state.records.some((record) => record.stampId === id)))
+    if (
+      spot?.prerequisites?.some(
+        (id) => rejectedCheckIns.has(id) || !state.records.some((record) => record.stampId === id),
+      )
+    )
       return { state, prerequisiteFailed: true };
     if (state.records.some((record) => record.stampId === operation.request.spotId))
       return { state, prerequisiteFailed: false };
@@ -141,11 +149,24 @@ export function rebuildUserStateLog(
 ): RebuildUserStateResult {
   let state = cloneState(baseline);
   const rejectedOperationIds: string[] = [];
+  const rejectedCheckIns = new Set(
+    operations
+      .filter(
+        (operation) => operation.status === "REJECTED_PERMANENT" && operation.kind === "checkIn",
+      )
+      .map((operation) => (operation.kind === "checkIn" ? operation.request.spotId : undefined))
+      .filter((spotId): spotId is string => spotId !== undefined),
+  );
   for (const operation of operations) {
+    if (operation.status === "REJECTED_PERMANENT") {
+      if (operation.kind === "checkIn") rejectedCheckIns.add(operation.request.spotId);
+      continue;
+    }
     if (!isReplayable(operation)) continue;
-    const replay = applyOperation(state, operation, config);
+    const replay = applyOperation(state, operation, config, rejectedCheckIns);
     if (replay.prerequisiteFailed) {
       rejectedOperationIds.push(operationId(operation));
+      if (operation.kind === "checkIn") rejectedCheckIns.add(operation.request.spotId);
       continue;
     }
     state = replay.state;

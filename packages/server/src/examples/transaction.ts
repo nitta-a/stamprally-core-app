@@ -69,9 +69,13 @@ export async function executeClaimRewardTransaction<Tx>(
   params: ClaimRewardTransactionParams,
   mutation: (current: ClaimRewardMutationContext) => ClaimRewardTransactionMutation,
 ): Promise<{ readonly success: boolean; readonly error?: string }> {
+  if (params.secondaryStockKey !== undefined && store.writeSecondaryStock === undefined)
+    return { success: false, error: "SECONDARY_STOCK_UNSUPPORTED" };
   try {
     return await database.transaction(async (transaction) => {
       const current = await store.readContext(transaction, params);
+      if (params.secondaryStockKey !== undefined && current.secondaryStock === undefined)
+        return { success: false, error: "SECONDARY_STOCK_UNSUPPORTED" };
       const secondaryStock = current.secondaryStock ?? null;
       const rewardStock = params.stockKey === "__shared__" ? secondaryStock : current.stock;
       const next = mutation({

@@ -15,6 +15,7 @@ import type {
   OfflineOperationError,
   OfflineQueue,
   OfflineQueueCapability,
+  OfflineQueueCapabilityWarning,
   OfflineStorageCapability,
   OfflineSyncResultEvent,
   RejectedOperationHistoryEntry,
@@ -71,6 +72,7 @@ export type ClientEvent =
   | { readonly type: "rewardClaimed"; readonly result: ClaimResult }
   | { readonly type: "sync"; readonly state: UserRallyState }
   | { readonly type: "syncLifecycle"; readonly event: SyncLifecycleEvent }
+  | { readonly type: "storageCapabilityWarning"; readonly warning: OfflineQueueCapabilityWarning }
   | { readonly type: "error"; readonly error: ClientError | OfflineOperationError };
 export type ClientListener = (state: UserRallyState) => void;
 export type ClientEventListener = (event: ClientEvent) => void;
@@ -182,6 +184,39 @@ function emptyState(config: PublicRallyConfig, userId: string | null, now: strin
     updatedAt: now,
   };
 }
+function applyOptimisticRewardClaim(
+  state: UserRallyState,
+  rewardId: string,
+  reward: RewardState,
+  now: string,
+): UserRallyState {
+  if (reward.claimTicketNumber === undefined || state.inventory === undefined)
+    return {
+      ...state,
+      rewards: state.rewards.map((item) => (item.rewardId === rewardId ? reward : item)),
+      updatedAt: now,
+    };
+  const currentInventory = state.inventory;
+  const currentRewardRemaining = currentInventory.rewardRemaining?.[rewardId];
+  return {
+    ...state,
+    rewards: state.rewards.map((item) => (item.rewardId === rewardId ? reward : item)),
+    updatedAt: now,
+    inventory: {
+      ...(currentInventory.sharedRemaining === undefined
+        ? {}
+        : { sharedRemaining: Math.max(0, currentInventory.sharedRemaining - 1) }),
+      ...(currentInventory.rewardRemaining === undefined || currentRewardRemaining === undefined
+        ? {}
+        : {
+            rewardRemaining: {
+              ...currentInventory.rewardRemaining,
+              [rewardId]: Math.max(0, currentRewardRemaining - 1),
+            },
+          }),
+    },
+  };
+}
 function errorMessage(
   error: ClientError | OfflineOperationError | undefined,
   fallback: string,
@@ -215,6 +250,9 @@ export class StampRallyClient {
     this.#offlineQueue = this.#options.offlineQueue;
     this.#offlineQueue?.setReplayConfig(config);
     this.#offlineQueue?.setSyncResultListener((event) => this.#handleOfflineSyncResult(event));
+    this.#offlineQueue?.setCapabilityWarningListener((warning) =>
+      this.#emitEvent({ type: "storageCapabilityWarning", warning }),
+    );
     this.#offlineQueue?.setChangeListener(() => {
       this.#syncRevision += 1;
       if (this.#state !== null) this.#emit(this.#state);
@@ -466,23 +504,13 @@ export class StampRallyClient {
           return result.ok ? this.#commitClaim(result) : this.#fail(result.error);
         } catch (error) {
           if (this.#offlineQueue === undefined) throw error;
-          const next = {
-            ...current,
-            rewards: current.rewards.map((item) =>
-              item.rewardId === rewardId ? local.value : item,
-            ),
-            updatedAt: now,
-          };
+          const next = applyOptimisticRewardClaim(current, rewardId, local.value, now);
           await this.#offlineQueue.enqueueClaimReward(request, next);
           await this.#storage.save(next);
           return this.#commitClaim({ ok: true, value: { state: next, reward: local.value } });
         }
       }
-      const next = {
-        ...current,
-        rewards: current.rewards.map((item) => (item.rewardId === rewardId ? local.value : item)),
-        updatedAt: now,
-      };
+      const next = applyOptimisticRewardClaim(current, rewardId, local.value, now);
       await this.#storage.save(next);
       return this.#commitClaim({ ok: true, value: { state: next, reward: local.value } });
     });

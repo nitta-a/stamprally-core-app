@@ -1,6 +1,6 @@
 {
   "name": "stamprally-core-app",
-  "version": "0.18.0",
+  "version": "0.19.0",
   "private": true,
   "license": "MIT",
   "packageManager": "pnpm@11.19.0",

@@ -64,6 +64,33 @@ describe("StampRallyServer", () => {
     expect(await persistence.getUserState("rally", "attacker")).toBeNull();
   });
 
+  it("applies the trusted identity to every operation in a sync batch", async () => {
+    const persistence = new InMemoryServerPersistenceAdapter();
+    const server = new StampRallyServer(config, persistence);
+    const result = await server.syncProgress(
+      {
+        rallyId: "rally",
+        userId: "attacker",
+        operations: [
+          {
+            kind: "checkIn",
+            request: {
+              rallyId: "rally",
+              userId: "attacker",
+              spotId: "s1",
+              context: { type: "passcode", code: "OPEN" },
+              idempotencyKey: "batch-check-in",
+            },
+          },
+        ],
+      },
+      { authenticatedUserId: "trusted-user" },
+    );
+    expect(result.userId).toBe("trusted-user");
+    expect(result.records).toHaveLength(1);
+    expect(await persistence.getUserState("rally", "attacker")).toBeNull();
+  });
+
   it("throws when a configured secondary stock key is unsupported", async () => {
     class UnsupportedSecondaryPersistence extends InMemoryServerPersistenceAdapter {
       override readonly supportsSecondaryStock = false;
