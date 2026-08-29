@@ -1,5 +1,5 @@
 import { type AdminRallyConfig, toPublicConfig, type UserRallyState } from "@stamprally/core";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   InMemoryServerPersistenceAdapter,
   runPersistenceAdapterComplianceTests,
@@ -89,6 +89,127 @@ describe("StampRallyServer", () => {
     expect(result.currentState.userId).toBe("trusted-user");
     expect(result.currentState.records).toHaveLength(1);
     expect(await persistence.getUserState("rally", "attacker")).toBeNull();
+  });
+
+  it("contains an unexpected operation exception and continues the batch", async () => {
+    const batchConfig = {
+      ...config,
+      spots: [
+        { id: "s1", orderIndex: 0, name: "Broken", conditions: [] },
+        { id: "s2", orderIndex: 1, name: "Healthy", conditions: [] },
+      ],
+    } satisfies AdminRallyConfig;
+    const persistence = new InMemoryServerPersistenceAdapter();
+    const persistCheckIn = persistence.executeCheckInTransaction.bind(persistence);
+    vi.spyOn(persistence, "executeCheckInTransaction").mockImplementation(
+      async (params, mutation) => {
+        if (params.spotId === "s1") throw new Error("database connection lost");
+        return persistCheckIn(params, mutation);
+      },
+    );
+    const server = new StampRallyServer(batchConfig, persistence);
+
+    const result = await server.syncProgress(
+      {
+        rallyId: "rally",
+        operations: [
+          {
+            kind: "checkIn",
+            request: {
+              rallyId: "rally",
+              spotId: "s1",
+              context: { type: "passcode", code: "ANY" },
+              idempotencyKey: "throws",
+            },
+          },
+          {
+            kind: "checkIn",
+            request: {
+              rallyId: "rally",
+              spotId: "s2",
+              context: { type: "passcode", code: "ANY" },
+              idempotencyKey: "succeeds",
+            },
+          },
+        ],
+      },
+      "user",
+    );
+
+    expect(result.results).toEqual([
+      expect.objectContaining({
+        operationId: "checkIn:rally:user:throws",
+        status: "FAILED_RETRYABLE",
+        resourceId: "s1",
+        error: "database connection lost",
+      }),
+      expect.objectContaining({
+        operationId: "checkIn:rally:user:succeeds",
+        status: "ACCEPTED",
+        resourceId: "s2",
+      }),
+    ]);
+    expect(result.currentState.records.map((record) => record.stampId)).toEqual(["s2"]);
+  });
+
+  it("contains an invalid operation and continues the batch", async () => {
+    const batchConfig = {
+      ...config,
+      spots: [
+        { id: "s1", orderIndex: 0, name: "Invalid", conditions: [] },
+        { id: "s2", orderIndex: 1, name: "Healthy", conditions: [] },
+      ],
+    } satisfies AdminRallyConfig;
+    const server = new StampRallyServer(batchConfig, new InMemoryServerPersistenceAdapter());
+    const result = await server.syncProgress(
+      {
+        rallyId: "rally",
+        operations: [
+          {
+            kind: "checkIn",
+            request: {
+              rallyId: "rally",
+              spotId: "s1",
+              context: undefined as never,
+              idempotencyKey: "invalid",
+            },
+          },
+          {
+            kind: "checkIn",
+            request: {
+              rallyId: "rally",
+              spotId: "s2",
+              context: { type: "passcode", code: "ANY" },
+              idempotencyKey: "valid",
+            },
+          },
+        ],
+      },
+      "user",
+    );
+
+    expect(result.results.map((item) => item.status)).toEqual(["FAILED_RETRYABLE", "ACCEPTED"]);
+    expect(result.results[0]).toMatchObject({
+      resourceId: "s1",
+      error: "Request validation failed.",
+    });
+    expect(result.currentState.records.map((record) => record.stampId)).toEqual(["s2"]);
+  });
+
+  it("normalizes string and object auth inputs like a trusted context", async () => {
+    const stringServer = new StampRallyServer(config, new InMemoryServerPersistenceAdapter());
+    const objectServer = new StampRallyServer(config, new InMemoryServerPersistenceAdapter());
+    const request = {
+      rallyId: "rally",
+      spotId: "s1",
+      context: { type: "passcode" as const, code: "OPEN" },
+      idempotencyKey: "auth-form",
+    };
+    const stringResult = await stringServer.checkIn(request, "same-user");
+    const objectResult = await objectServer.checkIn(request, { userId: "same-user" });
+
+    expect(stringResult).toMatchObject({ ok: true, state: { userId: "same-user" } });
+    expect(objectResult).toMatchObject({ ok: true, state: { userId: "same-user" } });
   });
 
   it("returns per-operation results and continues independent operations after rejection", async () => {

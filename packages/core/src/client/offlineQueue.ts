@@ -22,10 +22,35 @@ export type OfflineStorageCapability =
   | "custom"
   | "volatile_single_tab";
 export type MultiTabSyncCapability = "supported_web_locks" | "disabled_unsafe_environment";
-export interface OfflineQueueCapability {
-  readonly storage: OfflineStorageCapability;
+export type QueueCapabilityMode = "persistent" | "volatile_memory";
+export type LegacyQueueCapability = "persistent" | "volatile";
+
+export interface QueueCapability {
+  /** 永続性の状態。永続ストレージの種類は `storage` で確認できます。 */
+  readonly mode: QueueCapabilityMode;
+  /** 複数タブ排他同期の対応レベル。 */
   readonly multiTabSync: MultiTabSyncCapability;
+  /**
+   * @deprecated `mode === "persistent"` を使用してください。永続ストレージを利用できるかを
+   * 示す移行用の互換フラグです。
+   */
+  readonly isPersistent: boolean;
+  /**
+   * @deprecated `mode` と `multiTabSync` を使用してください。`persistent` は
+   * `mode === "persistent"`、`volatile` は `mode === "volatile_memory"` に対応します。
+   */
+  readonly legacy: LegacyQueueCapability;
+  /** 実際に選択されたストレージの種類。 */
+  readonly storage: OfflineStorageCapability;
 }
+/** @deprecated Use QueueCapability. */
+export type OfflineQueueCapability = QueueCapability;
+
+/** @deprecated Use `capability.mode` and `capability.multiTabSync`. */
+export function getLegacyQueueCapability(capability: QueueCapability): LegacyQueueCapability {
+  return capability.isPersistent ? "persistent" : "volatile";
+}
+
 type OfflineQueueStorageCapability = Exclude<OfflineStorageCapability, "volatile_single_tab">;
 
 export type OfflineOperation =
@@ -466,10 +491,14 @@ export class OfflineQueue {
   get pendingCount(): number {
     return this.#operations.length;
   }
-  get queueCapability(): OfflineQueueCapability {
+  get queueCapability(): QueueCapability {
+    const isPersistent = this.#queueCapability !== "memory";
     return {
       storage: this.#queueCapability,
+      mode: isPersistent ? "persistent" : "volatile_memory",
       multiTabSync: this.#hasWebLocks() ? "supported_web_locks" : "disabled_unsafe_environment",
+      isPersistent,
+      legacy: isPersistent ? "persistent" : "volatile",
     };
   }
   get storageCapability(): OfflineStorageCapability {

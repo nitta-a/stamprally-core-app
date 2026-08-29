@@ -94,4 +94,9 @@ export {
 } from "./security.js";
 export { StampRallyServer } from "./server.js";
 export { runPersistenceAdapterComplianceTests } from "./testing/index.js";
-export type { AuthenticationContext, TrustedAuthContext } from "./types.js";
+export {
+  type AuthenticationContext,
+  type AuthInput,
+  normalizeAuthContext,
+  type TrustedAuthContext,
+} from "./types.js";

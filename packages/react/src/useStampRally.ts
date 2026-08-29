@@ -3,8 +3,8 @@ import type {
   CheckInResult,
   ClaimOptions,
   ClaimResult,
-  OfflineQueueCapability,
   OfflineStorageCapability,
+  QueueCapability,
   RejectedOperationHistoryEntry,
   StampRallyClient,
   SyncEventListener,
@@ -41,7 +41,7 @@ export interface UseStampRallyReturn {
   readonly syncStatus: SyncState;
   readonly isSyncing: boolean;
   readonly pendingCount: number;
-  readonly queueCapability: OfflineQueueCapability;
+  readonly queueCapability: QueueCapability;
   readonly storageCapability: OfflineStorageCapability;
   readonly isStoragePersistent: boolean;
   readonly rejectedHistory: ReadonlyArray<RejectedOperationHistoryEntry>;

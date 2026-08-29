@@ -1,4 +1,4 @@
-# stamprally-core-app v0.20.1
+# stamprally-core-app v0.21.0
 
 A headless, storage-agnostic stamp rally engine with React, participant UI, authoring UI, and Web Standard server integration.
 
@@ -34,7 +34,7 @@ import { RallyViewer } from "@stamprally/ui";
 
 const adminConfig: AdminRallyConfig = {
   id: "city-tour",
-  version: "0.20.1",
+  version: "0.21.0",
   title: { ja: "街歩きラリー", en: "City Tour" },
   spots: [
     {
@@ -92,10 +92,21 @@ app.all("/api/*", async (context) => {
 
 Implement `ServerPersistenceAdapter` with rallyId-scoped locks, reward stock, idempotency, user state, claim records, and audit logs. Production deployments should use a transactional database or Redis primitives with equivalent atomicity.
 
-For v0.15.0 offline clients, use the scoped `OfflineQueue` key and return explicit
+For offline clients, use the scoped `OfflineQueue` key and return explicit
 operation outcomes (`ACCEPTED`, `REJECTED_PERMANENT`, or `RETRYABLE_ERROR`). The
 SQL transaction reference in `packages/server/src/examples/transaction.ts` shows
 the required all-or-nothing reward claim writes.
+
+Batch Sync returns one result per operation. Successful operations are applied,
+permanent rejections are removed from the queue, and unexpected operation
+exceptions are returned as `FAILED_RETRYABLE` so independent operations can
+continue. `queueCapability` exposes `mode`, `multiTabSync`, `isPersistent`, and
+`storage`; use the object properties in new code.
+
+Direct server APIs accept a verified `TrustedAuthContext`, `{ userId: string }`,
+or a string `userId` for simplified trusted calls. Production code should pass
+the context produced by authentication middleware; the context identity takes
+precedence over a request body's `userId`.
 
 ## Browser detectors
 

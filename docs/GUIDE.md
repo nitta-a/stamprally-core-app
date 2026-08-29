@@ -1,4 +1,4 @@
-# Stamp Rally v0.11.0 Guide
+# Stamp Rally v0.21.0 Guide
 
 ## Viewer
 
@@ -69,6 +69,24 @@ console.log(client.syncState, client.pendingCount);
 Failed check-ins and claims are retained by idempotency key and replayed in
 order on top of the authoritative server snapshot. Rejected prerequisite
 operations also invalidate dependent queued check-ins.
+
+`queueCapability` reports `mode` (`persistent` or `volatile_memory`),
+`isPersistent`, the selected `storage`, and `multiTabSync`. Web Locks is used
+for cross-tab exclusion only when supported; otherwise automatic cross-tab sync
+is disabled and the foreground tab must trigger sync explicitly.
+
+## Batch Sync and direct server APIs
+
+`syncProgress` returns a `results` entry for every operation. A permanent
+rejection or unexpected adapter/validation exception is isolated to that
+operation; independent operations continue. Unexpected exceptions are returned
+as `FAILED_RETRYABLE`, while the returned `currentState` contains only successful
+mutations.
+
+Direct server methods accept a verified `TrustedAuthContext`, `{ userId: string }`,
+or a string `userId` for simplified trusted calls. Use the verified context in
+production so claims and session information can cross the authentication
+boundary.
 
 ## Server persistence
 

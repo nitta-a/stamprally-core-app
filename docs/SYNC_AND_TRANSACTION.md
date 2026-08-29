@@ -1,6 +1,6 @@
 # Synchronization and reward transactions
 
-Version v0.15.0 makes check-in and reward persistence atomic. A `ServerPersistenceAdapter` must
+The v0.21.0 transaction contract makes check-in and reward persistence atomic. A `ServerPersistenceAdapter` must
 implement `executeClaimRewardTransaction`; there is no non-transactional fallback.
 The adapter commits stock, user state, claim count, audit log, and idempotency data
 as one unit and rolls all of them back if any write fails.

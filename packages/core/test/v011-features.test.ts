@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  getLegacyQueueCapability,
   InMemoryOfflineQueueStorage,
   OfflineQueue,
   sanitizeAdminConfig,
@@ -46,6 +47,36 @@ describe("v0.11 public configuration contract", () => {
 });
 
 describe("OfflineQueue", () => {
+  it("exposes object capabilities and legacy persistence access", async () => {
+    const persistent = new OfflineQueue({
+      storage: new InMemoryOfflineQueueStorage(),
+      key: "queue",
+    });
+    expect(persistent.queueCapability).toMatchObject({
+      mode: "persistent",
+      isPersistent: true,
+      legacy: "persistent",
+    });
+    expect(getLegacyQueueCapability(persistent.queueCapability)).toBe("persistent");
+
+    const volatile = new OfflineQueue({
+      storage: {
+        load: async () => {
+          throw new Error("storage unavailable");
+        },
+        save: async () => undefined,
+      },
+      key: "queue",
+    });
+    await volatile.initialize();
+    expect(volatile.queueCapability).toMatchObject({
+      mode: "volatile_memory",
+      isPersistent: false,
+      legacy: "volatile",
+    });
+    expect(getLegacyQueueCapability(volatile.queueCapability)).toBe("volatile");
+  });
+
   it("persists and drains operations in order", async () => {
     const storage = new InMemoryOfflineQueueStorage();
     const first = new OfflineQueue({ storage, key: "queue" });

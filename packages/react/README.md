@@ -1,4 +1,4 @@
-# @stamprally/react v0.20.1
+# @stamprally/react v0.21.0
 
 React integration for `@stamprally/core`. `useStampRally` subscribes to immutable client state and exposes check-in, reward-claim, synchronization, and user-switching operations.
 
@@ -9,7 +9,7 @@ import { useStampRally } from "@stamprally/react";
 
 const config: PublicRallyConfig = {
   id: "city-tour",
-  version: "0.20.1",
+  version: "0.21.0",
   title: "City Tour",
   spots: [{ id: "station", orderIndex: 0, name: "Station", conditions: [{ type: "passcode" }] }],
   rewards: [],
@@ -34,6 +34,11 @@ For a batch endpoint, configure the client's `sync` adapter to return the
 state, removes permanently rejected operations, and retains `FAILED_RETRYABLE`
 operations for retry. `syncState.storageCapability` and
 `syncState.rejectedHistory` can be passed to a status component.
+
+The hook exposes the client's `queueCapability` with `mode`, `multiTabSync`,
+`isPersistent`, and `storage`. Use `mode` and `multiTabSync` for new code;
+the deprecated `legacy` property and `getLegacyQueueCapability` helper support
+incremental migration from string-based persistence checks.
 
 ## License
 

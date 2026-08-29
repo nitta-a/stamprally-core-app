@@ -14,10 +14,10 @@ import { consumeReward, type RewardConsumeError, reconcileRewardStates } from ".
 import type {
   OfflineOperationError,
   OfflineQueue,
-  OfflineQueueCapability,
   OfflineQueueCapabilityWarning,
   OfflineStorageCapability,
   OfflineSyncResultEvent,
+  QueueCapability,
   RejectedOperationHistoryEntry,
   SyncState,
 } from "./offlineQueue.js";
@@ -296,11 +296,14 @@ export class StampRallyClient {
   getSyncRevision(): number {
     return this.#syncRevision;
   }
-  get queueCapability(): OfflineQueueCapability {
+  get queueCapability(): QueueCapability {
     return (
       this.#offlineQueue?.queueCapability ?? {
         storage: "custom",
+        mode: "persistent",
         multiTabSync: "disabled_unsafe_environment",
+        isPersistent: true,
+        legacy: "persistent",
       }
     );
   }

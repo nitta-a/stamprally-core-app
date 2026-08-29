@@ -30,7 +30,7 @@ import {
   validateClaimRewardRequest,
   validateSyncRequest,
 } from "./security.js";
-import type { TrustedAuthContext } from "./types.js";
+import { type AuthInput, normalizeAuthContext, type TrustedAuthContext } from "./types.js";
 
 type ErrorResponse = { readonly ok: false; readonly code: string; readonly message: string };
 type ClaimResponse =
@@ -255,10 +255,25 @@ function syncOperationResult(
   };
 }
 
+function syncOperationError(
+  operation: SyncProgressOperation,
+  userId: string,
+  error: unknown,
+): SyncOperationResult {
+  return {
+    operationId: syncOperationId(operation, userId),
+    status: "FAILED_RETRYABLE",
+    resourceId:
+      operation.kind === "checkIn" ? operation.request.spotId : operation.request.rewardId,
+    error: error instanceof Error ? error.message : "Unknown server error",
+  };
+}
+
 function withDirectIdentity<
   T extends { readonly userId?: string; readonly anonymousSessionId?: string },
->(request: T, authContext?: TrustedAuthContext): T & { readonly userId: string } {
-  if (authContext !== undefined) {
+>(request: T, authInput?: AuthInput): T & { readonly userId: string } {
+  if (authInput !== undefined) {
+    const authContext = normalizeAuthContext(authInput);
     if (authContext.authenticatedUserId.trim() === "")
       throw new RequestValidationException([
         {
@@ -411,11 +426,8 @@ export class StampRallyServer {
       throw error;
     }
   }
-  async checkIn(
-    request: CheckInRequest,
-    authContext?: TrustedAuthContext,
-  ): Promise<CheckInResponse> {
-    const directRequest = withDirectIdentity(request, authContext);
+  async checkIn(request: CheckInRequest, authInput?: AuthInput): Promise<CheckInResponse> {
+    const directRequest = withDirectIdentity(request, authInput);
     assertValidCheckInParams(directRequest, this.#config);
     const { userId } = directRequest;
     const key = `check-in:${request.rallyId}:${userId}:${request.idempotencyKey}`;
@@ -559,11 +571,8 @@ export class StampRallyServer {
       await this.#persistence.releaseLock(request.rallyId, lockKey);
     }
   }
-  async claimReward(
-    request: ClaimRewardRequest,
-    authContext?: TrustedAuthContext,
-  ): Promise<ClaimResponse> {
-    const directRequest = withDirectIdentity(request, authContext);
+  async claimReward(request: ClaimRewardRequest, authInput?: AuthInput): Promise<ClaimResponse> {
+    const directRequest = withDirectIdentity(request, authInput);
     assertValidClaimParams(directRequest, this.#config);
     const { userId } = directRequest;
     const key = `claim:${request.rallyId}:${userId}:${request.rewardId}:${request.idempotencyKey}`;
@@ -805,10 +814,20 @@ export class StampRallyServer {
   }
   async syncProgress(
     request: SyncProgressRequest,
-    authContext: TrustedAuthContext,
+    authInput: AuthInput,
   ): Promise<SyncProgressResponse> {
-    const directRequest = withDirectIdentity(request, authContext);
-    assertValidSyncParams(directRequest, this.#config);
+    const directRequest = withDirectIdentity(request, authInput);
+    const authContext = normalizeAuthContext(authInput);
+    assertValidSyncParams(
+      {
+        rallyId: directRequest.rallyId,
+        userId: directRequest.userId,
+        ...(directRequest.anonymousSessionId === undefined
+          ? {}
+          : { anonymousSessionId: directRequest.anonymousSessionId }),
+      },
+      this.#config,
+    );
     const results: SyncOperationResult[] = [];
     const rejectedCheckIns = new Set<string>();
     const operations = [...(request.operations ?? [])]
@@ -820,30 +839,34 @@ export class StampRallyServer {
       )
       .map(({ operation }) => operation);
     for (const operation of operations) {
-      const resourceId =
-        operation.kind === "checkIn" ? operation.request.spotId : operation.request.rewardId;
-      if (operation.kind === "checkIn") {
-        const spot = this.#config.spots.find((candidate) => candidate.id === resourceId);
-        if (spot?.prerequisites?.some((prerequisite) => rejectedCheckIns.has(prerequisite))) {
-          results.push({
-            operationId: syncOperationId(operation, directRequest.userId),
-            status: "REJECTED_PERMANENT",
-            resourceId,
-            errorCode: "REJECTED_PREREQUISITE_FAILED",
-            reason: "A prerequisite operation was rejected by the server.",
-          });
-          rejectedCheckIns.add(resourceId);
-          continue;
+      try {
+        const resourceId =
+          operation.kind === "checkIn" ? operation.request.spotId : operation.request.rewardId;
+        if (operation.kind === "checkIn") {
+          const spot = this.#config.spots.find((candidate) => candidate.id === resourceId);
+          if (spot?.prerequisites?.some((prerequisite) => rejectedCheckIns.has(prerequisite))) {
+            results.push({
+              operationId: syncOperationId(operation, directRequest.userId),
+              status: "REJECTED_PERMANENT",
+              resourceId,
+              errorCode: "REJECTED_PREREQUISITE_FAILED",
+              reason: "A prerequisite operation was rejected by the server.",
+            });
+            rejectedCheckIns.add(resourceId);
+            continue;
+          }
         }
+        const result =
+          operation.kind === "checkIn"
+            ? await this.checkIn(operation.request, authContext)
+            : await this.claimReward(operation.request, authContext);
+        const operationResult = syncOperationResult(operation, directRequest.userId, result);
+        results.push(operationResult);
+        if (operation.kind === "checkIn" && operationResult.status === "REJECTED_PERMANENT")
+          rejectedCheckIns.add(resourceId);
+      } catch (error) {
+        results.push(syncOperationError(operation, directRequest.userId, error));
       }
-      const result =
-        operation.kind === "checkIn"
-          ? await this.checkIn(operation.request, authContext)
-          : await this.claimReward(operation.request, authContext);
-      const operationResult = syncOperationResult(operation, directRequest.userId, result);
-      results.push(operationResult);
-      if (operation.kind === "checkIn" && operationResult.status === "REJECTED_PERMANENT")
-        rejectedCheckIns.add(resourceId);
     }
     const currentState = await this.sync(directRequest.rallyId, authContext);
     return {

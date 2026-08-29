@@ -1,4 +1,4 @@
-# @stamprally/server v0.20.1
+# @stamprally/server v0.21.0
 
 Web Standard `Request` / `Response` handlers for server-authoritative check-ins and reward claims.
 
@@ -33,9 +33,15 @@ timestamp, preserving FIFO order for equal timestamps, and returns
 `{ results, currentState, syncTimestamp }`. A permanently rejected
 operation does not stop unrelated operations; a later operation depending on that
 resource receives `REJECTED_PREREQUISITE_FAILED`. Retryable failures are returned
-as `FAILED_RETRYABLE` so the client can retain them for the next request.
+as `FAILED_RETRYABLE` so the client can retain them for the next request. The
+server catches unexpected exceptions at each operation boundary, returns the
+affected operation as `FAILED_RETRYABLE`, and continues independent operations.
 
-Direct server calls require a verified `TrustedAuthContext`:
+Direct `checkIn`, `claimReward`, and `syncProgress` calls accept a verified
+`TrustedAuthContext`, `{ userId: string }`, or a string `userId` for simplified
+trusted calls. The latter two forms are normalized to
+`{ authenticatedUserId: userId, isAnonymous: false }`; production integrations
+should pass `TrustedAuthContext` from authentication middleware:
 
 ```ts
 const progress = await server.syncProgress(
