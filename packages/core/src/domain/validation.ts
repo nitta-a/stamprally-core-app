@@ -91,6 +91,24 @@ function finiteNumber(
   }
 }
 
+function nonNegativeInteger(
+  value: RecordValue,
+  key: string,
+  path: string,
+  errors: ValidationError[],
+): void {
+  const item = value[key];
+  if (typeof item !== "number" || !Number.isFinite(item)) {
+    add(errors, `${path}.${key}`, "Expected a finite number.", "invalid_number");
+    return;
+  }
+  if (!Number.isInteger(item)) {
+    add(errors, `${path}.${key}`, "Expected a non-negative integer.", "invalid_integer");
+    return;
+  }
+  if (item < 0) add(errors, `${path}.${key}`, "Expected a non-negative integer.", "out_of_range");
+}
+
 function localizedText(value: unknown, path: string, errors: ValidationError[]): void {
   if (typeof value === "string") return;
   if (!isRecord(value)) {
@@ -298,9 +316,7 @@ function reward(value: unknown, path: string, errors: ValidationError[], isPubli
   finiteNumber(value, "requiredStampCount", path, errors, 0);
   for (const key of ["stockLimit", "userClaimLimit"]) {
     if (hasOwn(value, key) && value[key] !== undefined) {
-      finiteNumber(value, key, path, errors, 0);
-      if (typeof value[key] === "number" && !Number.isInteger(value[key]))
-        add(errors, `${path}.${key}`, "Expected an integer.", "invalid_integer");
+      nonNegativeInteger(value, key, path, errors);
     }
   }
   optionalString(value, "validUntil", path, errors);
@@ -347,8 +363,14 @@ function validate(value: unknown, isPublic: boolean): ReadonlyArray<ValidationEr
     });
   if (!isPublic) {
     optionalString(value, "staffPasscode", "$", errors);
-    if (hasOwn(value, "inventory") && value.inventory !== undefined && !isRecord(value.inventory))
-      add(errors, "$.inventory", "Expected an object.", "invalid_type");
+    if (hasOwn(value, "inventory") && value.inventory !== undefined) {
+      if (!isRecord(value.inventory))
+        add(errors, "$.inventory", "Expected an object.", "invalid_type");
+      else {
+        for (const [key, item] of Object.entries(value.inventory))
+          if (item !== undefined) nonNegativeInteger(value.inventory, key, "$.inventory", errors);
+      }
+    }
     if (
       hasOwn(value, "inventoryMode") &&
       value.inventoryMode !== undefined &&

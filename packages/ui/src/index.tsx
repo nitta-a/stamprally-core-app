@@ -17,6 +17,7 @@ import type {
   StampRallyClient,
   StampRallyProgress,
   StampRallyState,
+  SyncEventListener,
   UserRallyState,
 } from "@stamprally/core";
 import { DEFAULT_UI_DICTIONARY } from "./locales/index.js";
@@ -136,6 +137,7 @@ export interface RallyViewerProps<TLocale extends string = string>
   readonly customConditionRenderers?: Partial<
     Record<PublicCheckInCondition["type"], ConditionRenderer<TLocale>>
   >;
+  readonly onSyncEvent?: SyncEventListener;
 }
 
 const label = <TLocale extends string>(
@@ -392,6 +394,7 @@ export function RallyViewer<TLocale extends string = string>({
   styles = {},
   style,
   customConditionRenderers = {},
+  onSyncEvent,
   headerSlot,
   footerSlot,
   renderSpotCard,
@@ -411,6 +414,10 @@ export function RallyViewer<TLocale extends string = string>({
     void client.init().then(setState);
     return unsubscribe;
   }, [client]);
+  useEffect(() => {
+    if (client === undefined || onSyncEvent === undefined) return;
+    return client.subscribeSyncEvents(onSyncEvent);
+  }, [client, onSyncEvent]);
   if (config === undefined) throw new Error("RallyViewer requires config, client, or adapter.");
   const currentState = state ?? {
     rallyId: config.id,

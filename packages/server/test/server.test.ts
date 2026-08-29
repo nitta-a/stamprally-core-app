@@ -27,6 +27,37 @@ const config: AdminRallyConfig = {
   ],
 };
 describe("StampRallyServer", () => {
+  it("applies a trusted auth context over a caller-supplied userId", async () => {
+    const persistence = new InMemoryServerPersistenceAdapter();
+    const server = new StampRallyServer(config, persistence);
+    const result = await server.checkIn(
+      {
+        rallyId: "rally",
+        userId: "attacker",
+        spotId: "s1",
+        context: { type: "passcode", code: "OPEN" },
+        idempotencyKey: "trusted-context",
+      },
+      { authenticatedUserId: "trusted-user", sessionId: "session-1" },
+    );
+    expect(result.ok).toBe(true);
+    expect(result.ok && result.state.userId).toBe("trusted-user");
+    expect(await persistence.getUserState("rally", "attacker")).toBeNull();
+  });
+
+  it("rejects inventory claims when the adapter opts out of inventory storage", async () => {
+    class UnsupportedInventoryPersistence extends InMemoryServerPersistenceAdapter {
+      override readonly supportsRewardStock = false;
+    }
+    const persistence = new UnsupportedInventoryPersistence();
+    const server = new StampRallyServer(config, persistence);
+    const result = await server.claimReward(
+      { rallyId: "rally", userId: "alice", rewardId: "r1", idempotencyKey: "unsupported" },
+      { authenticatedUserId: "alice" },
+    );
+    expect(result).toMatchObject({ code: "INVENTORY_STORAGE_NOT_IMPLEMENTED" });
+  });
+
   it("validates direct API boundaries and exposes the secure anonymous default", async () => {
     const server = new StampRallyServer(config, new InMemoryServerPersistenceAdapter());
     await expect(

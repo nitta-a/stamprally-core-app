@@ -13,6 +13,8 @@ export type {
   ClientListener,
   ClientOptions,
   SyncAdapter,
+  SyncEventListener,
+  SyncLifecycleEvent,
 } from "./client.js";
 export { StampRallyClient } from "./client.js";
 export type {
@@ -25,6 +27,7 @@ export type {
   OfflineOperationResponse,
   OfflineOperationStatus,
   OfflineQueueCapability,
+  OfflineQueueChangeListener,
   OfflineQueueOptions,
   OfflineQueueStorage,
   OfflineResult,
@@ -43,6 +46,7 @@ export {
   InMemoryOfflineQueueStorage,
   OfflineQueue,
   offlineOperationId,
+  rollbackOptimisticOperation,
 } from "./offlineQueue.js";
 export type {
   IndexedDBAdapterOptions,

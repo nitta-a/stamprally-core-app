@@ -3,6 +3,7 @@ import type { AuditLog } from "../index.js";
 import type {
   CheckInTransactionMutation,
   CheckInTransactionParams,
+  ClaimRewardMutationContext,
   ClaimRewardTransactionMutation,
   ClaimRewardTransactionParams,
 } from "../persistence.js";
@@ -66,16 +67,21 @@ export async function executeClaimRewardTransaction<Tx>(
   database: SqlTransactionDatabase<Tx>,
   store: SqlClaimRewardStore<Tx>,
   params: ClaimRewardTransactionParams,
-  mutation: (current: {
-    readonly stock: number | null;
-    readonly claimCount: number;
-    readonly userState: UserRallyState;
-  }) => ClaimRewardTransactionMutation,
+  mutation: (current: ClaimRewardMutationContext) => ClaimRewardTransactionMutation,
 ): Promise<{ readonly success: boolean; readonly error?: string }> {
   try {
     return await database.transaction(async (transaction) => {
       const current = await store.readContext(transaction, params);
-      const next = mutation(current);
+      const secondaryStock = current.secondaryStock ?? null;
+      const rewardStock = params.stockKey === "__shared__" ? secondaryStock : current.stock;
+      const next = mutation({
+        ...current,
+        rewardStock,
+        sharedStock: params.stockKey === "__shared__" ? current.stock : null,
+        primaryStock: rewardStock,
+        secondaryStock,
+        stock: current.stock,
+      });
       if (next.error !== undefined) {
         await store.writeAudit(transaction, next.auditLog);
         if (params.idempotencyKey !== undefined && next.result !== undefined)
@@ -83,7 +89,7 @@ export async function executeClaimRewardTransaction<Tx>(
         return { success: false, error: next.error };
       }
       if (next.nextSecondaryStock !== undefined && store.writeSecondaryStock === undefined)
-        return { success: false, error: "INVENTORY_NOT_SUPPORTED" };
+        return { success: false, error: "INVENTORY_STORAGE_NOT_IMPLEMENTED" };
       if (next.nextStock !== null) await store.writeStock(transaction, params, next.nextStock);
       if (next.nextSecondaryStock !== undefined && store.writeSecondaryStock !== undefined) {
         if (next.nextSecondaryStock !== null)

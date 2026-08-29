@@ -10,14 +10,22 @@ import type {
   UserRallyState,
   Validator,
 } from "../domain/index.js";
-import { consumeReward, type RewardConsumeError, reconcileRewardStates } from "../engine/index.js";
+import {
+  type ConflictResolutionPolicy,
+  consumeReward,
+  type RewardConsumeError,
+  reconcileRewardStates,
+  resolveRallyStateConflict,
+} from "../engine/index.js";
 import type {
   OfflineOperationError,
   OfflineQueue,
   OfflineQueueCapability,
+  OfflineSyncResultEvent,
   RejectedOperationHistoryEntry,
   SyncState,
 } from "./offlineQueue.js";
+import { rollbackOptimisticOperation } from "./offlineQueue.js";
 import {
   cloneState,
   createAnonymousSessionId,
@@ -66,9 +74,35 @@ export type ClientEvent =
   | { readonly type: "checkIn"; readonly result: CheckInResult }
   | { readonly type: "rewardClaimed"; readonly result: ClaimResult }
   | { readonly type: "sync"; readonly state: UserRallyState }
+  | { readonly type: "syncLifecycle"; readonly event: SyncLifecycleEvent }
   | { readonly type: "error"; readonly error: ClientError | OfflineOperationError };
 export type ClientListener = (state: UserRallyState) => void;
 export type ClientEventListener = (event: ClientEvent) => void;
+export type SyncLifecycleEvent =
+  | { readonly type: "SYNC_STARTED" }
+  | {
+      readonly type: "OPERATION_ACCEPTED";
+      readonly operationId: string;
+      readonly resourceId: string;
+    }
+  | {
+      readonly type: "OPERATION_ROLLED_BACK";
+      readonly operationId: string;
+      readonly resourceId: string;
+      readonly reason: string;
+      readonly errorCode: string;
+    }
+  | {
+      readonly type: "OPERATION_RETRYABLE_ERROR";
+      readonly operationId: string;
+      readonly error: string;
+    }
+  | {
+      readonly type: "SYNC_COMPLETED";
+      readonly totalProcessed: number;
+      readonly failedCount: number;
+    };
+export type SyncEventListener = (event: SyncLifecycleEvent) => void;
 
 export interface CheckInRequest {
   readonly rallyId: string;
@@ -109,6 +143,9 @@ export interface ClientOptions {
   readonly userId?: string | null;
   readonly anonymousSessionId?: string;
   readonly offlineQueue?: OfflineQueue;
+  readonly conflictResolutionPolicy?: ConflictResolutionPolicy;
+  /** Alias for conflictResolutionPolicy. */
+  readonly conflictPolicy?: ConflictResolutionPolicy;
 }
 type StorageOrOptions = StampStorage | ClientOptions;
 function isStorage(value: StorageOrOptions): value is StampStorage {
@@ -152,10 +189,19 @@ function emptyState(config: PublicRallyConfig, userId: string | null, now: strin
     updatedAt: now,
   };
 }
+function errorMessage(
+  error: ClientError | OfflineOperationError | undefined,
+  fallback: string,
+): string {
+  return error !== undefined && "message" in error && typeof error.message === "string"
+    ? error.message
+    : fallback;
+}
 
 export class StampRallyClient {
   readonly #listeners = new Set<ClientListener>();
   readonly #eventListeners = new Set<ClientEventListener>();
+  readonly #syncEventListeners = new Set<SyncEventListener>();
   readonly #storage: StampStorage;
   readonly #options: ClientOptions;
   readonly #config: PublicRallyConfig;
@@ -165,6 +211,8 @@ export class StampRallyClient {
   #state: UserRallyState | null = null;
   #initialization: Promise<UserRallyState> | null = null;
   #queue: Promise<unknown> = Promise.resolve();
+  #syncRevision = 0;
+  #syncMetrics: { processed: number; failed: number } | null = null;
   constructor(config: PublicRallyConfig, storageOrOptions: StorageOrOptions = {}) {
     this.#config = config;
     this.#options = isStorage(storageOrOptions) ? { storage: storageOrOptions } : storageOrOptions;
@@ -173,6 +221,10 @@ export class StampRallyClient {
     this.#userId = this.#options.userId ?? this.#anonymousSessionId;
     this.#offlineQueue = this.#options.offlineQueue;
     this.#offlineQueue?.setSyncResultListener((event) => this.#handleOfflineSyncResult(event));
+    this.#offlineQueue?.setChangeListener(() => {
+      this.#syncRevision += 1;
+      if (this.#state !== null) this.#emit(this.#state);
+    });
   }
   getConfig(): RallyConfig {
     return this.#config;
@@ -195,6 +247,9 @@ export class StampRallyClient {
   get rejectedHistory(): ReadonlyArray<RejectedOperationHistoryEntry> {
     return this.#offlineQueue?.rejectedHistory ?? [];
   }
+  getSyncRevision(): number {
+    return this.#syncRevision;
+  }
   get queueCapability(): OfflineQueueCapability {
     return this.#offlineQueue?.queueCapability ?? "custom";
   }
@@ -204,6 +259,12 @@ export class StampRallyClient {
   retryRejected(operationId: string): Promise<boolean> {
     return this.#offlineQueue?.retryRejected(operationId) ?? Promise.resolve(false);
   }
+  dismissRejectedOperation(operationId: string): Promise<boolean> {
+    return this.discardRejected(operationId);
+  }
+  retryOperation(operationId: string): Promise<boolean> {
+    return this.retryRejected(operationId);
+  }
   subscribe(listener: ClientListener): () => void {
     this.#listeners.add(listener);
     return () => this.#listeners.delete(listener);
@@ -211,6 +272,15 @@ export class StampRallyClient {
   subscribeEvents(listener: ClientEventListener): () => void {
     this.#eventListeners.add(listener);
     return () => this.#eventListeners.delete(listener);
+  }
+  subscribeSyncEvents(listener: SyncEventListener): () => void {
+    this.#syncEventListeners.add(listener);
+    return () => this.#syncEventListeners.delete(listener);
+  }
+  subscribeSyncState(listener: () => void): () => void {
+    const wrapped: ClientListener = () => listener();
+    this.#listeners.add(wrapped);
+    return () => this.#listeners.delete(wrapped);
   }
   init(): Promise<UserRallyState> {
     return this.initialize();
@@ -419,36 +489,55 @@ export class StampRallyClient {
   }
   sync(adapter = this.#options.syncAdapter): Promise<void> {
     return this.#enqueue(async () => {
-      const current = await this.initialize();
-      if (this.#offlineQueue !== undefined && adapter !== undefined) {
-        await this.#offlineQueue.sync(async (operation) => {
-          if (operation.kind === "checkIn") {
-            if (adapter.checkIn === undefined)
-              throw new Error("No check-in sync adapter is configured.");
-            return adapter.checkIn(operation.request);
-          }
-          if (adapter.claimReward === undefined)
-            throw new Error("No reward sync adapter is configured.");
-          return adapter.claimReward(operation.request);
+      this.#emitSyncEvent({ type: "SYNC_STARTED" });
+      this.#syncMetrics = { processed: 0, failed: 0 };
+      try {
+        const current = await this.initialize();
+        if (this.#offlineQueue !== undefined && adapter !== undefined) {
+          await this.#offlineQueue.sync(async (operation) => {
+            if (operation.kind === "checkIn") {
+              if (adapter.checkIn === undefined)
+                throw new Error("No check-in sync adapter is configured.");
+              return adapter.checkIn(operation.request);
+            }
+            if (adapter.claimReward === undefined)
+              throw new Error("No reward sync adapter is configured.");
+            return adapter.claimReward(operation.request);
+          });
+        }
+        if (adapter?.sync === undefined) {
+          this.#emitEvent({ type: "sync", state: this.#state ?? current });
+          return;
+        }
+        const localState = this.#state ?? current;
+        const serverState = await adapter.sync({
+          rallyId: this.#config.id,
+          userId: this.#userId,
+          state: localState,
+          ...(this.#userId === this.#anonymousSessionId
+            ? { anonymousSessionId: this.#anonymousSessionId }
+            : {}),
+        });
+        const resolved = resolveRallyStateConflict(serverState, localState, {
+          policy:
+            this.#options.conflictResolutionPolicy ??
+            this.#options.conflictPolicy ??
+            "authoritative_replay",
+        });
+        const next = this.#reconcile(resolved);
+        await this.#storage.save(next);
+        this.#state = next;
+        this.#emit(next);
+        this.#emitEvent({ type: "sync", state: next });
+      } finally {
+        const metrics = this.#syncMetrics ?? { processed: 0, failed: 0 };
+        this.#syncMetrics = null;
+        this.#emitSyncEvent({
+          type: "SYNC_COMPLETED",
+          totalProcessed: metrics.processed,
+          failedCount: metrics.failed,
         });
       }
-      if (adapter?.sync === undefined) {
-        this.#emitEvent({ type: "sync", state: this.#state ?? current });
-        return;
-      }
-      const serverState = await adapter.sync({
-        rallyId: this.#config.id,
-        userId: this.#userId,
-        state: this.#state ?? current,
-        ...(this.#userId === this.#anonymousSessionId
-          ? { anonymousSessionId: this.#anonymousSessionId }
-          : {}),
-      });
-      const next = this.#reconcile(serverState);
-      await this.#storage.save(next);
-      this.#state = next;
-      this.#emit(next);
-      this.#emitEvent({ type: "sync", state: next });
     });
   }
   retrySync(): Promise<void> {
@@ -506,10 +595,50 @@ export class StampRallyClient {
       ),
     };
   }
-  async #handleOfflineSyncResult(
-    event: import("./offlineQueue.js").OfflineSyncResultEvent,
-  ): Promise<void> {
-    if (event.state !== undefined) {
+  async #handleOfflineSyncResult(event: OfflineSyncResultEvent): Promise<void> {
+    if (event.status === "ACCEPTED") {
+      if (this.#syncMetrics !== null) this.#syncMetrics.processed += 1;
+      if (event.state !== undefined) {
+        const next = this.#reconcile(event.state);
+        await this.#storage.save(next);
+        this.#state = next;
+        this.#emit(next);
+      }
+      this.#emitSyncEvent({
+        type: "OPERATION_ACCEPTED",
+        operationId: this.#operationId(event.operation),
+        resourceId: this.#resourceId(event.operation),
+      });
+    } else if (event.status === "REJECTED_PERMANENT") {
+      const error = event.error ?? {
+        code: "REJECTED_PERMANENT",
+        message: "Offline operation was rejected.",
+      };
+      if (this.#syncMetrics !== null) {
+        this.#syncMetrics.processed += 1;
+        this.#syncMetrics.failed += 1;
+      }
+      const base = event.state ?? this.#state ?? event.operation.request.state;
+      const next = this.#reconcile(rollbackOptimisticOperation(base, event.operation));
+      await this.#storage.save(next);
+      this.#state = next;
+      this.#emit(next);
+      this.#emitSyncEvent({
+        type: "OPERATION_ROLLED_BACK",
+        operationId: this.#operationId(event.operation),
+        resourceId: this.#resourceId(event.operation),
+        reason: errorMessage(error, "Offline operation was rejected."),
+        errorCode: error.code,
+      });
+    } else if (event.status === "RETRYABLE_ERROR") {
+      if (this.#syncMetrics !== null) this.#syncMetrics.failed += 1;
+      this.#emitSyncEvent({
+        type: "OPERATION_RETRYABLE_ERROR",
+        operationId: this.#operationId(event.operation),
+        error: errorMessage(event.error, "Retryable sync error."),
+      });
+    }
+    if (event.state !== undefined && event.status === undefined) {
       const next = this.#reconcile(event.state);
       await this.#storage.save(next);
       this.#state = next;
@@ -547,6 +676,18 @@ export class StampRallyClient {
   }
   #emitEvent(event: ClientEvent): void {
     for (const listener of this.#eventListeners) listener(event);
+  }
+  #emitSyncEvent(event: SyncLifecycleEvent): void {
+    for (const listener of this.#syncEventListeners) listener(event);
+    this.#emitEvent({ type: "syncLifecycle", event });
+  }
+  #operationId(operation: import("./offlineQueue.js").OfflineOperation): string {
+    const identity =
+      operation.request.userId ?? operation.request.anonymousSessionId ?? "anonymous";
+    return `${operation.kind}:${operation.request.rallyId}:${identity}:${operation.request.idempotencyKey}`;
+  }
+  #resourceId(operation: import("./offlineQueue.js").OfflineOperation): string {
+    return operation.kind === "checkIn" ? operation.request.spotId : operation.request.rewardId;
   }
 }
 export { storageKey };

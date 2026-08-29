@@ -1,4 +1,5 @@
 import type { UserRallyState } from "@stamprally/core";
+import type { TrustedAuthContext } from "./types.js";
 export interface AuditLog {
   readonly id: string;
   readonly timestamp: string;
@@ -43,13 +44,10 @@ export interface ServerOptions {
   readonly idempotencyTtlMs?: number;
   readonly authenticate?: (
     request: Request,
-  ) => Promise<string | AuthenticationContext | null> | string | AuthenticationContext | null;
+  ) => Promise<string | TrustedAuthContext | null> | string | TrustedAuthContext | null;
   readonly customValidators?: Readonly<Record<string, import("@stamprally/core").Validator>>;
   readonly now?: () => string;
   readonly anonymousPolicy?: "session_scoped" | "reject" | "shared_global_opt_in_insecure";
-}
-export interface AuthenticationContext {
-  readonly authenticatedUserId: string;
 }
 export type { UserRallyState } from "@stamprally/core";
 export {
@@ -64,6 +62,7 @@ export {
 export type {
   CheckInTransactionMutation,
   CheckInTransactionParams,
+  ClaimRewardMutationContext,
   ClaimRewardTransactionMutation,
   ClaimRewardTransactionParams,
   InMemoryServerPersistenceOptions,
@@ -84,3 +83,4 @@ export {
 } from "./security.js";
 export { StampRallyServer } from "./server.js";
 export { runPersistenceAdapterComplianceTests } from "./testing/index.js";
+export type { AuthenticationContext, TrustedAuthContext } from "./types.js";

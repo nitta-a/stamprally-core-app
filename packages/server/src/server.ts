@@ -26,6 +26,7 @@ import {
   validateClaimRewardRequest,
   validateSyncRequest,
 } from "./security.js";
+import type { TrustedAuthContext } from "./types.js";
 
 type ErrorResponse = { readonly ok: false; readonly code: string; readonly message: string };
 type ClaimResponse =
@@ -183,7 +184,18 @@ function operationStatus(result: {
 
 function withDirectIdentity<
   T extends { readonly userId?: string; readonly anonymousSessionId?: string },
->(request: T): T & { readonly userId: string } {
+>(request: T, authContext?: TrustedAuthContext): T & { readonly userId: string } {
+  if (authContext !== undefined) {
+    if (authContext.authenticatedUserId.trim() === "")
+      throw new RequestValidationException([
+        {
+          path: "authContext.authenticatedUserId",
+          message: "An authenticated userId is required.",
+          code: "REQUIRED",
+        },
+      ]);
+    return { ...request, userId: authContext.authenticatedUserId };
+  }
   if (request.userId !== undefined) return { ...request, userId: request.userId };
   if (request.anonymousSessionId !== undefined && isUuidV4(request.anonymousSessionId))
     return { ...request, userId: request.anonymousSessionId };
@@ -318,8 +330,11 @@ export class StampRallyServer {
       throw error;
     }
   }
-  async checkIn(request: CheckInRequest): Promise<CheckInResponse> {
-    const directRequest = withDirectIdentity(request);
+  async checkIn(
+    request: CheckInRequest,
+    authContext?: TrustedAuthContext,
+  ): Promise<CheckInResponse> {
+    const directRequest = withDirectIdentity(request, authContext);
     assertValidCheckInParams(directRequest, this.#config);
     const { userId } = directRequest;
     const key = `check-in:${request.rallyId}:${userId}:${request.idempotencyKey}`;
@@ -463,8 +478,11 @@ export class StampRallyServer {
       await this.#persistence.releaseLock(request.rallyId, lockKey);
     }
   }
-  async claimReward(request: ClaimRewardRequest): Promise<ClaimResponse> {
-    const directRequest = withDirectIdentity(request);
+  async claimReward(
+    request: ClaimRewardRequest,
+    authContext?: TrustedAuthContext,
+  ): Promise<ClaimResponse> {
+    const directRequest = withDirectIdentity(request, authContext);
     assertValidClaimParams(directRequest, this.#config);
     const { userId } = directRequest;
     const key = `claim:${request.rallyId}:${userId}:${request.rewardId}:${request.idempotencyKey}`;
@@ -482,17 +500,21 @@ export class StampRallyServer {
         now(this.#options),
       );
     const plan = inventoryPlan(this.#config, reward.id, reward.stockLimit);
+    const inventoryEnabled =
+      plan.primaryInitial !== null ||
+      (plan.secondaryInitial !== undefined && plan.secondaryInitial !== null);
     if (
-      rewardStock(this.#config, reward.id, reward.stockLimit) !== null &&
+      inventoryEnabled &&
       (this.#persistence.supportsRewardStock === false ||
-        typeof this.#persistence.getRewardStock !== "function")
+        typeof this.#persistence.getRewardStock !== "function" ||
+        typeof this.#persistence.executeClaimRewardTransaction !== "function")
     )
       return this.#rememberClaim(
         key,
         {
           ok: false,
-          code: "INVENTORY_NOT_SUPPORTED",
-          message: "This persistence adapter cannot store per-reward inventory.",
+          code: "INVENTORY_STORAGE_NOT_IMPLEMENTED",
+          message: "This persistence adapter cannot atomically store inventory.",
         },
         directRequest,
         now(this.#options),
@@ -662,11 +684,11 @@ export class StampRallyServer {
       const response = responseHolder.value;
       if (!result.success) {
         if (response !== null && !response.ok && response.code === result.error) return response;
-        if (result.error === "INVENTORY_NOT_SUPPORTED")
+        if (result.error === "INVENTORY_STORAGE_NOT_IMPLEMENTED")
           return {
             ok: false,
-            code: "INVENTORY_NOT_SUPPORTED",
-            message: "This persistence adapter cannot store per-reward inventory.",
+            code: "INVENTORY_STORAGE_NOT_IMPLEMENTED",
+            message: "This persistence adapter cannot atomically store inventory.",
           };
         return {
           ok: false,

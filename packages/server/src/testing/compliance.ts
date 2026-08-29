@@ -102,6 +102,17 @@ export async function runPersistenceAdapterComplianceTests(
     "per-reward stock was not decremented atomically",
   );
 
+  const exhausted = await adapter.executeClaimRewardTransaction(
+    params("carol", "boundary"),
+    mutation,
+  );
+  assert(!exhausted.success, "a zero-stock claim was accepted");
+  assert(
+    (await adapter.getRewardStock("compliance-rally", "__shared__")) === 0 &&
+      (await adapter.getRewardStock("compliance-rally", "reward")) === 0,
+    "zero-stock rejection did not preserve both stock boundaries",
+  );
+
   const idempotentAdapter = await createAdapter();
   const idempotentParams = params("alice", "same-key");
   const firstClaim = await idempotentAdapter.executeClaimRewardTransaction(
@@ -116,6 +127,10 @@ export async function runPersistenceAdapterComplianceTests(
   assert(
     (await idempotentAdapter.getRewardStock("compliance-rally", "__shared__")) === 0,
     "idempotent retry decremented shared stock twice",
+  );
+  assert(
+    (await idempotentAdapter.getRewardStock("compliance-rally", "reward")) === 0,
+    "idempotent retry decremented per-reward stock twice",
   );
 
   const rollbackAdapter = await createAdapter();

@@ -1,4 +1,4 @@
-# @stamprally/core v0.16.0
+# @stamprally/core v0.17.0
 
 Dependency-free domain models, immutable state transitions, storage adapters, browser detectors, and safe configuration parsers.
 
@@ -7,7 +7,7 @@ import { InMemoryStorage, StampRallyClient, type PublicRallyConfig } from "@stam
 
 const config: PublicRallyConfig = {
   id: "city-tour",
-  version: "0.16.0",
+  version: "0.17.0",
   title: "City Tour",
   spots: [{ id: "station", orderIndex: 0, name: "Central Station", conditions: [{ type: "passcode" }] }],
   rewards: [],
@@ -23,13 +23,13 @@ The browser detectors `getCurrentGeoContext`, `readNfcContext`, and `readQrConte
 
 `InMemoryStorage`, `LocalStorageAdapter`, and `IndexedDBAdapter` implement `StampStorage`. `updateLocalizedField` updates one locale without dropping existing translations.
 
-## v0.15.0 offline synchronization
+## v0.17.0 offline synchronization
 
 Configure `OfflineQueue` with `rallyId` and `userId` to persist pending work under
 `stamprally:queue:<rallyId>:<userId-or-anonymous>`. `switchUser` loads the other
-user's queue. Conflict policy `merge` unions stamp records, keeps the latest
-timestamps, and gives `CONSUMED` reward states priority; `server_wins` uses the
-server state unchanged. Sync adapters may return `ACCEPTED`, `REJECTED_PERMANENT`,
+user's queue. The default `authoritative_replay` policy uses the server state as
+the conflict baseline; `merge` is retained only as an explicit compatibility
+option, and `server_wins` uses the server state unchanged. Sync adapters may return `ACCEPTED`, `REJECTED_PERMANENT`,
 or `RETRYABLE_ERROR`; only the first two remove an operation.
 
 When no authenticated user is supplied, the client creates a persistent UUID v4

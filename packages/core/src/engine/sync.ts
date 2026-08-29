@@ -1,7 +1,9 @@
 import type { RewardState, UserRallyState } from "../domain/index.js";
 
+export type ConflictResolutionPolicy = "authoritative_replay" | "server_wins" | "merge";
 export interface MergeConflictOptions {
-  readonly policy: "server_wins" | "merge";
+  /** `merge` is retained for compatibility; synchronization paths use `authoritative_replay`. */
+  readonly policy: ConflictResolutionPolicy;
 }
 
 function latestTimestamp(serverTimestamp: string, localTimestamp: string): string {
@@ -103,6 +105,12 @@ export function resolveRallyStateConflict(
   options: MergeConflictOptions = { policy: "merge" },
 ): UserRallyState {
   if (options.policy === "server_wins") return serverState;
+  if (options.policy === "authoritative_replay")
+    return {
+      ...serverState,
+      records: serverState.records.map((record) => ({ ...record })),
+      rewards: serverState.rewards.map((reward) => ({ ...reward })),
+    };
   return {
     ...serverState,
     records: mergeStampRecords(serverState.records, localState.records),

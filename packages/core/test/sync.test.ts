@@ -5,6 +5,7 @@ import {
   InMemoryOfflineQueueStorage,
   OfflineQueue,
   resolveRallyStateConflict,
+  rollbackOptimisticOperation,
   StampRallyClient,
   toPublicConfig,
   type UserRallyState,
@@ -46,6 +47,69 @@ describe("resolveRallyStateConflict", () => {
 });
 
 describe("OfflineQueue conflict synchronization", () => {
+  it("rolls back an optimistic reward claim to its previous state", () => {
+    const previous = state([], "AVAILABLE");
+    const operation = {
+      kind: "claimReward" as const,
+      request: {
+        rallyId: "rally",
+        userId: "user",
+        rewardId: "r1",
+        idempotencyKey: "claim",
+        now: "2026-01-01T00:00:01.000Z",
+        options: {},
+        state: previous,
+      },
+    };
+    const optimistic = {
+      ...previous,
+      rewards: [{ rewardId: "r1", status: "CONSUMED" as const, claimTicketNumber: "ticket" }],
+      inventory: { sharedRemaining: 0, rewardRemaining: { r1: 0 } },
+    };
+    expect(rollbackOptimisticOperation(optimistic, operation)).toEqual(previous);
+    expect(optimistic.rewards[0]?.status).toBe("CONSUMED");
+  });
+
+  it("emits lifecycle events and persists an immediate permanent-rejection rollback", async () => {
+    const config = toPublicConfig({
+      id: "rally",
+      version: "1",
+      title: "Rally",
+      spots: [
+        { id: "s1", orderIndex: 0, name: "Spot", conditions: [{ type: "passcode", code: "OPEN" }] },
+      ],
+      rewards: [],
+    });
+    const queue = new OfflineQueue({
+      storage: new InMemoryOfflineQueueStorage(),
+      rallyId: "rally",
+      userId: "user",
+    });
+    let offline = true;
+    const client = new StampRallyClient(config, {
+      offlineQueue: queue,
+      userId: "user",
+      syncAdapter: {
+        checkIn: async () => {
+          if (offline) throw new Error("offline");
+          return {
+            ok: false as const,
+            error: { code: "INVALID_PROOF" as const, spotId: "s1", message: "Rejected" },
+          };
+        },
+      },
+    });
+    const events: string[] = [];
+    client.subscribeSyncEvents((event) => events.push(event.type));
+    await client.checkIn("s1", "OPEN", { now: "2026-01-01T00:00:00.000Z" });
+    expect(client.getState()?.records).toHaveLength(1);
+    offline = false;
+    await client.sync();
+    expect(client.getState()?.records).toHaveLength(0);
+    expect(events).toEqual(["SYNC_STARTED", "OPERATION_ROLLED_BACK", "SYNC_COMPLETED"]);
+    expect((await client.getUserState("rally", "user"))?.records).toHaveLength(0);
+  });
+
   it("rolls optimistic state back when the server permanently rejects an operation", async () => {
     const config = toPublicConfig({
       id: "rally",

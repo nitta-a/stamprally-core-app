@@ -26,6 +26,34 @@ const validAdmin = {
 } as const;
 
 describe("configuration parsing", () => {
+  it("rejects negative and fractional inventory values", () => {
+    const result = safeParseAdminConfig({
+      id: "rally",
+      version: "1",
+      title: "Rally",
+      inventory: { sharedStock: -1, global: 1.5, reward: 0 },
+      spots: [],
+      rewards: [
+        {
+          id: "reward",
+          title: "Reward",
+          type: "digital",
+          redemptionMethod: "server_claim",
+          requiredStampCount: 0,
+          stockLimit: -2,
+        },
+      ],
+    });
+    expect(result.success).toBe(false);
+    if (!result.success)
+      expect(result.errors.map((error) => error.path)).toEqual(
+        expect.arrayContaining([
+          "$.inventory.sharedStock",
+          "$.inventory.global",
+          "rewards[0].stockLimit",
+        ]),
+      );
+  });
   it("returns a typed value for valid admin configuration", () => {
     expect(parseAdminConfig(validAdmin).id).toBe("rally");
   });

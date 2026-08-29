@@ -1,4 +1,5 @@
 import type { UserRallyState } from "../domain/index.js";
+import type { ConflictResolutionPolicy } from "../engine/sync.js";
 import { resolveRallyStateConflict } from "../engine/sync.js";
 import type {
   CheckInRequest,
@@ -7,6 +8,7 @@ import type {
   ClaimResult,
   ClientError,
 } from "./client.js";
+import { cloneState } from "./storage.js";
 
 export type QueueOperationStatus =
   | "PENDING"
@@ -31,7 +33,7 @@ export type OfflineOperation =
     };
 export type OfflineResult = CheckInResult | ClaimResult | UserRallyState;
 export type SyncState = "idle" | "syncing" | "error";
-export type SyncConflictPolicy = "server_wins" | "merge";
+export type SyncConflictPolicy = ConflictResolutionPolicy;
 export interface OfflineConflictResult {
   readonly conflict: true;
   readonly localState: UserRallyState;
@@ -128,6 +130,52 @@ export interface OfflineSyncResultEvent {
   readonly state?: UserRallyState;
 }
 export type OfflineSyncResultListener = (event: OfflineSyncResultEvent) => void | Promise<void>;
+export type OfflineQueueChangeListener = () => void;
+
+/** Removes only an operation's optimistic changes without mutating its inputs. */
+export function rollbackOptimisticOperation(
+  state: UserRallyState,
+  operation: OfflineOperation,
+): UserRallyState {
+  const previous = operation.request.state;
+  if (operation.kind === "checkIn") {
+    const records = state.records.filter(
+      (record) =>
+        record.stampId !== operation.request.spotId || record.acquiredAt !== operation.request.now,
+    );
+    const previousRewards = new Map(previous.rewards.map((reward) => [reward.rewardId, reward]));
+    const rewards = state.rewards.map((reward) => previousRewards.get(reward.rewardId) ?? reward);
+    return { ...cloneState(state), records, rewards, updatedAt: previous.updatedAt };
+  }
+  const previousReward = previous.rewards.find(
+    (reward) => reward.rewardId === operation.request.rewardId,
+  );
+  const rewards = state.rewards
+    .filter(
+      (reward) => reward.rewardId !== operation.request.rewardId || previousReward !== undefined,
+    )
+    .map((reward) =>
+      reward.rewardId === operation.request.rewardId && previousReward !== undefined
+        ? { ...previousReward }
+        : reward,
+    );
+  const cloned = cloneState(state);
+  const { inventory: _inventory, ...stateWithoutInventory } = cloned;
+  const previousInventory = previous.inventory;
+  return previousInventory === undefined
+    ? { ...stateWithoutInventory, rewards, updatedAt: previous.updatedAt }
+    : {
+        ...stateWithoutInventory,
+        rewards,
+        inventory: {
+          ...previousInventory,
+          ...(previousInventory.rewardRemaining === undefined
+            ? {}
+            : { rewardRemaining: { ...previousInventory.rewardRemaining } }),
+        },
+        updatedAt: previous.updatedAt,
+      };
+}
 
 class MemoryQueueStorage implements OfflineQueueStorage {
   readonly #values = new Map<string, ReadonlyArray<OfflineOperation>>();
@@ -368,6 +416,7 @@ export class OfflineQueue {
   #sender: OfflineSender | undefined;
   #syncPromise: Promise<void> | null = null;
   #syncResultListener: OfflineSyncResultListener | undefined;
+  #changeListener: OfflineQueueChangeListener | undefined;
   readonly #synchronizeInstances: boolean;
   readonly #retryOptions: Required<SyncRetryOptions>;
   readonly #instanceId = randomId();
@@ -395,7 +444,7 @@ export class OfflineQueue {
     this.#configuredKey = options.key;
     this.#rallyId = options.rallyId;
     this.#userId = options.userId ?? null;
-    this.#conflictPolicy = options.conflictPolicy ?? "server_wins";
+    this.#conflictPolicy = options.conflictPolicy ?? "authoritative_replay";
     this.#onSyncConflict = options.onSyncConflict;
     this.#synchronizeInstances = options.synchronizeInstances ?? true;
     const retryOptions = {
@@ -447,6 +496,10 @@ export class OfflineQueue {
 
   setSyncResultListener(listener: OfflineSyncResultListener | undefined): void {
     this.#syncResultListener = listener;
+  }
+
+  setChangeListener(listener: OfflineQueueChangeListener | undefined): void {
+    this.#changeListener = listener;
   }
 
   async initialize(): Promise<void> {
@@ -620,6 +673,7 @@ export class OfflineQueue {
             if (lock === null) {
               await this.#reloadFromStorage();
               this.#state = "idle";
+              this.#changeListener?.();
               return false;
             }
             callbackStarted = true;
@@ -644,9 +698,11 @@ export class OfflineQueue {
   async #runWithStorageLock(sender: OfflineSender): Promise<void> {
     this.#state = "syncing";
     this.#error = null;
+    this.#changeListener?.();
     if (!this.#acquireSyncLock()) {
       await this.#reloadFromStorage();
       this.#state = "idle";
+      this.#changeListener?.();
       return;
     }
     try {
@@ -731,9 +787,11 @@ export class OfflineQueue {
         });
       }
       this.#state = "idle";
+      this.#changeListener?.();
     } catch (cause) {
       this.#state = "error";
       this.#error = cause instanceof Error ? cause : new Error(String(cause));
+      this.#changeListener?.();
       throw this.#error;
     } finally {
       this.#releaseSyncLock();
@@ -800,6 +858,7 @@ export class OfflineQueue {
   }
 
   #announceChange(): void {
+    this.#changeListener?.();
     this.#channel?.postMessage({
       type: "change",
       key: this.#storageKey(),

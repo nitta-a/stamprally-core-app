@@ -6,6 +6,7 @@ import type {
   OfflineQueueCapability,
   RejectedOperationHistoryEntry,
   StampRallyClient,
+  SyncEventListener,
   SyncState,
   UserRallyState,
 } from "@stamprally/core";
@@ -13,6 +14,12 @@ import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 
 export interface UseStampRallyOptions {
   readonly initialize?: boolean;
+  readonly onSyncEvent?: SyncEventListener;
+}
+export interface UseStampRallySyncState {
+  readonly isSyncing: boolean;
+  readonly pendingCount: number;
+  readonly rejectedHistory: ReadonlyArray<RejectedOperationHistoryEntry>;
 }
 export interface UseStampRallyReturn {
   readonly state: UserRallyState | null;
@@ -27,12 +34,17 @@ export interface UseStampRallyReturn {
   readonly onClaimReward: (rewardId: string, options?: ClaimOptions) => Promise<ClaimResult>;
   readonly onSync: () => Promise<void>;
   readonly retrySync: () => Promise<void>;
-  readonly syncState: SyncState;
+  readonly syncState: UseStampRallySyncState;
+  readonly syncStatus: SyncState;
+  readonly isSyncing: boolean;
   readonly pendingCount: number;
   readonly queueCapability: OfflineQueueCapability;
   readonly rejectedHistory: ReadonlyArray<RejectedOperationHistoryEntry>;
   readonly discardRejected: (operationId: string) => Promise<boolean>;
   readonly retryRejected: (operationId: string) => Promise<boolean>;
+  readonly retryOperation: (operationId: string) => Promise<boolean>;
+  readonly dismissRejectedOperation: (operationId: string) => Promise<boolean>;
+  readonly onSyncEvent: (listener: SyncEventListener) => () => void;
   readonly anonymousSessionId: string;
   readonly switchUser: (userId: string | null) => Promise<UserRallyState>;
   readonly clearUserState: (userId?: string) => Promise<void>;
@@ -50,6 +62,15 @@ export function useStampRally(
   const subscribe = useCallback((listener: () => void) => client.subscribe(listener), [client]);
   const getSnapshot = useCallback(() => client.getState(), [client]);
   const state = useSyncExternalStore(subscribe, getSnapshot, serverSnapshot);
+  const syncSubscribe = useCallback(
+    (listener: () => void) => client.subscribeSyncState(listener),
+    [client],
+  );
+  const syncRevision = useSyncExternalStore(
+    syncSubscribe,
+    () => client.getSyncRevision(),
+    () => 0,
+  );
   const [error, setError] = useState<Error | null>(null);
   useEffect(() => {
     if (options.initialize === false || client.getState() !== null) return;
@@ -66,6 +87,10 @@ export function useStampRally(
       if (event.type === "error") setError(errorFrom(event.error));
     });
   }, [client]);
+  useEffect(() => {
+    if (options.onSyncEvent === undefined) return;
+    return client.subscribeSyncEvents(options.onSyncEvent);
+  }, [client, options.onSyncEvent]);
   const onCheckIn = useCallback(
     (spotId: string, proof: unknown, checkInOptions: CheckInOptions = {}) => {
       setError(null);
@@ -94,6 +119,11 @@ export function useStampRally(
       throw next;
     });
   }, [client]);
+  const onSyncEvent = useCallback(
+    (listener: SyncEventListener) => client.subscribeSyncEvents(listener),
+    [client],
+  );
+  void syncRevision;
   return {
     state,
     config: client.getConfig(),
@@ -103,12 +133,21 @@ export function useStampRally(
     onClaimReward,
     onSync,
     retrySync: onSync,
-    syncState: client.syncState,
+    syncState: {
+      isSyncing: client.syncState === "syncing",
+      pendingCount: client.pendingCount,
+      rejectedHistory: client.rejectedHistory,
+    },
+    syncStatus: client.syncState,
+    isSyncing: client.syncState === "syncing",
     pendingCount: client.pendingCount,
     queueCapability: client.queueCapability,
     rejectedHistory: client.rejectedHistory,
     discardRejected: client.discardRejected.bind(client),
     retryRejected: client.retryRejected.bind(client),
+    retryOperation: client.retryOperation.bind(client),
+    dismissRejectedOperation: client.dismissRejectedOperation.bind(client),
+    onSyncEvent,
     anonymousSessionId: client.getAnonymousSessionId(),
     switchUser: client.switchUser.bind(client),
     clearUserState: client.clearUserState.bind(client),

@@ -107,6 +107,7 @@ export type RedemptionMethod = "manual_slide" | "staff_passcode" | "view_only" |
 export type InventoryAggregationMode = "shared" | "per_reward";
 export type RallyInventory = Readonly<Record<string, number>> & {
   readonly sharedStock?: number;
+  readonly global?: number;
 };
 export interface RallyInventoryState {
   readonly sharedRemaining?: number;

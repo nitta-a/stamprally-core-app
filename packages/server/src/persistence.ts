@@ -41,6 +41,17 @@ export interface ClaimRewardTransactionMutation {
   readonly error?: string;
 }
 
+export interface ClaimRewardMutationContext {
+  readonly rewardStock: number | null;
+  readonly sharedStock: number | null;
+  readonly primaryStock: number | null;
+  readonly secondaryStock: number | null;
+  /** @deprecated Use rewardStock. */
+  readonly stock: number | null;
+  readonly claimCount: number;
+  readonly userState: UserRallyState;
+}
+
 export interface CheckInTransactionParams {
   readonly rallyId: string;
   readonly userId: string;
@@ -71,12 +82,7 @@ export interface ServerPersistenceAdapter {
    */
   executeClaimRewardTransaction(
     params: ClaimRewardTransactionParams,
-    mutation: (current: {
-      readonly stock: number | null;
-      readonly secondaryStock: number | null;
-      readonly claimCount: number;
-      readonly userState: UserRallyState;
-    }) => ClaimRewardTransactionMutation,
+    mutation: (current: ClaimRewardMutationContext) => ClaimRewardTransactionMutation,
   ): Promise<{ readonly success: boolean; readonly error?: string }>;
   /** Set false when the adapter cannot persist per-reward inventory atomically. */
   readonly supportsRewardStock?: boolean;
@@ -106,7 +112,7 @@ export interface InMemoryServerPersistenceOptions {
   readonly stocks?: Readonly<Record<string, number>>;
 }
 export class InMemoryServerPersistenceAdapter implements ServerPersistenceAdapter {
-  readonly supportsRewardStock = true;
+  readonly supportsRewardStock: boolean = true;
   readonly #locks = new Map<string, number>();
   readonly #idempotent = new Map<string, TimedValue<unknown>>();
   readonly #states = new Map<string, UserRallyState>();
@@ -170,12 +176,7 @@ export class InMemoryServerPersistenceAdapter implements ServerPersistenceAdapte
 
   async executeClaimRewardTransaction(
     params: ClaimRewardTransactionParams,
-    mutation: (current: {
-      readonly stock: number | null;
-      readonly secondaryStock: number | null;
-      readonly claimCount: number;
-      readonly userState: UserRallyState;
-    }) => ClaimRewardTransactionMutation,
+    mutation: (current: ClaimRewardMutationContext) => ClaimRewardTransactionMutation,
   ): Promise<{ readonly success: boolean; readonly error?: string }> {
     try {
       const initialStock =
@@ -208,9 +209,16 @@ export class InMemoryServerPersistenceAdapter implements ServerPersistenceAdapte
           params.secondaryStockKey === undefined
             ? null
             : await this.getRewardStock(params.rallyId, params.secondaryStockKey);
+        const stock = storedStock ?? initialStock;
+        const secondaryStock = storedSecondaryStock ?? initialSecondaryStock;
+        const rewardStock = params.stockKey === "__shared__" ? secondaryStock : stock;
+        const sharedStock = params.stockKey === "__shared__" ? stock : null;
         const mutationResult = mutation({
-          stock: storedStock ?? initialStock,
-          secondaryStock: storedSecondaryStock ?? initialSecondaryStock,
+          rewardStock,
+          sharedStock,
+          primaryStock: rewardStock,
+          secondaryStock,
+          stock,
           claimCount: await this.getUserClaimCount(params.rallyId, params.userId, params.rewardId),
           userState,
         });
