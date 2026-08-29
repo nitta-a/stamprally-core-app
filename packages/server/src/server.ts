@@ -18,6 +18,10 @@ import type {
 } from "./index.js";
 import type { ServerPersistenceAdapter } from "./persistence.js";
 import {
+  assertValidCheckInParams,
+  assertValidClaimParams,
+  assertValidSyncParams,
+  RequestValidationException,
   validateCheckInRequest,
   validateClaimRewardRequest,
   validateSyncRequest,
@@ -177,6 +181,21 @@ function operationStatus(result: {
     : "REJECTED_PERMANENT";
 }
 
+function withDirectIdentity<
+  T extends { readonly userId?: string; readonly anonymousSessionId?: string },
+>(request: T): T & { readonly userId: string } {
+  if (request.userId !== undefined) return { ...request, userId: request.userId };
+  if (request.anonymousSessionId !== undefined && isUuidV4(request.anonymousSessionId))
+    return { ...request, userId: request.anonymousSessionId };
+  throw new RequestValidationException([
+    {
+      path: "userId",
+      message: "An authenticated userId or anonymousSessionId is required.",
+      code: "REQUIRED",
+    },
+  ]);
+}
+
 export class StampRallyServer {
   readonly #config: AdminRallyConfig;
   readonly #persistence: ServerPersistenceAdapter;
@@ -216,7 +235,18 @@ export class StampRallyServer {
         { ok: false, code: "UNAUTHENTICATED", message: "Authentication is required." },
         401,
       );
-    const result = await this.checkIn({ ...body.data, userId });
+    const sessionId = request.headers.get("x-anonymous-session-id");
+    let result: CheckInResponse;
+    try {
+      result = await this.checkIn({
+        ...body.data,
+        userId,
+        ...(sessionId === null ? {} : { anonymousSessionId: sessionId }),
+      });
+    } catch (error) {
+      if (error instanceof RequestValidationException) return validationResponse(error.errors);
+      throw error;
+    }
     return json(
       { ...result, status: operationStatus(result) },
       result.ok ? 200 : result.code === "SPOT_NOT_FOUND" ? 404 : 422,
@@ -239,7 +269,18 @@ export class StampRallyServer {
         { ok: false, code: "UNAUTHENTICATED", message: "Authentication is required." },
         401,
       );
-    const result = await this.claimReward({ ...body.data, userId });
+    const sessionId = request.headers.get("x-anonymous-session-id");
+    let result: ClaimResponse;
+    try {
+      result = await this.claimReward({
+        ...body.data,
+        userId,
+        ...(sessionId === null ? {} : { anonymousSessionId: sessionId }),
+      });
+    } catch (error) {
+      if (error instanceof RequestValidationException) return validationResponse(error.errors);
+      throw error;
+    }
     return json(
       { ...result, status: operationStatus(result) },
       result.ok ? 200 : result.code === "REWARD_NOT_FOUND" ? 404 : 422,
@@ -262,16 +303,32 @@ export class StampRallyServer {
         { ok: false, code: "UNAUTHENTICATED", message: "Authentication is required." },
         401,
       );
-    return json({ ok: true, state: await this.sync(body.data.rallyId, userId) });
+    const sessionId = request.headers.get("x-anonymous-session-id");
+    try {
+      return json({
+        ok: true,
+        state: await this.syncProgress({
+          rallyId: body.data.rallyId,
+          userId,
+          ...(sessionId === null ? {} : { anonymousSessionId: sessionId }),
+        }),
+      });
+    } catch (error) {
+      if (error instanceof RequestValidationException) return validationResponse(error.errors);
+      throw error;
+    }
   }
-  async checkIn(request: CheckInRequest & { readonly userId: string }): Promise<CheckInResponse> {
-    const key = `check-in:${request.rallyId}:${request.userId}:${request.idempotencyKey}`;
+  async checkIn(request: CheckInRequest): Promise<CheckInResponse> {
+    const directRequest = withDirectIdentity(request);
+    assertValidCheckInParams(directRequest, this.#config);
+    const { userId } = directRequest;
+    const key = `check-in:${request.rallyId}:${userId}:${request.idempotencyKey}`;
     const previous = await this.#persistence.getIdempotentResult<CheckInResponse>(
       request.rallyId,
       key,
     );
     if (previous !== null) return previous;
-    const lockKey = `state:${request.rallyId}:${request.userId}`;
+    const lockKey = `state:${request.rallyId}:${userId}`;
     if (
       !(await this.#persistence.acquireLock(
         request.rallyId,
@@ -283,13 +340,13 @@ export class StampRallyServer {
     const timestamp = now(this.#options);
     try {
       const current =
-        (await this.#persistence.getUserState(request.rallyId, request.userId)) ??
-        initialState(this.#config, request.userId, timestamp);
+        (await this.#persistence.getUserState(request.rallyId, userId)) ??
+        initialState(this.#config, userId, timestamp);
       const responseHolder: { value: CheckInResponse | null } = { value: null };
       const makeAudit = (status: "SUCCESS" | "REJECTED", code?: string): AuditLog =>
         audit(
           request.rallyId,
-          request.userId,
+          userId,
           "CHECK_IN",
           request.spotId,
           request.idempotencyKey,
@@ -305,7 +362,7 @@ export class StampRallyServer {
           message: "Spot was not found.",
         };
         return await this.#rememberCheckInTransaction(
-          request,
+          directRequest,
           timestamp,
           key,
           current,
@@ -329,7 +386,7 @@ export class StampRallyServer {
       };
       if (current.records.some((record) => record.stampId === request.spotId))
         return await this.#rememberCheckInTransaction(
-          request,
+          directRequest,
           timestamp,
           key,
           current,
@@ -339,7 +396,7 @@ export class StampRallyServer {
       const acquired = new Set(current.records.map((record) => record.stampId));
       if (spot.prerequisites?.some((id) => !acquired.has(id)))
         return await this.#rememberCheckInTransaction(
-          request,
+          directRequest,
           timestamp,
           key,
           current,
@@ -358,7 +415,7 @@ export class StampRallyServer {
           ))
         )
           return await this.#rememberCheckInTransaction(
-            request,
+            directRequest,
             timestamp,
             key,
             current,
@@ -380,7 +437,7 @@ export class StampRallyServer {
       const transaction = await this.#persistence.executeCheckInTransaction(
         {
           rallyId: request.rallyId,
-          userId: request.userId,
+          userId,
           spotId: request.spotId,
           timestamp: timestampMillis(timestamp),
           idempotencyKey: key,
@@ -406,10 +463,11 @@ export class StampRallyServer {
       await this.#persistence.releaseLock(request.rallyId, lockKey);
     }
   }
-  async claimReward(
-    request: ClaimRewardRequest & { readonly userId: string },
-  ): Promise<ClaimResponse> {
-    const key = `claim:${request.rallyId}:${request.userId}:${request.rewardId}:${request.idempotencyKey}`;
+  async claimReward(request: ClaimRewardRequest): Promise<ClaimResponse> {
+    const directRequest = withDirectIdentity(request);
+    assertValidClaimParams(directRequest, this.#config);
+    const { userId } = directRequest;
+    const key = `claim:${request.rallyId}:${userId}:${request.rewardId}:${request.idempotencyKey}`;
     const previous = await this.#persistence.getIdempotentResult<ClaimResponse>(
       request.rallyId,
       key,
@@ -420,7 +478,23 @@ export class StampRallyServer {
       return this.#rememberClaim(
         key,
         { ok: false, code: "REWARD_NOT_FOUND", message: "Reward was not found." },
-        request,
+        directRequest,
+        now(this.#options),
+      );
+    const plan = inventoryPlan(this.#config, reward.id, reward.stockLimit);
+    if (
+      rewardStock(this.#config, reward.id, reward.stockLimit) !== null &&
+      (this.#persistence.supportsRewardStock === false ||
+        typeof this.#persistence.getRewardStock !== "function")
+    )
+      return this.#rememberClaim(
+        key,
+        {
+          ok: false,
+          code: "INVENTORY_NOT_SUPPORTED",
+          message: "This persistence adapter cannot store per-reward inventory.",
+        },
+        directRequest,
         now(this.#options),
       );
     const lockKey =
@@ -436,7 +510,6 @@ export class StampRallyServer {
     )
       return { ok: false, code: "CONFLICT", message: "The reward is being claimed." };
     const timestamp = now(this.#options);
-    const plan = inventoryPlan(this.#config, reward.id, reward.stockLimit);
     try {
       const checked = await this.#persistence.getIdempotentResult<ClaimResponse>(
         request.rallyId,
@@ -447,10 +520,13 @@ export class StampRallyServer {
       const result = await this.#persistence.executeClaimRewardTransaction(
         {
           rallyId: request.rallyId,
-          userId: request.userId,
+          userId,
           rewardId: reward.id,
           stockKey: plan.primaryKey,
           ...(plan.secondaryKey === undefined ? {} : { secondaryStockKey: plan.secondaryKey }),
+          rewardStockLimit: rewardStock(this.#config, reward.id, reward.stockLimit),
+          sharedStockLimit:
+            this.#config.inventoryMode === "shared" ? sharedStock(this.#config) : null,
           initialStock: plan.primaryInitial,
           ...(plan.secondaryInitial === undefined
             ? {}
@@ -462,7 +538,7 @@ export class StampRallyServer {
           ...(this.#options.idempotencyTtlMs === undefined
             ? {}
             : { idempotencyTtlMs: this.#options.idempotencyTtlMs }),
-          initialUserState: initialState(this.#config, request.userId, timestamp),
+          initialUserState: initialState(this.#config, userId, timestamp),
         },
         ({ stock, secondaryStock, claimCount, userState }) => {
           const storedReward = userState.rewards.find((item) => item.rewardId === reward.id) ?? {
@@ -478,7 +554,7 @@ export class StampRallyServer {
           const makeAudit = (status: "SUCCESS" | "REJECTED", code?: string): AuditLog =>
             audit(
               request.rallyId,
-              request.userId,
+              userId,
               "CLAIM_REWARD",
               reward.id,
               request.idempotencyKey,
@@ -586,6 +662,12 @@ export class StampRallyServer {
       const response = responseHolder.value;
       if (!result.success) {
         if (response !== null && !response.ok && response.code === result.error) return response;
+        if (result.error === "INVENTORY_NOT_SUPPORTED")
+          return {
+            ok: false,
+            code: "INVENTORY_NOT_SUPPORTED",
+            message: "This persistence adapter cannot store per-reward inventory.",
+          };
         return {
           ok: false,
           code: "PERSISTENCE_FAILED",
@@ -609,10 +691,20 @@ export class StampRallyServer {
     }
   }
   async sync(rallyId: string, userId: string): Promise<UserRallyState> {
+    assertValidSyncParams({ rallyId, userId }, this.#config);
     const state =
       (await this.#persistence.getUserState(rallyId, userId)) ??
       initialState(this.#config, userId, now(this.#options));
     return this.#attachInventory(state);
+  }
+  async syncProgress(request: {
+    readonly rallyId: string;
+    readonly userId?: string;
+    readonly anonymousSessionId?: string;
+  }): Promise<UserRallyState> {
+    const directRequest = withDirectIdentity(request);
+    assertValidSyncParams(directRequest, this.#config);
+    return this.sync(directRequest.rallyId, directRequest.userId);
   }
   async #attachInventory(state: UserRallyState): Promise<UserRallyState> {
     const rewardRemaining: Record<string, number> = {};
@@ -662,10 +754,11 @@ export class StampRallyServer {
       const authenticatedUserId = identity.authenticatedUserId;
       return authenticatedUserId.length > 0 ? authenticatedUserId : null;
     }
-    if (this.#options.anonymousPolicy === "reject") return null;
+    const policy = this.#options.anonymousPolicy ?? "session_scoped";
+    if (policy === "reject") return null;
     const sessionId = request.headers.get("X-Anonymous-Session-Id");
-    if (sessionId !== null && isUuidV4(sessionId)) return sessionId;
-    if (this.#options.anonymousPolicy === "session_scoped") return null;
+    if (sessionId !== null) return isUuidV4(sessionId) ? sessionId : null;
+    if (policy === "session_scoped") return null;
     return "anonymous";
   }
 

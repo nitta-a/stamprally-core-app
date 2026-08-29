@@ -3,6 +3,8 @@ import type {
   CheckInResult,
   ClaimOptions,
   ClaimResult,
+  OfflineQueueCapability,
+  RejectedOperationHistoryEntry,
   StampRallyClient,
   SyncState,
   UserRallyState,
@@ -27,6 +29,10 @@ export interface UseStampRallyReturn {
   readonly retrySync: () => Promise<void>;
   readonly syncState: SyncState;
   readonly pendingCount: number;
+  readonly queueCapability: OfflineQueueCapability;
+  readonly rejectedHistory: ReadonlyArray<RejectedOperationHistoryEntry>;
+  readonly discardRejected: (operationId: string) => Promise<boolean>;
+  readonly retryRejected: (operationId: string) => Promise<boolean>;
   readonly anonymousSessionId: string;
   readonly switchUser: (userId: string | null) => Promise<UserRallyState>;
   readonly clearUserState: (userId?: string) => Promise<void>;
@@ -99,6 +105,10 @@ export function useStampRally(
     retrySync: onSync,
     syncState: client.syncState,
     pendingCount: client.pendingCount,
+    queueCapability: client.queueCapability,
+    rejectedHistory: client.rejectedHistory,
+    discardRejected: client.discardRejected.bind(client),
+    retryRejected: client.retryRejected.bind(client),
     anonymousSessionId: client.getAnonymousSessionId(),
     switchUser: client.switchUser.bind(client),
     clearUserState: client.clearUserState.bind(client),

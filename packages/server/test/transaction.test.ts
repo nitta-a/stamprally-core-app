@@ -68,6 +68,8 @@ const params: ClaimRewardTransactionParams = {
   ticketNumber: "ticket-1",
   timestamp: Date.parse("2026-01-01T00:00:00.000Z"),
   idempotencyKey: "claim-1",
+  rewardStockLimit: 1,
+  sharedStockLimit: null,
 };
 
 const mutation = (current: {

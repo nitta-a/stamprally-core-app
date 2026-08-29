@@ -1,4 +1,4 @@
-# @stamprally/core v0.15.0
+# @stamprally/core v0.16.0
 
 Dependency-free domain models, immutable state transitions, storage adapters, browser detectors, and safe configuration parsers.
 
@@ -7,7 +7,7 @@ import { InMemoryStorage, StampRallyClient, type PublicRallyConfig } from "@stam
 
 const config: PublicRallyConfig = {
   id: "city-tour",
-  version: "0.15.0",
+  version: "0.16.0",
   title: "City Tour",
   spots: [{ id: "station", orderIndex: 0, name: "Central Station", conditions: [{ type: "passcode" }] }],
   rewards: [],

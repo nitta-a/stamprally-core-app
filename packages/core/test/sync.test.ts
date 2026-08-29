@@ -147,7 +147,7 @@ describe("OfflineQueue conflict synchronization", () => {
       serverState: state(["server"], "LOCKED"),
     }));
     expect(queue.pendingCount).toBe(0);
-    expect(events).toEqual(["server,local"]);
+    expect(events).toEqual(["server"]);
   });
 
   it("isolates the default queue by rally and user and switches scopes", async () => {
@@ -208,6 +208,36 @@ describe("OfflineQueue conflict synchronization", () => {
         error: { code: "NETWORK", message: "Try again." },
       })),
     ).rejects.toThrow("Try again.");
+    expect(queue.pendingCount).toBe(1);
+  });
+
+  it("keeps rejection reasons and can explicitly retry a rejected operation", async () => {
+    const storage = new InMemoryOfflineQueueStorage();
+    const queue = new OfflineQueue({ storage, key: "rejected-history" });
+    const request = {
+      rallyId: "rally",
+      userId: "user",
+      spotId: "s1",
+      proofData: "proof",
+      idempotencyKey: "rejected-history",
+      now: "2026-01-01T00:00:00.000Z",
+      state: state([], "LOCKED"),
+    };
+    await queue.enqueueCheckIn(request);
+    await queue.sync(async () => ({
+      status: "REJECTED_PERMANENT",
+      reason: { code: "INVALID_PROOF", message: "The proof is no longer valid." },
+    }));
+    const operationId =
+      queue.rejectedHistory[0] &&
+      `${queue.rejectedHistory[0].operation.kind}:${request.rallyId}:${request.userId}:${request.idempotencyKey}`;
+    expect(queue.rejectedHistory[0]).toMatchObject({
+      errorCode: "INVALID_PROOF",
+      reason: { message: "The proof is no longer valid." },
+    });
+    expect(operationId).toBeTruthy();
+    await expect(queue.retryRejected(operationId ?? "")).resolves.toBe(true);
+    expect(queue.rejectedHistory).toHaveLength(0);
     expect(queue.pendingCount).toBe(1);
   });
 });

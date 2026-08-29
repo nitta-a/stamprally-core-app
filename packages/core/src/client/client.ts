@@ -11,7 +11,13 @@ import type {
   Validator,
 } from "../domain/index.js";
 import { consumeReward, type RewardConsumeError, reconcileRewardStates } from "../engine/index.js";
-import type { OfflineOperationError, OfflineQueue, SyncState } from "./offlineQueue.js";
+import type {
+  OfflineOperationError,
+  OfflineQueue,
+  OfflineQueueCapability,
+  RejectedOperationHistoryEntry,
+  SyncState,
+} from "./offlineQueue.js";
 import {
   cloneState,
   createAnonymousSessionId,
@@ -185,6 +191,18 @@ export class StampRallyClient {
   }
   get pendingCount(): number {
     return this.#offlineQueue?.pendingCount ?? 0;
+  }
+  get rejectedHistory(): ReadonlyArray<RejectedOperationHistoryEntry> {
+    return this.#offlineQueue?.rejectedHistory ?? [];
+  }
+  get queueCapability(): OfflineQueueCapability {
+    return this.#offlineQueue?.queueCapability ?? "custom";
+  }
+  discardRejected(operationId: string): Promise<boolean> {
+    return this.#offlineQueue?.discardRejected(operationId) ?? Promise.resolve(false);
+  }
+  retryRejected(operationId: string): Promise<boolean> {
+    return this.#offlineQueue?.retryRejected(operationId) ?? Promise.resolve(false);
   }
   subscribe(listener: ClientListener): () => void {
     this.#listeners.add(listener);

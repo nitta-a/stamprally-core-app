@@ -14,6 +14,7 @@ export type SyncOperationStatus = "ACCEPTED" | "REJECTED_PERMANENT" | "RETRYABLE
 export interface CheckInRequest {
   readonly rallyId: string;
   readonly userId?: string;
+  readonly anonymousSessionId?: string;
   readonly spotId: string;
   readonly context: import("@stamprally/core").VerificationContext;
   readonly idempotencyKey: string;
@@ -22,6 +23,7 @@ export interface CheckInRequest {
 export interface ClaimRewardRequest {
   readonly rallyId: string;
   readonly userId?: string;
+  readonly anonymousSessionId?: string;
   readonly rewardId: string;
   readonly idempotencyKey: string;
   readonly staffPasscode?: string;
@@ -44,7 +46,7 @@ export interface ServerOptions {
   ) => Promise<string | AuthenticationContext | null> | string | AuthenticationContext | null;
   readonly customValidators?: Readonly<Record<string, import("@stamprally/core").Validator>>;
   readonly now?: () => string;
-  readonly anonymousPolicy?: "session_scoped" | "reject";
+  readonly anonymousPolicy?: "session_scoped" | "reject" | "shared_global_opt_in_insecure";
 }
 export interface AuthenticationContext {
   readonly authenticatedUserId: string;
@@ -70,10 +72,15 @@ export type {
 } from "./persistence.js";
 export { InMemoryServerPersistenceAdapter } from "./persistence.js";
 export {
+  assertValidCheckInParams,
+  assertValidClaimParams,
+  assertValidSyncParams,
   type RequestValidationError,
+  RequestValidationException,
   type RequestValidationResult,
   validateCheckInRequest,
   validateClaimRewardRequest,
   validateSyncRequest,
 } from "./security.js";
 export { StampRallyServer } from "./server.js";
+export { runPersistenceAdapterComplianceTests } from "./testing/index.js";

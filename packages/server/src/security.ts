@@ -1,3 +1,4 @@
+import type { AdminRallyConfig } from "@stamprally/core";
 import type { CheckInRequest, ClaimRewardRequest } from "./index.js";
 
 export interface RequestValidationError {
@@ -8,6 +9,17 @@ export interface RequestValidationError {
 export type RequestValidationResult<T> =
   | { readonly success: true; readonly data: T }
   | { readonly success: false; readonly errors: ReadonlyArray<RequestValidationError> };
+
+export class RequestValidationException extends Error {
+  readonly code = "VALIDATION_FAILED";
+  readonly errors: ReadonlyArray<RequestValidationError>;
+
+  constructor(errors: ReadonlyArray<RequestValidationError>) {
+    super("Request validation failed.");
+    this.name = "RequestValidationException";
+    this.errors = errors;
+  }
+}
 
 function errors(...items: ReadonlyArray<RequestValidationError>): RequestValidationResult<never> {
   return { success: false, errors: items };
@@ -142,7 +154,7 @@ export function validateClaimRewardRequest(
     });
   if (value.staffId !== undefined && !nonEmpty(value.staffId))
     return errors({ path: "staffId", message: "staffId must be non-empty.", code: "INVALID_TYPE" });
-  if (value.now !== undefined && !nonEmpty(value.now))
+  if (value.now !== undefined && !dateInput(value.now))
     return errors({
       path: "now",
       message: "now must be an ISO 8601 date or positive timestamp.",
@@ -151,14 +163,130 @@ export function validateClaimRewardRequest(
   return { success: true, data: value as unknown as ClaimRewardRequest };
 }
 
-export function validateSyncRequest(
+function uuid(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+  );
+}
+
+function identityErrors(value: { readonly userId?: string; readonly anonymousSessionId?: string }) {
+  const result: RequestValidationError[] = [];
+  if (value.userId === undefined && value.anonymousSessionId === undefined)
+    result.push({
+      path: "userId",
+      message: "An authenticated userId or anonymousSessionId is required.",
+      code: "REQUIRED",
+    });
+  if (value.userId !== undefined && !nonEmpty(value.userId))
+    result.push({ path: "userId", message: "userId must be non-empty.", code: "INVALID_TYPE" });
+  if (value.anonymousSessionId !== undefined && !uuid(value.anonymousSessionId))
+    result.push({
+      path: "anonymousSessionId",
+      message: "anonymousSessionId must be a UUID v4.",
+      code: "INVALID_FORMAT",
+    });
+  if (
+    value.userId !== undefined &&
+    value.anonymousSessionId !== undefined &&
+    value.userId !== value.anonymousSessionId
+  )
+    result.push({
+      path: "anonymousSessionId",
+      message: "userId and anonymousSessionId must identify the same session.",
+      code: "IDENTITY_MISMATCH",
+    });
+  return result;
+}
+
+function directErrors(
   value: unknown,
-): RequestValidationResult<{ readonly rallyId: string; readonly userId?: string }> {
+  config: AdminRallyConfig,
+  kind: "check-in" | "claim",
+): ReadonlyArray<RequestValidationError> {
+  const validated =
+    kind === "check-in" ? validateCheckInRequest(value) : validateClaimRewardRequest(value);
+  if (!validated.success) return validated.errors;
+  const errors: RequestValidationError[] = [];
+  if (validated.data.rallyId !== config.id)
+    errors.push({
+      path: "rallyId",
+      message: "The rally does not match this server.",
+      code: "INVALID_VALUE",
+    });
+  const resourceId =
+    kind === "check-in"
+      ? (validated.data as CheckInRequest).spotId
+      : (validated.data as ClaimRewardRequest).rewardId;
+  const exists =
+    kind === "check-in"
+      ? config.spots.some((spot) => spot.id === resourceId)
+      : config.rewards.some((reward) => reward.id === resourceId);
+  if (!exists)
+    errors.push({
+      path: kind === "check-in" ? "spotId" : "rewardId",
+      message: `${kind === "check-in" ? "Spot" : "Reward"} was not found.`,
+      code: kind === "check-in" ? "SPOT_NOT_FOUND" : "REWARD_NOT_FOUND",
+    });
+  errors.push(...identityErrors(validated.data));
+  return errors;
+}
+
+export function assertValidCheckInParams(
+  value: unknown,
+  config: AdminRallyConfig,
+): asserts value is CheckInRequest & { readonly userId: string } {
+  const errors = directErrors(value, config, "check-in");
+  if (errors.length > 0) throw new RequestValidationException(errors);
+}
+
+export function assertValidClaimParams(
+  value: unknown,
+  config: AdminRallyConfig,
+): asserts value is ClaimRewardRequest & { readonly userId: string } {
+  const errors = directErrors(value, config, "claim");
+  if (errors.length > 0) throw new RequestValidationException(errors);
+}
+
+export function assertValidSyncParams(
+  value: unknown,
+  config: AdminRallyConfig,
+): asserts value is { readonly rallyId: string; readonly userId: string } {
+  const validated = validateSyncRequest(value);
+  const errors = validated.success
+    ? [
+        ...(validated.data.rallyId !== config.id
+          ? [
+              {
+                path: "rallyId",
+                message: "The rally does not match this server.",
+                code: "INVALID_VALUE",
+              },
+            ]
+          : []),
+      ]
+    : [...validated.errors];
+  if (validated.success) errors.push(...identityErrors(validated.data));
+  if (errors.length > 0) throw new RequestValidationException(errors);
+}
+
+export function validateSyncRequest(value: unknown): RequestValidationResult<{
+  readonly rallyId: string;
+  readonly userId?: string;
+  readonly anonymousSessionId?: string;
+}> {
   const required = requiredErrors(value, ["rallyId"]);
   if (required.length > 0) return errors(...required);
   if (!record(value))
     return errors({ path: "$", message: "Expected an object.", code: "INVALID_TYPE" });
   if (value.userId !== undefined && !nonEmpty(value.userId))
     return errors({ path: "userId", message: "userId must be non-empty.", code: "INVALID_TYPE" });
-  return { success: true, data: value as { readonly rallyId: string; readonly userId?: string } };
+  return {
+    success: true,
+    data: value as {
+      readonly rallyId: string;
+      readonly userId?: string;
+      readonly anonymousSessionId?: string;
+    },
+  };
 }

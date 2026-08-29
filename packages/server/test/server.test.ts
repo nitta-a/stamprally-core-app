@@ -1,6 +1,10 @@
 import { type AdminRallyConfig, toPublicConfig, type UserRallyState } from "@stamprally/core";
 import { describe, expect, it } from "vitest";
-import { InMemoryServerPersistenceAdapter, StampRallyServer } from "../src/index.js";
+import {
+  InMemoryServerPersistenceAdapter,
+  runPersistenceAdapterComplianceTests,
+  StampRallyServer,
+} from "../src/index.js";
 
 const config: AdminRallyConfig = {
   id: "rally",
@@ -23,6 +27,65 @@ const config: AdminRallyConfig = {
   ],
 };
 describe("StampRallyServer", () => {
+  it("validates direct API boundaries and exposes the secure anonymous default", async () => {
+    const server = new StampRallyServer(config, new InMemoryServerPersistenceAdapter());
+    await expect(
+      server.checkIn({
+        rallyId: "other-rally",
+        userId: "alice",
+        spotId: "s1",
+        context: { type: "passcode", code: "OPEN" },
+        idempotencyKey: "wrong-rally",
+      }),
+    ).rejects.toMatchObject({
+      code: "VALIDATION_FAILED",
+      errors: [{ path: "rallyId", code: "INVALID_VALUE" }],
+    });
+    const gpsServer = new StampRallyServer(
+      {
+        ...config,
+        spots: [
+          {
+            id: "gps",
+            orderIndex: 0,
+            name: "GPS",
+            conditions: [{ type: "gps", latitude: 0, longitude: 0, radiusMeters: 10 }],
+          },
+        ],
+      },
+      new InMemoryServerPersistenceAdapter(),
+    );
+    await expect(
+      gpsServer.checkIn({
+        rallyId: "rally",
+        userId: "alice",
+        spotId: "gps",
+        context: { type: "gps", latitude: 91, longitude: 0 },
+        idempotencyKey: "invalid-gps",
+      }),
+    ).rejects.toMatchObject({
+      errors: [{ path: "proof.latitude", code: "INVALID_RANGE" }],
+    });
+    const response = await server.handle(
+      new Request("https://example.test/check-in", {
+        method: "POST",
+        body: JSON.stringify({
+          rallyId: "rally",
+          spotId: "s1",
+          context: { type: "passcode", code: "OPEN" },
+          idempotencyKey: "secure-anonymous",
+        }),
+      }),
+    );
+    expect(response.status).toBe(401);
+  });
+
+  it("runs the public persistence adapter compliance suite", async () => {
+    await expect(
+      runPersistenceAdapterComplianceTests(async () => new InMemoryServerPersistenceAdapter()),
+    ).resolves.toBeUndefined();
+  });
+
   it("atomically decrements shared and per-reward inventory", async () => {
     const sharedConfig = {
       ...config,
@@ -148,6 +211,7 @@ describe("StampRallyServer", () => {
     const persistence = new InMemoryServerPersistenceAdapter();
     const server = new StampRallyServer(config, persistence, {
       now: () => "2026-02-03T04:05:06.000Z",
+      anonymousPolicy: "shared_global_opt_in_insecure",
     });
     const response = await server.handle(
       new Request("https://example.test/rally/check-in", {

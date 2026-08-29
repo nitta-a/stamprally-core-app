@@ -82,6 +82,8 @@ export async function executeClaimRewardTransaction<Tx>(
           await store.writeIdempotency(transaction, params, next.result);
         return { success: false, error: next.error };
       }
+      if (next.nextSecondaryStock !== undefined && store.writeSecondaryStock === undefined)
+        return { success: false, error: "INVENTORY_NOT_SUPPORTED" };
       if (next.nextStock !== null) await store.writeStock(transaction, params, next.nextStock);
       if (next.nextSecondaryStock !== undefined && store.writeSecondaryStock !== undefined) {
         if (next.nextSecondaryStock !== null)

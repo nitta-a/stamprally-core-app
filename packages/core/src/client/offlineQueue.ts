@@ -8,17 +8,25 @@ import type {
   ClientError,
 } from "./client.js";
 
+export type QueueOperationStatus =
+  | "PENDING"
+  | "IN_FLIGHT"
+  | "ACCEPTED"
+  | "REJECTED_PERMANENT"
+  | "FAILED_RETRYABLE";
+export type OfflineQueueCapability = "indexeddb" | "localstorage" | "memory" | "custom";
+
 export type OfflineOperation =
   | {
       readonly kind: "checkIn";
       readonly request: CheckInRequest;
-      readonly status?: OfflineOperationLifecycleStatus;
+      readonly status?: QueueOperationStatus;
       readonly attempts?: number;
     }
   | {
       readonly kind: "claimReward";
       readonly request: ClaimRequest;
-      readonly status?: OfflineOperationLifecycleStatus;
+      readonly status?: QueueOperationStatus;
       readonly attempts?: number;
     };
 export type OfflineResult = CheckInResult | ClaimResult | UserRallyState;
@@ -33,6 +41,11 @@ export interface OfflineConflictResult {
 export interface OfflineQueueStorage {
   load(key: string): Promise<ReadonlyArray<OfflineOperation>>;
   save(key: string, operations: ReadonlyArray<OfflineOperation>): Promise<void>;
+  loadRejectedHistory?(key: string): Promise<ReadonlyArray<RejectedOperationHistoryEntry>>;
+  saveRejectedHistory?(
+    key: string,
+    history: ReadonlyArray<RejectedOperationHistoryEntry>,
+  ): Promise<void>;
 }
 
 export interface OfflineQueueOptions {
@@ -75,19 +88,21 @@ export interface OfflineConflict {
 export type OfflineSender = (
   operation: OfflineOperation,
 ) => Promise<OfflineResult | OfflineConflictResult | OfflineOperationResponse>;
-export type OfflineOperationStatus =
-  | "PENDING"
-  | "IN_FLIGHT"
-  | "ACCEPTED"
-  | "REJECTED"
-  | "REJECTED_PERMANENT"
-  | "RETRYABLE_ERROR";
-export type OfflineOperationLifecycleStatus = "PENDING" | "IN_FLIGHT" | "ACCEPTED" | "REJECTED";
+export type OfflineOperationStatus = QueueOperationStatus | "REJECTED" | "RETRYABLE_ERROR";
+export type OfflineOperationLifecycleStatus = QueueOperationStatus;
 export interface OfflineOperationError {
   readonly code: string;
   readonly message: string;
   readonly [key: string]: unknown;
 }
+export interface RejectedOperationHistoryEntry {
+  readonly operation: OfflineOperation;
+  readonly reason: OfflineOperationError;
+  readonly errorCode: string;
+  readonly rejectedAt: string;
+  readonly attempts: number;
+}
+export type RejectedOperation = RejectedOperationHistoryEntry;
 export type OfflineOperationResponse =
   | {
       readonly status: "ACCEPTED";
@@ -116,11 +131,21 @@ export type OfflineSyncResultListener = (event: OfflineSyncResultEvent) => void 
 
 class MemoryQueueStorage implements OfflineQueueStorage {
   readonly #values = new Map<string, ReadonlyArray<OfflineOperation>>();
+  readonly #rejected = new Map<string, ReadonlyArray<RejectedOperationHistoryEntry>>();
   async load(key: string): Promise<ReadonlyArray<OfflineOperation>> {
     return this.#values.get(key) ?? [];
   }
   async save(key: string, operations: ReadonlyArray<OfflineOperation>): Promise<void> {
     this.#values.set(key, structuredClone(operations));
+  }
+  async loadRejectedHistory(key: string): Promise<ReadonlyArray<RejectedOperationHistoryEntry>> {
+    return this.#rejected.get(key) ?? [];
+  }
+  async saveRejectedHistory(
+    key: string,
+    history: ReadonlyArray<RejectedOperationHistoryEntry>,
+  ): Promise<void> {
+    this.#rejected.set(key, structuredClone(history));
   }
 }
 
@@ -138,6 +163,22 @@ class LocalStorageQueueStorage implements OfflineQueueStorage {
   }
   async save(key: string, operations: ReadonlyArray<OfflineOperation>): Promise<void> {
     this.storage.setItem(key, JSON.stringify(operations));
+  }
+  async loadRejectedHistory(key: string): Promise<ReadonlyArray<RejectedOperationHistoryEntry>> {
+    const value = this.storage.getItem(`${key}:rejected-history`);
+    if (value === null) return [];
+    try {
+      const parsed: unknown = JSON.parse(value);
+      return Array.isArray(parsed) ? (parsed as ReadonlyArray<RejectedOperationHistoryEntry>) : [];
+    } catch {
+      return [];
+    }
+  }
+  async saveRejectedHistory(
+    key: string,
+    history: ReadonlyArray<RejectedOperationHistoryEntry>,
+  ): Promise<void> {
+    this.storage.setItem(`${key}:rejected-history`, JSON.stringify(history));
   }
 }
 
@@ -178,6 +219,40 @@ export class IndexedDBOfflineQueueStorage implements OfflineQueueStorage {
         reject(transaction.error ?? new Error("Offline queue write aborted."));
     });
   }
+  async loadRejectedHistory(key: string): Promise<ReadonlyArray<RejectedOperationHistoryEntry>> {
+    const database = await this.#open();
+    return new Promise((resolve, reject) => {
+      const request = database
+        .transaction("operations", "readonly")
+        .objectStore("operations")
+        .get(`${key}:rejected-history`);
+      request.onsuccess = () =>
+        resolve(
+          Array.isArray(request.result)
+            ? (request.result as ReadonlyArray<RejectedOperationHistoryEntry>)
+            : [],
+        );
+      request.onerror = () =>
+        reject(request.error ?? new Error("Failed to read rejected operation history."));
+    });
+  }
+  async saveRejectedHistory(
+    key: string,
+    history: ReadonlyArray<RejectedOperationHistoryEntry>,
+  ): Promise<void> {
+    const database = await this.#open();
+    return new Promise((resolve, reject) => {
+      const transaction = database.transaction("operations", "readwrite");
+      transaction
+        .objectStore("operations")
+        .put(structuredClone(history), `${key}:rejected-history`);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () =>
+        reject(transaction.error ?? new Error("Failed to save rejected operation history."));
+      transaction.onabort = () =>
+        reject(transaction.error ?? new Error("Rejected operation history write aborted."));
+    });
+  }
   #open(): Promise<IDBDatabase> {
     if (this.#databasePromise !== null) return this.#databasePromise;
     let factory = this.#providedFactory;
@@ -201,27 +276,47 @@ export class IndexedDBOfflineQueueStorage implements OfflineQueueStorage {
   }
 }
 
-function defaultStorage(databaseName?: string): OfflineQueueStorage {
+function availableLocalStorage(): NonNullable<OfflineQueueOptions["storageLike"]> | null {
+  try {
+    const storage = (
+      globalThis as {
+        readonly localStorage?: OfflineQueueOptions["storageLike"];
+      }
+    ).localStorage;
+    return storage ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function defaultStorage(databaseName?: string): {
+  readonly storage: OfflineQueueStorage;
+  readonly capability: OfflineQueueCapability;
+} {
   try {
     const indexedDB = (globalThis as { readonly indexedDB?: IDBFactory }).indexedDB;
     if (indexedDB !== undefined)
-      return new IndexedDBOfflineQueueStorage({
-        indexedDB,
-        ...(databaseName === undefined ? {} : { databaseName }),
-      });
-    const storage = (globalThis as { readonly localStorage?: OfflineQueueOptions["storageLike"] })
-      .localStorage;
-    if (storage !== undefined && storage !== null) return new LocalStorageQueueStorage(storage);
+      return {
+        storage: new IndexedDBOfflineQueueStorage({
+          indexedDB,
+          ...(databaseName === undefined ? {} : { databaseName }),
+        }),
+        capability: "indexeddb",
+      };
+    const storage = availableLocalStorage();
+    if (storage !== undefined && storage !== null)
+      return { storage: new LocalStorageQueueStorage(storage), capability: "localstorage" };
   } catch {
     // Access to localStorage can be denied by privacy mode or a sandbox.
   }
-  return new MemoryQueueStorage();
+  return { storage: new MemoryQueueStorage(), capability: "memory" };
 }
 
-function operationId(operation: OfflineOperation): string {
+export function offlineOperationId(operation: OfflineOperation): string {
+  const identity = operation.request.userId ?? operation.request.anonymousSessionId ?? "anonymous";
   return operation.kind === "checkIn"
-    ? `checkIn:${operation.request.rallyId}:${operation.request.userId ?? "anonymous"}:${operation.request.idempotencyKey}`
-    : `claimReward:${operation.request.rallyId}:${operation.request.userId ?? "anonymous"}:${operation.request.idempotencyKey}`;
+    ? `checkIn:${operation.request.rallyId}:${identity}:${operation.request.idempotencyKey}`
+    : `claimReward:${operation.request.rallyId}:${identity}:${operation.request.idempotencyKey}`;
 }
 
 function requestScope(operation: OfflineOperation): { rallyId: string; userId: string | null } {
@@ -258,13 +353,15 @@ function randomId(): string {
 
 /** Durable, sequential retry queue for operations created while disconnected. */
 export class OfflineQueue {
-  readonly #storage: OfflineQueueStorage;
+  #storage: OfflineQueueStorage;
+  #queueCapability: OfflineQueueCapability;
   readonly #configuredKey: string | undefined;
   #rallyId: string | undefined;
   #userId: string | null;
   readonly #conflictPolicy: SyncConflictPolicy;
   readonly #onSyncConflict: OfflineQueueOptions["onSyncConflict"];
   #operations: OfflineOperation[] = [];
+  #rejectedHistory: RejectedOperationHistoryEntry[] = [];
   #loaded = false;
   #state: SyncState = "idle";
   #error: Error | null = null;
@@ -275,14 +372,26 @@ export class OfflineQueue {
   readonly #retryOptions: Required<SyncRetryOptions>;
   readonly #instanceId = randomId();
   readonly #lockStorage: NonNullable<OfflineQueueOptions["storageLike"]> | null;
+  readonly #observedLocks = new Map<
+    string,
+    { readonly owner: string; readonly expiresAt: number }
+  >();
+  #warnedMemoryLock = false;
   #storageListener: ((event: StorageEvent) => void) | undefined;
   #channel: BroadcastChannel | null = null;
 
   constructor(options: OfflineQueueOptions = {}) {
-    if (options.storage !== undefined) this.#storage = options.storage;
-    else if (options.storageLike !== undefined && options.storageLike !== null)
+    if (options.storage !== undefined) {
+      this.#storage = options.storage;
+      this.#queueCapability = "custom";
+    } else if (options.storageLike !== undefined && options.storageLike !== null) {
       this.#storage = new LocalStorageQueueStorage(options.storageLike);
-    else this.#storage = defaultStorage(options.databaseName);
+      this.#queueCapability = "localstorage";
+    } else {
+      const selected = defaultStorage(options.databaseName);
+      this.#storage = selected.storage;
+      this.#queueCapability = selected.capability;
+    }
     this.#configuredKey = options.key;
     this.#rallyId = options.rallyId;
     this.#userId = options.userId ?? null;
@@ -298,10 +407,7 @@ export class OfflineQueue {
       initialIntervalMs: Math.max(0, retryOptions.initialIntervalMs),
       backoffMultiplier: Math.max(1, retryOptions.backoffMultiplier),
     };
-    this.#lockStorage =
-      options.storageLike ??
-      (globalThis as { readonly localStorage?: OfflineQueueOptions["storageLike"] }).localStorage ??
-      null;
+    this.#lockStorage = options.storageLike ?? availableLocalStorage();
     if (this.#synchronizeInstances) this.#subscribeToExternalChanges();
   }
 
@@ -310,6 +416,12 @@ export class OfflineQueue {
   }
   get pendingCount(): number {
     return this.#operations.length;
+  }
+  get queueCapability(): OfflineQueueCapability {
+    return this.#queueCapability;
+  }
+  get rejectedHistory(): ReadonlyArray<RejectedOperationHistoryEntry> {
+    return this.#rejectedHistory;
   }
   get error(): Error | null {
     return this.#error;
@@ -339,7 +451,21 @@ export class OfflineQueue {
 
   async initialize(): Promise<void> {
     if (this.#loaded) return;
-    this.#operations = (await this.#storage.load(this.#storageKey())).map(normalizeOperation);
+    try {
+      const key = this.#storageKey();
+      this.#operations = (await this.#storage.load(key)).map(normalizeOperation);
+      this.#rejectedHistory =
+        (await this.#storage.loadRejectedHistory?.(key))?.map(normalizeRejectedHistory) ?? [];
+    } catch (error) {
+      if (this.#queueCapability === "memory") throw error;
+      this.#storage = new MemoryQueueStorage();
+      this.#queueCapability = "memory";
+      this.#operations = [];
+      this.#rejectedHistory = [];
+      this.#warnMemoryLock(
+        `Offline queue persistence is unavailable; queued data can be lost after reload (${String(error)}).`,
+      );
+    }
     this.#loaded = true;
   }
 
@@ -387,8 +513,8 @@ export class OfflineQueue {
         throw new Error("Offline operation belongs to another rally or user queue.");
     }
     await this.initialize();
-    const id = operationId(operation);
-    if (this.#operations.some((item) => operationId(item) === id)) return;
+    const id = offlineOperationId(operation);
+    if (this.#operations.some((item) => offlineOperationId(item) === id)) return;
     this.#operations = [...this.#operations, { ...operation, status: "PENDING", attempts: 0 }];
     await this.#storage.save(this.#storageKey(), this.#operations);
     this.#announceChange();
@@ -406,6 +532,52 @@ export class OfflineQueue {
     await this.initialize();
     this.#operations = [];
     await this.#storage.save(this.#storageKey(), this.#operations);
+    this.#announceChange();
+  }
+
+  async discardRejected(operationId: string): Promise<boolean> {
+    await this.initialize();
+    const next = this.#rejectedHistory.filter(
+      (entry) => offlineOperationId(entry.operation) !== operationId,
+    );
+    if (next.length === this.#rejectedHistory.length) return false;
+    this.#rejectedHistory = next;
+    await this.#saveRejectedHistory();
+    this.#announceChange();
+    return true;
+  }
+
+  async retryRejected(operationId: string): Promise<boolean> {
+    await this.initialize();
+    const entry = this.#rejectedHistory.find(
+      (candidate) => offlineOperationId(candidate.operation) === operationId,
+    );
+    if (entry === undefined) return false;
+    if (!this.#operations.some((operation) => offlineOperationId(operation) === operationId))
+      this.#operations = [
+        ...this.#operations,
+        { ...entry.operation, status: "PENDING", attempts: 0 },
+      ];
+    this.#rejectedHistory = this.#rejectedHistory.filter((candidate) => candidate !== entry);
+    await this.#storage.save(this.#storageKey(), this.#operations);
+    await this.#saveRejectedHistory();
+    this.#announceChange();
+    return true;
+  }
+
+  async discardRejectedOperation(operationId: string): Promise<boolean> {
+    return this.discardRejected(operationId);
+  }
+
+  async retryRejectedOperation(operationId: string): Promise<boolean> {
+    return this.retryRejected(operationId);
+  }
+
+  async clearRejectedHistory(): Promise<void> {
+    await this.initialize();
+    if (this.#rejectedHistory.length === 0) return;
+    this.#rejectedHistory = [];
+    await this.#saveRejectedHistory();
     this.#announceChange();
   }
 
@@ -438,7 +610,7 @@ export class OfflineQueue {
         };
       }
     ).navigator?.locks;
-    if (locks !== undefined) {
+    if (locks !== undefined && typeof locks.request === "function") {
       let callbackStarted = false;
       try {
         const acquired = await locks.request(
@@ -462,6 +634,10 @@ export class OfflineQueue {
         if (callbackStarted) throw error;
       }
     }
+    if (this.#lockStorage === null)
+      this.#warnMemoryLock(
+        "No cross-tab storage lock is available; offline sync is single-tab only.",
+      );
     await this.#runWithStorageLock(sender);
   }
 
@@ -499,7 +675,10 @@ export class OfflineQueue {
           const error = errorValue(response.error ?? response.reason, "RETRYABLE_ERROR");
           await this.#updateOperationStatus("PENDING", attempt + 1);
           await this.#syncResultListener?.({ operation, status: response.status, error });
-          if (attempt >= this.#retryOptions.maxRetries) throw new Error(error.message);
+          if (attempt >= this.#retryOptions.maxRetries) {
+            await this.#updateOperationStatus("FAILED_RETRYABLE", attempt + 1);
+            throw new Error(error.message);
+          }
           const interval =
             this.#retryOptions.initialIntervalMs * this.#retryOptions.backoffMultiplier ** attempt;
           await new Promise<void>((resolve) => setTimeout(resolve, Math.max(0, interval)));
@@ -509,21 +688,37 @@ export class OfflineQueue {
         const state =
           response.state ??
           (result !== undefined && "conflict" in result && result.conflict === true
-            ? await this.resolveConflict(operation, result.localState, result.serverState)
+            ? result.serverState
             : result !== undefined && "ok" in result && result.ok
               ? result.value.state
               : undefined);
         const error =
           response.status === "REJECTED_PERMANENT"
-            ? errorValue(response.error ?? response.reason, "REJECTED_PERMANENT")
+            ? errorValue(
+                response.error ??
+                  response.reason ??
+                  (result !== undefined && "ok" in result && !result.ok ? result.error : undefined),
+                "REJECTED_PERMANENT",
+              )
             : undefined;
         await this.#updateOperationStatus(
-          response.status === "ACCEPTED" ? "ACCEPTED" : "REJECTED",
+          response.status === "ACCEPTED" ? "ACCEPTED" : "REJECTED_PERMANENT",
           attempt + 1,
         );
-        const fallbackState =
-          response.status === "REJECTED_PERMANENT" ? operation.request.state : undefined;
-        const eventState = state ?? fallbackState;
+        const eventState = state;
+        if (response.status === "REJECTED_PERMANENT" && error !== undefined) {
+          this.#rejectedHistory = [
+            ...this.#rejectedHistory,
+            {
+              operation: { ...operation, status: "REJECTED_PERMANENT", attempts: attempt + 1 },
+              reason: error,
+              errorCode: error.code,
+              rejectedAt: new Date().toISOString(),
+              attempts: attempt + 1,
+            },
+          ];
+          await this.#saveRejectedHistory();
+        }
         this.#operations = this.#operations.slice(1);
         await this.#storage.save(this.#storageKey(), this.#operations);
         this.#announceChange();
@@ -545,10 +740,7 @@ export class OfflineQueue {
     }
   }
 
-  async #updateOperationStatus(
-    status: OfflineOperationLifecycleStatus,
-    attempts: number,
-  ): Promise<void> {
+  async #updateOperationStatus(status: QueueOperationStatus, attempts: number): Promise<void> {
     const operation = this.#operations[0];
     if (operation === undefined) return;
     this.#operations = [{ ...operation, status, attempts }, ...this.#operations.slice(1)];
@@ -560,7 +752,11 @@ export class OfflineQueue {
     const windowLike = (globalThis as { readonly window?: Window }).window;
     if (windowLike !== undefined) {
       this.#storageListener = (event) => {
-        if (event.key === this.#storageKey()) void this.#reloadFromStorage();
+        if (
+          event.key === this.#storageKey() ||
+          event.key === `${this.#storageKey()}:rejected-history`
+        )
+          void this.#reloadFromStorage();
       };
       windowLike.addEventListener("storage", this.#storageListener);
     }
@@ -570,6 +766,25 @@ export class OfflineQueue {
       try {
         this.#channel = new Channel("stamprally:queue-sync");
         this.#channel.addEventListener("message", (event: MessageEvent<unknown>) => {
+          if (typeof event.data === "object" && event.data !== null) {
+            const data = event.data as {
+              readonly type?: unknown;
+              readonly lockKey?: unknown;
+              readonly owner?: unknown;
+              readonly expiresAt?: unknown;
+            };
+            if (data.type === "lock" && data.lockKey === this.#lockKey()) {
+              this.#observedLocks.set(data.lockKey, {
+                owner: typeof data.owner === "string" ? data.owner : "unknown",
+                expiresAt: typeof data.expiresAt === "number" ? data.expiresAt : 0,
+              });
+              return;
+            }
+            if (data.type === "unlock" && data.lockKey === this.#lockKey()) {
+              this.#observedLocks.delete(data.lockKey);
+              return;
+            }
+          }
           if (
             typeof event.data === "object" &&
             event.data !== null &&
@@ -585,13 +800,21 @@ export class OfflineQueue {
   }
 
   #announceChange(): void {
-    this.#channel?.postMessage({ key: this.#storageKey(), owner: this.#instanceId });
+    this.#channel?.postMessage({
+      type: "change",
+      key: this.#storageKey(),
+      owner: this.#instanceId,
+    });
   }
 
   async #reloadFromStorage(): Promise<void> {
     if (this.#state === "syncing") return;
     try {
-      this.#operations = (await this.#storage.load(this.#storageKey())).map(normalizeOperation);
+      const key = this.#storageKey();
+      this.#operations = (await this.#storage.load(key)).map(normalizeOperation);
+      this.#rejectedHistory =
+        (await this.#storage.loadRejectedHistory?.(key))?.map(normalizeRejectedHistory) ??
+        this.#rejectedHistory;
       this.#loaded = true;
     } catch {
       // A transient storage failure must not destroy the in-memory queue.
@@ -607,6 +830,9 @@ export class OfflineQueue {
     const now = Date.now();
     const local = syncLocks.get(key);
     if (local !== undefined && local.expiresAt > now && local.owner !== this.#instanceId)
+      return false;
+    const observed = this.#observedLocks.get(key);
+    if (observed !== undefined && observed.expiresAt > now && observed.owner !== this.#instanceId)
       return false;
     if (this.#lockStorage !== null) {
       try {
@@ -626,8 +852,14 @@ export class OfflineQueue {
           key,
           JSON.stringify({ owner: this.#instanceId, expiresAt: now + SYNC_LOCK_TTL_MS }),
         );
+        this.#channel?.postMessage({
+          type: "lock",
+          lockKey: key,
+          owner: this.#instanceId,
+          expiresAt: now + SYNC_LOCK_TTL_MS,
+        });
       } catch {
-        // The in-process lock remains useful when persistent storage is unavailable.
+        this.#warnMemoryLock("Persistent lock access failed; offline sync is single-tab only.");
       }
     }
     syncLocks.set(key, { owner: this.#instanceId, expiresAt: now + SYNC_LOCK_TTL_MS });
@@ -646,6 +878,7 @@ export class OfflineQueue {
           (JSON.parse(value) as { readonly owner?: unknown }).owner === this.#instanceId
         )
           this.#lockStorage.removeItem?.(key);
+        this.#channel?.postMessage({ type: "unlock", lockKey: key, owner: this.#instanceId });
       } catch {
         // Lock expiry protects against an unreadable lock record.
       }
@@ -691,13 +924,42 @@ export class OfflineQueue {
         : configured) ?? this.#conflictPolicy;
     return resolveRallyStateConflict(serverState, localState, { policy });
   }
+
+  async #saveRejectedHistory(): Promise<void> {
+    await this.#storage.saveRejectedHistory?.(this.#storageKey(), this.#rejectedHistory);
+  }
+
+  #warnMemoryLock(message: string): void {
+    if (this.#warnedMemoryLock) return;
+    this.#warnedMemoryLock = true;
+    console.warn(`[@stamprally/core] ${message}`);
+  }
 }
 
 function normalizeOperation(operation: OfflineOperation): OfflineOperation {
+  const status = (operation as { readonly status?: string }).status;
   return {
     ...operation,
-    status: operation.status === "IN_FLIGHT" ? "PENDING" : (operation.status ?? "PENDING"),
+    status:
+      status === "IN_FLIGHT" || status === "REJECTED"
+        ? "PENDING"
+        : status === "RETRYABLE_ERROR"
+          ? "FAILED_RETRYABLE"
+          : (operation.status ?? "PENDING"),
     attempts: operation.attempts ?? 0,
+  };
+}
+
+function normalizeRejectedHistory(
+  entry: RejectedOperationHistoryEntry,
+): RejectedOperationHistoryEntry {
+  return {
+    ...entry,
+    operation: normalizeOperation(entry.operation),
+    reason: errorValue(entry.reason, "REJECTED_PERMANENT"),
+    errorCode: entry.errorCode || entry.reason.code,
+    rejectedAt: entry.rejectedAt || new Date(0).toISOString(),
+    attempts: entry.attempts ?? entry.operation.attempts ?? 0,
   };
 }
 

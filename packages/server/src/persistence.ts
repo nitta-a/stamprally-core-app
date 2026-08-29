@@ -18,6 +18,10 @@ export interface ClaimRewardTransactionParams {
   readonly idempotencyKey?: string;
   readonly proofData?: unknown;
   readonly idempotencyTtlMs?: number;
+  /** The configured per-reward stock limit, or null for unlimited stock. */
+  readonly rewardStockLimit: number | null;
+  /** The configured shared stock limit, or null when shared inventory is disabled. */
+  readonly sharedStockLimit: number | null;
   /** Used when the first claim is made before a user state has been stored. */
   readonly initialUserState?: UserRallyState;
   readonly stockKey?: string;
@@ -74,6 +78,8 @@ export interface ServerPersistenceAdapter {
       readonly userState: UserRallyState;
     }) => ClaimRewardTransactionMutation,
   ): Promise<{ readonly success: boolean; readonly error?: string }>;
+  /** Set false when the adapter cannot persist per-reward inventory atomically. */
+  readonly supportsRewardStock?: boolean;
   acquireLock(rallyId: string, lockKey: string, ttlMs: number): Promise<boolean>;
   releaseLock(rallyId: string, lockKey: string): Promise<void>;
   getRewardStock(rallyId: string, rewardId: string): Promise<number | null>;
@@ -100,6 +106,7 @@ export interface InMemoryServerPersistenceOptions {
   readonly stocks?: Readonly<Record<string, number>>;
 }
 export class InMemoryServerPersistenceAdapter implements ServerPersistenceAdapter {
+  readonly supportsRewardStock = true;
   readonly #locks = new Map<string, number>();
   readonly #idempotent = new Map<string, TimedValue<unknown>>();
   readonly #states = new Map<string, UserRallyState>();
@@ -108,6 +115,7 @@ export class InMemoryServerPersistenceAdapter implements ServerPersistenceAdapte
   readonly #claims = new Map<string, number>();
   readonly #claimRecords: UserClaimRecord[] = [];
   readonly #auditLogs: AuditLog[] = [];
+  readonly #transactionTails = new Map<string, Promise<void>>();
   constructor(options: InMemoryServerPersistenceOptions = {}) {
     this.#stocks = new Map();
     this.#stockDefaults = new Map();
@@ -170,7 +178,24 @@ export class InMemoryServerPersistenceAdapter implements ServerPersistenceAdapte
     }) => ClaimRewardTransactionMutation,
   ): Promise<{ readonly success: boolean; readonly error?: string }> {
     try {
+      const initialStock =
+        params.initialStock !== undefined
+          ? params.initialStock
+          : params.stockKey === "__shared__"
+            ? params.sharedStockLimit
+            : params.rewardStockLimit;
+      const initialSecondaryStock =
+        params.initialSecondaryStock !== undefined
+          ? params.initialSecondaryStock
+          : params.rewardStockLimit;
       return await this.runTransaction(params.rallyId, async () => {
+        if (params.idempotencyKey !== undefined) {
+          const previous = await this.getIdempotentResult<unknown>(
+            params.rallyId,
+            params.idempotencyKey,
+          );
+          if (previous !== null) return { success: true };
+        }
         const userState =
           (await this.getUserState(params.rallyId, params.userId)) ?? params.initialUserState;
         if (userState === undefined)
@@ -184,8 +209,8 @@ export class InMemoryServerPersistenceAdapter implements ServerPersistenceAdapte
             ? null
             : await this.getRewardStock(params.rallyId, params.secondaryStockKey);
         const mutationResult = mutation({
-          stock: storedStock ?? params.initialStock ?? null,
-          secondaryStock: storedSecondaryStock ?? params.initialSecondaryStock ?? null,
+          stock: storedStock ?? initialStock,
+          secondaryStock: storedSecondaryStock ?? initialSecondaryStock,
           claimCount: await this.getUserClaimCount(params.rallyId, params.userId, params.rewardId),
           userState,
         });
@@ -205,31 +230,26 @@ export class InMemoryServerPersistenceAdapter implements ServerPersistenceAdapte
           params.rallyId,
           params.stockKey ?? params.rewardId,
         );
-        const effectiveStock = currentStock ?? params.initialStock ?? null;
-        if (
-          currentStock === null &&
-          params.initialStock !== undefined &&
-          params.initialStock !== null
-        )
+        const effectiveStock = currentStock ?? initialStock;
+        if (currentStock === null && initialStock !== undefined && initialStock !== null)
           this.#stocks.set(
             this.#stockKey(params.rallyId, params.stockKey ?? params.rewardId),
-            params.initialStock,
+            initialStock,
           );
         const currentSecondaryStock =
           params.secondaryStockKey === undefined
             ? null
             : await this.getRewardStock(params.rallyId, params.secondaryStockKey);
-        const effectiveSecondaryStock =
-          currentSecondaryStock ?? params.initialSecondaryStock ?? null;
+        const effectiveSecondaryStock = currentSecondaryStock ?? initialSecondaryStock;
         if (
           currentSecondaryStock === null &&
           params.secondaryStockKey !== undefined &&
-          params.initialSecondaryStock !== undefined &&
-          params.initialSecondaryStock !== null
+          initialSecondaryStock !== undefined &&
+          initialSecondaryStock !== null
         )
           this.#stocks.set(
             this.#stockKey(params.rallyId, params.secondaryStockKey),
-            params.initialSecondaryStock,
+            initialSecondaryStock,
           );
         if (
           effectiveStock !== null &&
@@ -429,32 +449,43 @@ export class InMemoryServerPersistenceAdapter implements ServerPersistenceAdapte
   }
 
   async runTransaction<T>(
-    _rallyId: string,
+    rallyId: string,
     operation: (transaction: ServerPersistenceAdapter) => Promise<T>,
   ): Promise<T> {
-    const snapshot = {
-      stocks: new Map(this.#stocks),
-      idempotent: new Map(this.#idempotent),
-      states: new Map(this.#states),
-      claims: new Map(this.#claims),
-      claimRecords: structuredClone(this.#claimRecords),
-      auditLogs: structuredClone(this.#auditLogs),
-    };
-    try {
-      return await operation(this);
-    } catch (error) {
-      this.#stocks.clear();
-      for (const [key, value] of snapshot.stocks) this.#stocks.set(key, value);
-      this.#idempotent.clear();
-      for (const [key, value] of snapshot.idempotent)
-        this.#idempotent.set(key, structuredClone(value));
-      this.#states.clear();
-      for (const [key, value] of snapshot.states) this.#states.set(key, structuredClone(value));
-      this.#claims.clear();
-      for (const [key, value] of snapshot.claims) this.#claims.set(key, value);
-      this.#claimRecords.splice(0, this.#claimRecords.length, ...snapshot.claimRecords);
-      this.#auditLogs.splice(0, this.#auditLogs.length, ...snapshot.auditLogs);
-      throw error;
-    }
+    const previous = this.#transactionTails.get(rallyId) ?? Promise.resolve();
+    const current = previous.then(async () => {
+      const snapshot = {
+        stocks: new Map(this.#stocks),
+        idempotent: new Map(this.#idempotent),
+        states: new Map(this.#states),
+        claims: new Map(this.#claims),
+        claimRecords: structuredClone(this.#claimRecords),
+        auditLogs: structuredClone(this.#auditLogs),
+      };
+      try {
+        return await operation(this);
+      } catch (error) {
+        this.#stocks.clear();
+        for (const [key, value] of snapshot.stocks) this.#stocks.set(key, value);
+        this.#idempotent.clear();
+        for (const [key, value] of snapshot.idempotent)
+          this.#idempotent.set(key, structuredClone(value));
+        this.#states.clear();
+        for (const [key, value] of snapshot.states) this.#states.set(key, structuredClone(value));
+        this.#claims.clear();
+        for (const [key, value] of snapshot.claims) this.#claims.set(key, value);
+        this.#claimRecords.splice(0, this.#claimRecords.length, ...snapshot.claimRecords);
+        this.#auditLogs.splice(0, this.#auditLogs.length, ...snapshot.auditLogs);
+        throw error;
+      }
+    });
+    this.#transactionTails.set(
+      rallyId,
+      current.then(
+        () => undefined,
+        () => undefined,
+      ),
+    );
+    return current;
   }
 }
