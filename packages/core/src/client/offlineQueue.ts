@@ -1,6 +1,4 @@
-import type { UserRallyState } from "../domain/index.js";
-import type { ConflictResolutionPolicy } from "../engine/sync.js";
-import { resolveRallyStateConflict } from "../engine/sync.js";
+import type { AdminRallyConfig, PublicRallyConfig, UserRallyState } from "../domain/index.js";
 import type {
   CheckInRequest,
   CheckInResult,
@@ -17,23 +15,26 @@ export type QueueOperationStatus =
   | "REJECTED_PERMANENT"
   | "FAILED_RETRYABLE";
 export type OfflineQueueCapability = "indexeddb" | "localstorage" | "memory" | "custom";
+export type OfflineStorageCapability = OfflineQueueCapability | "volatile_single_tab";
 
 export type OfflineOperation =
   | {
       readonly kind: "checkIn";
       readonly request: CheckInRequest;
+      readonly optimisticState?: UserRallyState;
       readonly status?: QueueOperationStatus;
       readonly attempts?: number;
     }
   | {
       readonly kind: "claimReward";
       readonly request: ClaimRequest;
+      readonly optimisticState?: UserRallyState;
       readonly status?: QueueOperationStatus;
       readonly attempts?: number;
     };
 export type OfflineResult = CheckInResult | ClaimResult | UserRallyState;
 export type SyncState = "idle" | "syncing" | "error";
-export type SyncConflictPolicy = ConflictResolutionPolicy;
+export type SyncConflictPolicy = "authoritative_replay";
 export interface OfflineConflictResult {
   readonly conflict: true;
   readonly localState: UserRallyState;
@@ -50,6 +51,13 @@ export interface OfflineQueueStorage {
   ): Promise<void>;
 }
 
+export interface OfflineQueueCapabilityWarning {
+  readonly type: "STORAGE_CAPABILITY_WARNING";
+  readonly storageCapability: "volatile_single_tab" | "memory";
+  readonly isStoragePersistent: boolean;
+  readonly message: string;
+}
+
 export interface OfflineQueueOptions {
   readonly storage?: OfflineQueueStorage;
   readonly storageLike?: {
@@ -63,10 +71,6 @@ export interface OfflineQueueOptions {
   /** User scope used by the default durable key. */
   readonly userId?: string | null;
   readonly databaseName?: string;
-  readonly conflictPolicy?: SyncConflictPolicy;
-  readonly onSyncConflict?:
-    | SyncConflictPolicy
-    | ((context: OfflineConflict) => SyncConflictPolicy | Promise<SyncConflictPolicy>);
   /** Enables storage-event/BroadcastChannel synchronization when browser APIs exist. */
   readonly synchronizeInstances?: boolean;
   readonly retryOptions?: SyncRetryOptions;
@@ -79,12 +83,6 @@ export interface SyncRetryOptions {
   readonly maxRetries?: number;
   readonly initialIntervalMs?: number;
   readonly backoffMultiplier?: number;
-}
-
-export interface OfflineConflict {
-  readonly operation: OfflineOperation;
-  readonly localState: UserRallyState;
-  readonly serverState: UserRallyState;
 }
 
 export type OfflineSender = (
@@ -406,8 +404,6 @@ export class OfflineQueue {
   readonly #configuredKey: string | undefined;
   #rallyId: string | undefined;
   #userId: string | null;
-  readonly #conflictPolicy: SyncConflictPolicy;
-  readonly #onSyncConflict: OfflineQueueOptions["onSyncConflict"];
   #operations: OfflineOperation[] = [];
   #rejectedHistory: RejectedOperationHistoryEntry[] = [];
   #loaded = false;
@@ -426,6 +422,8 @@ export class OfflineQueue {
     { readonly owner: string; readonly expiresAt: number }
   >();
   #warnedMemoryLock = false;
+  #capabilityWarningListener: ((event: OfflineQueueCapabilityWarning) => void) | undefined;
+  #replayConfig: AdminRallyConfig | PublicRallyConfig | undefined;
   #storageListener: ((event: StorageEvent) => void) | undefined;
   #channel: BroadcastChannel | null = null;
 
@@ -444,8 +442,6 @@ export class OfflineQueue {
     this.#configuredKey = options.key;
     this.#rallyId = options.rallyId;
     this.#userId = options.userId ?? null;
-    this.#conflictPolicy = options.conflictPolicy ?? "authoritative_replay";
-    this.#onSyncConflict = options.onSyncConflict;
     this.#synchronizeInstances = options.synchronizeInstances ?? true;
     const retryOptions = {
       ...DEFAULT_RETRY_OPTIONS,
@@ -469,6 +465,17 @@ export class OfflineQueue {
   get queueCapability(): OfflineQueueCapability {
     return this.#queueCapability;
   }
+  get storageCapability(): OfflineStorageCapability {
+    if (this.#queueCapability === "memory") return "memory";
+    const locks = (globalThis as { readonly navigator?: { readonly locks?: unknown } }).navigator
+      ?.locks;
+    return locks !== undefined || this.#lockStorage !== null
+      ? this.#queueCapability
+      : "volatile_single_tab";
+  }
+  get isStoragePersistent(): boolean {
+    return this.#queueCapability !== "memory";
+  }
   get rejectedHistory(): ReadonlyArray<RejectedOperationHistoryEntry> {
     return this.#rejectedHistory;
   }
@@ -477,9 +484,6 @@ export class OfflineQueue {
   }
   get operations(): ReadonlyArray<OfflineOperation> {
     return this.#operations;
-  }
-  get conflictPolicy(): SyncConflictPolicy {
-    return this.#conflictPolicy;
   }
 
   get storageKey(): string {
@@ -502,6 +506,16 @@ export class OfflineQueue {
     this.#changeListener = listener;
   }
 
+  setCapabilityWarningListener(
+    listener: ((event: OfflineQueueCapabilityWarning) => void) | undefined,
+  ): void {
+    this.#capabilityWarningListener = listener;
+  }
+
+  setReplayConfig(config: AdminRallyConfig | PublicRallyConfig): void {
+    this.#replayConfig = config;
+  }
+
   async initialize(): Promise<void> {
     if (this.#loaded) return;
     try {
@@ -519,6 +533,8 @@ export class OfflineQueue {
         `Offline queue persistence is unavailable; queued data can be lost after reload (${String(error)}).`,
       );
     }
+    if (this.#queueCapability === "memory")
+      this.#warnMemoryLock("Offline queue persistence is unavailable; queued data is memory-only.");
     this.#loaded = true;
   }
 
@@ -573,12 +589,20 @@ export class OfflineQueue {
     this.#announceChange();
   }
 
-  async enqueueCheckIn(request: CheckInRequest): Promise<void> {
-    return this.enqueue({ kind: "checkIn", request });
+  async enqueueCheckIn(request: CheckInRequest, optimisticState?: UserRallyState): Promise<void> {
+    return this.enqueue({
+      kind: "checkIn",
+      request,
+      ...(optimisticState === undefined ? {} : { optimisticState }),
+    });
   }
 
-  async enqueueClaimReward(request: ClaimRequest): Promise<void> {
-    return this.enqueue({ kind: "claimReward", request });
+  async enqueueClaimReward(request: ClaimRequest, optimisticState?: UserRallyState): Promise<void> {
+    return this.enqueue({
+      kind: "claimReward",
+      request,
+      ...(optimisticState === undefined ? {} : { optimisticState }),
+    });
   }
 
   async clear(): Promise<void> {
@@ -688,7 +712,7 @@ export class OfflineQueue {
         if (callbackStarted) throw error;
       }
     }
-    if (this.#lockStorage === null)
+    if (this.storageCapability === "volatile_single_tab")
       this.#warnMemoryLock(
         "No cross-tab storage lock is available; offline sync is single-tab only.",
       );
@@ -709,6 +733,7 @@ export class OfflineQueue {
       while (this.#operations.length > 0) {
         const operation = this.#operations[0];
         if (operation === undefined) break;
+        if (await this.#rejectFailedPrerequisite(operation)) continue;
         let attempt = 0;
         let response: {
           readonly status: OfflineOperationStatus;
@@ -804,6 +829,48 @@ export class OfflineQueue {
     this.#operations = [{ ...operation, status, attempts }, ...this.#operations.slice(1)];
     await this.#storage.save(this.#storageKey(), this.#operations);
     this.#announceChange();
+  }
+
+  async #rejectFailedPrerequisite(operation: OfflineOperation): Promise<boolean> {
+    if (operation.kind !== "checkIn" || this.#replayConfig === undefined) return false;
+    const spot = this.#replayConfig.spots.find(
+      (candidate) => candidate.id === operation.request.spotId,
+    );
+    if (spot === undefined) return false;
+    const failedSpots = new Set(
+      this.#rejectedHistory
+        .filter((entry) => entry.operation.kind === "checkIn")
+        .map((entry) =>
+          entry.operation.kind === "checkIn" ? entry.operation.request.spotId : undefined,
+        )
+        .filter((spotId): spotId is string => spotId !== undefined),
+    );
+    if (!spot.prerequisites?.some((prerequisite) => failedSpots.has(prerequisite))) return false;
+    const error: OfflineOperationError = {
+      code: "REJECTED_PREREQUISITE_FAILED",
+      message: "A prerequisite operation was rejected by the server.",
+    };
+    const rejectedOperation = { ...operation, status: "REJECTED_PERMANENT" as const };
+    this.#rejectedHistory = [
+      ...this.#rejectedHistory,
+      {
+        operation: rejectedOperation,
+        reason: error,
+        errorCode: error.code,
+        rejectedAt: new Date().toISOString(),
+        attempts: operation.attempts ?? 0,
+      },
+    ];
+    this.#operations = this.#operations.slice(1);
+    await this.#storage.save(this.#storageKey(), this.#operations);
+    await this.#saveRejectedHistory();
+    this.#announceChange();
+    await this.#syncResultListener?.({
+      operation,
+      status: "REJECTED_PERMANENT",
+      error,
+    });
+    return true;
   }
 
   #subscribeToExternalChanges(): void {
@@ -971,19 +1038,6 @@ export class OfflineQueue {
     return { status: "ACCEPTED", result: value };
   }
 
-  async resolveConflict(
-    operation: OfflineOperation,
-    localState: UserRallyState,
-    serverState: UserRallyState,
-  ): Promise<UserRallyState> {
-    const configured = this.#onSyncConflict;
-    const policy =
-      (typeof configured === "function"
-        ? await configured({ operation, localState, serverState })
-        : configured) ?? this.#conflictPolicy;
-    return resolveRallyStateConflict(serverState, localState, { policy });
-  }
-
   async #saveRejectedHistory(): Promise<void> {
     await this.#storage.saveRejectedHistory?.(this.#storageKey(), this.#rejectedHistory);
   }
@@ -992,6 +1046,12 @@ export class OfflineQueue {
     if (this.#warnedMemoryLock) return;
     this.#warnedMemoryLock = true;
     console.warn(`[@stamprally/core] ${message}`);
+    this.#capabilityWarningListener?.({
+      type: "STORAGE_CAPABILITY_WARNING",
+      storageCapability: this.storageCapability === "memory" ? "memory" : "volatile_single_tab",
+      isStoragePersistent: this.isStoragePersistent,
+      message,
+    });
   }
 }
 

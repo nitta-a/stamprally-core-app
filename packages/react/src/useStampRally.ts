@@ -4,6 +4,7 @@ import type {
   ClaimOptions,
   ClaimResult,
   OfflineQueueCapability,
+  OfflineStorageCapability,
   RejectedOperationHistoryEntry,
   StampRallyClient,
   SyncEventListener,
@@ -20,6 +21,8 @@ export interface UseStampRallySyncState {
   readonly isSyncing: boolean;
   readonly pendingCount: number;
   readonly rejectedHistory: ReadonlyArray<RejectedOperationHistoryEntry>;
+  readonly storageCapability: OfflineStorageCapability;
+  readonly isStoragePersistent: boolean;
 }
 export interface UseStampRallyReturn {
   readonly state: UserRallyState | null;
@@ -39,6 +42,8 @@ export interface UseStampRallyReturn {
   readonly isSyncing: boolean;
   readonly pendingCount: number;
   readonly queueCapability: OfflineQueueCapability;
+  readonly storageCapability: OfflineStorageCapability;
+  readonly isStoragePersistent: boolean;
   readonly rejectedHistory: ReadonlyArray<RejectedOperationHistoryEntry>;
   readonly discardRejected: (operationId: string) => Promise<boolean>;
   readonly retryRejected: (operationId: string) => Promise<boolean>;
@@ -137,11 +142,15 @@ export function useStampRally(
       isSyncing: client.syncState === "syncing",
       pendingCount: client.pendingCount,
       rejectedHistory: client.rejectedHistory,
+      storageCapability: client.storageCapability,
+      isStoragePersistent: client.isStoragePersistent,
     },
     syncStatus: client.syncState,
     isSyncing: client.syncState === "syncing",
     pendingCount: client.pendingCount,
     queueCapability: client.queueCapability,
+    storageCapability: client.storageCapability,
+    isStoragePersistent: client.isStoragePersistent,
     rejectedHistory: client.rejectedHistory,
     discardRejected: client.discardRejected.bind(client),
     retryRejected: client.retryRejected.bind(client),

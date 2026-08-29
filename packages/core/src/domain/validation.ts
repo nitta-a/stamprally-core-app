@@ -138,7 +138,11 @@ function theme(value: unknown, path: string, errors: ValidationError[]): void {
   finiteNumber(value, "gridColumns", path, errors, 1);
   if (typeof value.gridColumns === "number" && !Number.isInteger(value.gridColumns))
     add(errors, `${path}.gridColumns`, "Expected an integer.", "invalid_integer");
-  if (hasOwn(value, "unclaimedOpacity")) finiteNumber(value, "unclaimedOpacity", path, errors, 0);
+  if (hasOwn(value, "unclaimedOpacity")) {
+    finiteNumber(value, "unclaimedOpacity", path, errors, 0);
+    if (typeof value.unclaimedOpacity === "number" && value.unclaimedOpacity > 1)
+      add(errors, `${path}.unclaimedOpacity`, "Expected a value between 0 and 1.", "out_of_range");
+  }
 }
 
 function externalReferences(value: unknown, path: string, errors: ValidationError[]): void {
@@ -313,12 +317,14 @@ function reward(value: unknown, path: string, errors: ValidationError[], isPubli
     )
   )
     add(errors, `${path}.redemptionMethod`, "Unknown redemption method.", "invalid_enum");
-  finiteNumber(value, "requiredStampCount", path, errors, 0);
+  nonNegativeInteger(value, "requiredStampCount", path, errors);
   for (const key of ["stockLimit", "userClaimLimit"]) {
     if (hasOwn(value, key) && value[key] !== undefined) {
       nonNegativeInteger(value, key, path, errors);
     }
   }
+  optionalString(value, "stockKey", path, errors);
+  optionalString(value, "secondaryStockKey", path, errors);
   optionalString(value, "validUntil", path, errors);
   if (typeof value.validUntil === "string" && Number.isNaN(Date.parse(value.validUntil)))
     add(errors, `${path}.validUntil`, "Expected a valid date string.", "invalid_date");
@@ -367,8 +373,25 @@ function validate(value: unknown, isPublic: boolean): ReadonlyArray<ValidationEr
       if (!isRecord(value.inventory))
         add(errors, "$.inventory", "Expected an object.", "invalid_type");
       else {
-        for (const [key, item] of Object.entries(value.inventory))
+        for (const [key, item] of Object.entries(value.inventory)) {
+          if (key === "global") {
+            add(
+              errors,
+              "$.inventory.global",
+              "Use sharedStock instead of global.",
+              "deprecated_field",
+            );
+            continue;
+          }
           if (item !== undefined) nonNegativeInteger(value.inventory, key, "$.inventory", errors);
+        }
+        if (hasOwn(value.inventory, "sharedStock") && hasOwn(value.inventory, "global"))
+          add(
+            errors,
+            "$.inventory",
+            "sharedStock and global cannot be configured together.",
+            "conflicting_fields",
+          );
       }
     }
     if (
@@ -466,6 +489,33 @@ export function validateRallyConfigRelations(
     reward.conditions?.forEach((condition, conditionIndex) => {
       visit(condition, `rewards[${index}].conditions[${conditionIndex}]`);
     });
+    if (reward.requiredStampCount > config.spots.length)
+      add(
+        errors,
+        `rewards[${index}].requiredStampCount`,
+        "requiredStampCount cannot exceed the number of spots.",
+        "required_stamp_count_exceeds_spots",
+      );
+    const inventory = "inventory" in config ? config.inventory : undefined;
+    for (const [field, key] of [
+      ["stockKey", reward.stockKey],
+      ["secondaryStockKey", reward.secondaryStockKey],
+    ] as const) {
+      if (key !== undefined && key !== "__shared__" && inventory?.[key] === undefined)
+        add(
+          errors,
+          `rewards[${index}].${field}`,
+          "Referenced inventory key does not exist.",
+          "missing_inventory_key",
+        );
+    }
+    if (reward.stockKey === "__shared__" && inventory?.sharedStock === undefined)
+      add(
+        errors,
+        `rewards[${index}].stockKey`,
+        "sharedStock is not defined.",
+        "missing_inventory_key",
+      );
   });
 
   const visiting = new Set<string>();

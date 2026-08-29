@@ -4,6 +4,7 @@ import {
   evaluateSpotStatus,
   InMemoryOfflineQueueStorage,
   OfflineQueue,
+  rebuildUserStateFromLog,
   resolveRallyStateConflict,
   rollbackOptimisticOperation,
   StampRallyClient,
@@ -23,26 +24,60 @@ const state = (
 });
 
 describe("resolveRallyStateConflict", () => {
-  it("merges stamp records and gives consumed rewards priority", () => {
+  it("uses the server snapshot as the replay baseline", () => {
     const server = state(["server"], "CONSUMED");
     const local = {
       ...state(["local"], "AVAILABLE"),
       rewards: [...state([], "AVAILABLE").rewards, { rewardId: "r2", status: "CONSUMED" as const }],
     };
     const merged = resolveRallyStateConflict(server, local);
-    expect(merged.records.map((record) => record.stampId)).toEqual(["server", "local"]);
-    expect(merged.rewards).toEqual([
-      { rewardId: "r1", status: "CONSUMED" },
-      { rewardId: "r2", status: "CONSUMED" },
-    ]);
+    expect(merged.records.map((record) => record.stampId)).toEqual(["server"]);
+    expect(merged.rewards).toEqual([{ rewardId: "r1", status: "CONSUMED" }]);
     expect(server.records).toHaveLength(1);
     expect(local.records).toHaveLength(1);
   });
 
-  it("returns the server state for server_wins", () => {
+  it("does not mutate the server baseline", () => {
     const server = state(["server"], "LOCKED");
     const local = state(["local"], "CONSUMED");
-    expect(resolveRallyStateConflict(server, local, { policy: "server_wins" })).toBe(server);
+    expect(resolveRallyStateConflict(server, local)).not.toBe(server);
+    expect(resolveRallyStateConflict(server, local)).toEqual(server);
+  });
+});
+
+describe("rebuildUserStateFromLog", () => {
+  it("keeps independent optimistic operations and removes failed prerequisite chains", () => {
+    const baseline = state([], "LOCKED");
+    const config = {
+      id: "rally",
+      version: "1",
+      title: "Rally",
+      spots: [
+        { id: "a", orderIndex: 0, name: "A", conditions: [] },
+        { id: "b", orderIndex: 1, name: "B", conditions: [] },
+        { id: "c", orderIndex: 2, name: "C", prerequisites: ["a"], conditions: [] },
+      ],
+      rewards: [],
+    } as const;
+    const operation = (spotId: "a" | "b" | "c", status: "PENDING" | "REJECTED_PERMANENT") => ({
+      kind: "checkIn" as const,
+      status,
+      request: {
+        rallyId: "rally",
+        userId: "user",
+        spotId,
+        proofData: "proof",
+        idempotencyKey: spotId,
+        now: `2026-01-01T00:00:0${spotId === "a" ? "1" : spotId === "b" ? "2" : "3"}.000Z`,
+        state: baseline,
+      },
+    });
+    const rebuilt = rebuildUserStateFromLog(
+      baseline,
+      [operation("a", "REJECTED_PERMANENT"), operation("b", "PENDING"), operation("c", "PENDING")],
+      config,
+    );
+    expect(rebuilt.records.map((record) => record.stampId)).toEqual(["b"]);
   });
 });
 
@@ -190,7 +225,7 @@ describe("OfflineQueue conflict synchronization", () => {
 
   it("resolves conflicts, notifies the client, and removes the operation", async () => {
     const storage = new InMemoryOfflineQueueStorage();
-    const queue = new OfflineQueue({ storage, key: "conflict", conflictPolicy: "merge" });
+    const queue = new OfflineQueue({ storage, key: "conflict" });
     const request = {
       rallyId: "rally",
       userId: "user",

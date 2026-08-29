@@ -86,6 +86,8 @@ export interface ServerPersistenceAdapter {
   ): Promise<{ readonly success: boolean; readonly error?: string }>;
   /** Set false when the adapter cannot persist per-reward inventory atomically. */
   readonly supportsRewardStock?: boolean;
+  /** Must be true when a claim plan uses `secondaryStockKey`. */
+  readonly supportsSecondaryStock?: boolean;
   acquireLock(rallyId: string, lockKey: string, ttlMs: number): Promise<boolean>;
   releaseLock(rallyId: string, lockKey: string): Promise<void>;
   getRewardStock(rallyId: string, rewardId: string): Promise<number | null>;
@@ -113,6 +115,7 @@ export interface InMemoryServerPersistenceOptions {
 }
 export class InMemoryServerPersistenceAdapter implements ServerPersistenceAdapter {
   readonly supportsRewardStock: boolean = true;
+  readonly supportsSecondaryStock: boolean = true;
   readonly #locks = new Map<string, number>();
   readonly #idempotent = new Map<string, TimedValue<unknown>>();
   readonly #states = new Map<string, UserRallyState>();

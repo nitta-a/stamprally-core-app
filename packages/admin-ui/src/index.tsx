@@ -1489,12 +1489,12 @@ export function GeneralSettingsForm<
             "inventoryOverrideHelp",
             "Individual reward limits override this global limit.",
           )}
-          value={config.inventory?.global ?? ""}
+          value={config.inventory?.sharedStock ?? ""}
           onChange={(event) => {
             const value = event.target.value;
             const inventory = { ...(config.inventory ?? {}) };
-            if (value === "") delete inventory.global;
-            else inventory.global = Number(value);
+            if (value === "") delete inventory.sharedStock;
+            else inventory.sharedStock = Number(value);
             onChange({ ...config, inventory });
           }}
         />

@@ -45,6 +45,45 @@ describe("StampRallyServer", () => {
     expect(await persistence.getUserState("rally", "attacker")).toBeNull();
   });
 
+  it("uses the trusted auth context for syncProgress", async () => {
+    const persistence = new InMemoryServerPersistenceAdapter();
+    const server = new StampRallyServer(config, persistence);
+    await server.checkIn({
+      rallyId: "rally",
+      userId: "trusted-user",
+      spotId: "s1",
+      context: { type: "passcode", code: "OPEN" },
+      idempotencyKey: "trusted-sync-check",
+    });
+    const result = await server.syncProgress(
+      { rallyId: "rally", userId: "attacker" },
+      { authenticatedUserId: "trusted-user" },
+    );
+    expect(result.userId).toBe("trusted-user");
+    expect(result.records).toHaveLength(1);
+    expect(await persistence.getUserState("rally", "attacker")).toBeNull();
+  });
+
+  it("throws when a configured secondary stock key is unsupported", async () => {
+    class UnsupportedSecondaryPersistence extends InMemoryServerPersistenceAdapter {
+      override readonly supportsSecondaryStock = false;
+    }
+    const secondaryConfig = {
+      ...config,
+      rewards: config.rewards.map((reward) => ({ ...reward, secondaryStockKey: "secondary" })),
+      inventory: { secondary: 1 },
+    };
+    const server = new StampRallyServer(secondaryConfig, new UnsupportedSecondaryPersistence());
+    await expect(
+      server.claimReward({
+        rallyId: "rally",
+        userId: "alice",
+        rewardId: "r1",
+        idempotencyKey: "unsupported-secondary",
+      }),
+    ).rejects.toThrow("SECONDARY_STOCK_UNSUPPORTED");
+  });
+
   it("rejects inventory claims when the adapter opts out of inventory storage", async () => {
     class UnsupportedInventoryPersistence extends InMemoryServerPersistenceAdapter {
       override readonly supportsRewardStock = false;

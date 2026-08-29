@@ -10,17 +10,12 @@ import type {
   UserRallyState,
   Validator,
 } from "../domain/index.js";
-import {
-  type ConflictResolutionPolicy,
-  consumeReward,
-  type RewardConsumeError,
-  reconcileRewardStates,
-  resolveRallyStateConflict,
-} from "../engine/index.js";
+import { consumeReward, type RewardConsumeError, reconcileRewardStates } from "../engine/index.js";
 import type {
   OfflineOperationError,
   OfflineQueue,
   OfflineQueueCapability,
+  OfflineStorageCapability,
   OfflineSyncResultEvent,
   RejectedOperationHistoryEntry,
   SyncState,
@@ -33,6 +28,7 @@ import {
   type StampStorage,
   storageKey,
 } from "./storage.js";
+import { rebuildUserStateFromLog } from "./sync.js";
 
 export type CheckInOptions = {
   readonly now?: string;
@@ -143,9 +139,6 @@ export interface ClientOptions {
   readonly userId?: string | null;
   readonly anonymousSessionId?: string;
   readonly offlineQueue?: OfflineQueue;
-  readonly conflictResolutionPolicy?: ConflictResolutionPolicy;
-  /** Alias for conflictResolutionPolicy. */
-  readonly conflictPolicy?: ConflictResolutionPolicy;
 }
 type StorageOrOptions = StampStorage | ClientOptions;
 function isStorage(value: StorageOrOptions): value is StampStorage {
@@ -220,6 +213,7 @@ export class StampRallyClient {
     this.#anonymousSessionId = this.#options.anonymousSessionId ?? createAnonymousSessionId();
     this.#userId = this.#options.userId ?? this.#anonymousSessionId;
     this.#offlineQueue = this.#options.offlineQueue;
+    this.#offlineQueue?.setReplayConfig(config);
     this.#offlineQueue?.setSyncResultListener((event) => this.#handleOfflineSyncResult(event));
     this.#offlineQueue?.setChangeListener(() => {
       this.#syncRevision += 1;
@@ -252,6 +246,12 @@ export class StampRallyClient {
   }
   get queueCapability(): OfflineQueueCapability {
     return this.#offlineQueue?.queueCapability ?? "custom";
+  }
+  get storageCapability(): OfflineStorageCapability {
+    return this.#offlineQueue?.storageCapability ?? "custom";
+  }
+  get isStoragePersistent(): boolean {
+    return this.#offlineQueue?.isStoragePersistent ?? true;
   }
   discardRejected(operationId: string): Promise<boolean> {
     return this.#offlineQueue?.discardRejected(operationId) ?? Promise.resolve(false);
@@ -407,13 +407,13 @@ export class StampRallyClient {
           return result.ok ? this.#commitCheckIn(result) : this.#fail(result.error);
         } catch (error) {
           if (this.#offlineQueue === undefined) throw error;
-          await this.#offlineQueue.enqueueCheckIn(request);
           const record = { stampId: spotId, acquiredAt: now };
           const next = this.#reconcile({
             ...current,
             records: [...current.records, record],
             updatedAt: now,
           });
+          await this.#offlineQueue.enqueueCheckIn(request, next);
           await this.#storage.save(next);
           return this.#commitCheckIn({ ok: true, value: { state: next, record } });
         }
@@ -466,7 +466,6 @@ export class StampRallyClient {
           return result.ok ? this.#commitClaim(result) : this.#fail(result.error);
         } catch (error) {
           if (this.#offlineQueue === undefined) throw error;
-          await this.#offlineQueue.enqueueClaimReward(request);
           const next = {
             ...current,
             rewards: current.rewards.map((item) =>
@@ -474,6 +473,7 @@ export class StampRallyClient {
             ),
             updatedAt: now,
           };
+          await this.#offlineQueue.enqueueClaimReward(request, next);
           await this.#storage.save(next);
           return this.#commitClaim({ ok: true, value: { state: next, reward: local.value } });
         }
@@ -518,12 +518,11 @@ export class StampRallyClient {
             ? { anonymousSessionId: this.#anonymousSessionId }
             : {}),
         });
-        const resolved = resolveRallyStateConflict(serverState, localState, {
-          policy:
-            this.#options.conflictResolutionPolicy ??
-            this.#options.conflictPolicy ??
-            "authoritative_replay",
-        });
+        const resolved = rebuildUserStateFromLog(
+          serverState,
+          this.#offlineQueue?.operations ?? [],
+          this.#config,
+        );
         const next = this.#reconcile(resolved);
         await this.#storage.save(next);
         this.#state = next;
@@ -599,7 +598,12 @@ export class StampRallyClient {
     if (event.status === "ACCEPTED") {
       if (this.#syncMetrics !== null) this.#syncMetrics.processed += 1;
       if (event.state !== undefined) {
-        const next = this.#reconcile(event.state);
+        const rebuilt = rebuildUserStateFromLog(
+          event.state,
+          this.#offlineQueue?.operations ?? [],
+          this.#config,
+        );
+        const next = this.#reconcile(rebuilt);
         await this.#storage.save(next);
         this.#state = next;
         this.#emit(next);
@@ -619,7 +623,14 @@ export class StampRallyClient {
         this.#syncMetrics.failed += 1;
       }
       const base = event.state ?? this.#state ?? event.operation.request.state;
-      const next = this.#reconcile(rollbackOptimisticOperation(base, event.operation));
+      const rollbackBase =
+        event.state === undefined ? rollbackOptimisticOperation(base, event.operation) : base;
+      const rebuilt = rebuildUserStateFromLog(
+        rollbackBase,
+        this.#offlineQueue?.operations ?? [],
+        this.#config,
+      );
+      const next = this.#reconcile(rebuilt);
       await this.#storage.save(next);
       this.#state = next;
       this.#emit(next);

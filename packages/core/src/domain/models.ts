@@ -107,7 +107,6 @@ export type RedemptionMethod = "manual_slide" | "staff_passcode" | "view_only" |
 export type InventoryAggregationMode = "shared" | "per_reward";
 export type RallyInventory = Readonly<Record<string, number>> & {
   readonly sharedStock?: number;
-  readonly global?: number;
 };
 export interface RallyInventoryState {
   readonly sharedRemaining?: number;
@@ -126,6 +125,10 @@ export interface Reward<TLocale extends string = string> {
   readonly validUntil?: string;
   readonly stockLimit?: number;
   readonly userClaimLimit?: number;
+  /** Explicit primary inventory key. Defaults to the reward id. */
+  readonly stockKey?: string;
+  /** Optional second inventory bucket that must be decremented atomically. */
+  readonly secondaryStockKey?: string;
 }
 export type PublicReward<TLocale extends string = string> = Omit<
   Reward<TLocale>,

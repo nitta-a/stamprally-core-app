@@ -19,7 +19,6 @@ export type {
 export { StampRallyClient } from "./client.js";
 export type {
   IndexedDBOfflineQueueOptions,
-  OfflineConflict,
   OfflineConflictResult,
   OfflineOperation,
   OfflineOperationError,
@@ -27,11 +26,13 @@ export type {
   OfflineOperationResponse,
   OfflineOperationStatus,
   OfflineQueueCapability,
+  OfflineQueueCapabilityWarning,
   OfflineQueueChangeListener,
   OfflineQueueOptions,
   OfflineQueueStorage,
   OfflineResult,
   OfflineSender,
+  OfflineStorageCapability,
   OfflineSyncResultEvent,
   OfflineSyncResultListener,
   QueueOperationStatus,
@@ -71,3 +72,5 @@ export {
   StorageAdapterError,
   storageKey,
 } from "./storage.js";
+export type { RebuildUserStateOptions, RebuildUserStateResult } from "./sync.js";
+export { rebuildUserStateFromLog, rebuildUserStateLog } from "./sync.js";

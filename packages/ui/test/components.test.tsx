@@ -1,7 +1,27 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { describe, expect, it, vi } from "vitest";
-import { RallyViewer } from "../src/index.js";
+import { RallyViewer, SyncStatusBanner } from "../src/index.js";
+
+describe("SyncStatusBanner", () => {
+  it("renders pending offline operations", () => {
+    render(
+      <SyncStatusBanner
+        locale="ja"
+        status={{
+          syncState: "idle",
+          isSyncing: false,
+          pendingCount: 2,
+          rejectedHistory: [],
+          storageCapability: "localstorage",
+          isStoragePersistent: true,
+        }}
+      />,
+    );
+    expect(screen.getByRole("status").textContent).toContain("オフラインで記録中");
+    expect(screen.getByRole("status").textContent).toContain("2件");
+  });
+});
 
 describe("RallyViewer", () => {
   it("renders spot and feedback slots with the deepest style hooks", () => {

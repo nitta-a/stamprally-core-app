@@ -91,32 +91,52 @@ interface InventoryPlan {
 }
 function rewardStock(
   config: AdminRallyConfig,
-  rewardId: string,
-  stockLimit: number | undefined,
+  reward: AdminRallyConfig["rewards"][number],
 ): number | null {
-  const configured = config.inventory?.[rewardId];
+  const stockLimit = reward.stockLimit;
+  const key = reward.stockKey ?? reward.id;
+  const configured = key === "__shared__" ? config.inventory?.sharedStock : config.inventory?.[key];
   if (stockLimit === undefined) return configured ?? null;
   if (configured === undefined) return stockLimit;
   return Math.min(stockLimit, configured);
 }
 function sharedStock(config: AdminRallyConfig): number | null {
-  return config.inventory?.sharedStock ?? config.inventory?.global ?? null;
+  return config.inventory?.sharedStock ?? null;
 }
 function inventoryPlan(
   config: AdminRallyConfig,
   rewardId: string,
   stockLimit: number | undefined,
 ): InventoryPlan {
-  const individual = rewardStock(config, rewardId, stockLimit);
+  const reward = config.rewards.find((item) => item.id === rewardId);
+  const individual = reward === undefined ? (stockLimit ?? null) : rewardStock(config, reward);
   const shared = sharedStock(config);
+  const explicitPrimaryKey = reward?.stockKey;
+  const explicitSecondaryKey = reward?.secondaryStockKey;
   if (config.inventoryMode === "shared" && shared !== null) {
     return {
-      primaryKey: "__shared__",
-      primaryInitial: shared,
-      ...(individual === null ? {} : { secondaryKey: rewardId, secondaryInitial: individual }),
+      primaryKey: explicitPrimaryKey ?? "__shared__",
+      primaryInitial: explicitPrimaryKey === undefined ? shared : individual,
+      ...(explicitSecondaryKey !== undefined
+        ? {
+            secondaryKey: explicitSecondaryKey,
+            secondaryInitial: config.inventory?.[explicitSecondaryKey] ?? individual,
+          }
+        : individual === null
+          ? {}
+          : { secondaryKey: rewardId, secondaryInitial: individual }),
     };
   }
-  return { primaryKey: rewardId, primaryInitial: individual };
+  return {
+    primaryKey: explicitPrimaryKey ?? rewardId,
+    primaryInitial: individual,
+    ...(explicitSecondaryKey === undefined
+      ? {}
+      : {
+          secondaryKey: explicitSecondaryKey,
+          secondaryInitial: config.inventory?.[explicitSecondaryKey] ?? null,
+        }),
+  };
 }
 function getProof(context: VerificationContext): unknown {
   return context.type === "qr"
@@ -316,14 +336,20 @@ export class StampRallyServer {
         401,
       );
     const sessionId = request.headers.get("x-anonymous-session-id");
+    const authContext: TrustedAuthContext = {
+      authenticatedUserId: userId,
+      ...(sessionId === null ? {} : { isAnonymous: true, sessionId }),
+    };
     try {
       return json({
         ok: true,
-        state: await this.syncProgress({
-          rallyId: body.data.rallyId,
-          userId,
-          ...(sessionId === null ? {} : { anonymousSessionId: sessionId }),
-        }),
+        state: await this.syncProgress(
+          {
+            rallyId: body.data.rallyId,
+            ...(sessionId === null ? {} : { anonymousSessionId: sessionId }),
+          },
+          authContext,
+        ),
       });
     } catch (error) {
       if (error instanceof RequestValidationException) return validationResponse(error.errors);
@@ -500,6 +526,8 @@ export class StampRallyServer {
         now(this.#options),
       );
     const plan = inventoryPlan(this.#config, reward.id, reward.stockLimit);
+    if (plan.secondaryKey !== undefined && this.#persistence.supportsSecondaryStock !== true)
+      throw new Error("SECONDARY_STOCK_UNSUPPORTED");
     const inventoryEnabled =
       plan.primaryInitial !== null ||
       (plan.secondaryInitial !== undefined && plan.secondaryInitial !== null);
@@ -546,7 +574,7 @@ export class StampRallyServer {
           rewardId: reward.id,
           stockKey: plan.primaryKey,
           ...(plan.secondaryKey === undefined ? {} : { secondaryStockKey: plan.secondaryKey }),
-          rewardStockLimit: rewardStock(this.#config, reward.id, reward.stockLimit),
+          rewardStockLimit: rewardStock(this.#config, reward),
           sharedStockLimit:
             this.#config.inventoryMode === "shared" ? sharedStock(this.#config) : null,
           initialStock: plan.primaryInitial,
@@ -712,27 +740,33 @@ export class StampRallyServer {
       await this.#persistence.releaseLock(request.rallyId, lockKey);
     }
   }
-  async sync(rallyId: string, userId: string): Promise<UserRallyState> {
+  async sync(rallyId: string, identity: string | TrustedAuthContext): Promise<UserRallyState> {
+    const userId = typeof identity === "string" ? identity : identity.authenticatedUserId;
     assertValidSyncParams({ rallyId, userId }, this.#config);
     const state =
       (await this.#persistence.getUserState(rallyId, userId)) ??
       initialState(this.#config, userId, now(this.#options));
     return this.#attachInventory(state);
   }
-  async syncProgress(request: {
-    readonly rallyId: string;
-    readonly userId?: string;
-    readonly anonymousSessionId?: string;
-  }): Promise<UserRallyState> {
-    const directRequest = withDirectIdentity(request);
+  async syncProgress(
+    request: {
+      readonly rallyId: string;
+      readonly userId?: string;
+      readonly anonymousSessionId?: string;
+    },
+    authContext: TrustedAuthContext,
+  ): Promise<UserRallyState> {
+    const directRequest = withDirectIdentity(request, authContext);
     assertValidSyncParams(directRequest, this.#config);
-    return this.sync(directRequest.rallyId, directRequest.userId);
+    return this.sync(directRequest.rallyId, authContext);
   }
   async #attachInventory(state: UserRallyState): Promise<UserRallyState> {
     const rewardRemaining: Record<string, number> = {};
     for (const reward of this.#config.rewards) {
       const plan = inventoryPlan(this.#config, reward.id, reward.stockLimit);
       if (plan.secondaryKey !== undefined) {
+        if (this.#persistence.supportsSecondaryStock !== true)
+          throw new Error("SECONDARY_STOCK_UNSUPPORTED");
         const stock = await this.#persistence.getRewardStock(state.rallyId, plan.secondaryKey);
         const remaining = stock ?? plan.secondaryInitial ?? null;
         if (remaining !== null) rewardRemaining[reward.id] = Math.max(0, remaining);

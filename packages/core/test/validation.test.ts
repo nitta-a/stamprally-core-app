@@ -133,4 +133,41 @@ describe("configuration relationships", () => {
     });
     expect(errors.some((error) => error.code === "cyclic_prerequisites")).toBe(true);
   });
+
+  it("enforces semantic opacity, inventory-key, and reward-count constraints", () => {
+    const invalidTheme = safeParseAdminConfig({
+      ...validAdmin,
+      theme: {
+        primaryColor: "#000",
+        cardBackgroundColor: "#fff",
+        textColor: "#000",
+        slotShape: "rounded",
+        gridColumns: 3,
+        unclaimedOpacity: 1.1,
+      },
+    });
+    expect(invalidTheme.success).toBe(false);
+    if (!invalidTheme.success)
+      expect(invalidTheme.errors.map((error) => error.code)).toContain("out_of_range");
+
+    const result = safeParseAdminConfig({
+      ...validAdmin,
+      inventory: { sharedStock: 1 },
+      rewards: [
+        {
+          id: "reward",
+          title: "Reward",
+          type: "digital",
+          redemptionMethod: "view_only",
+          requiredStampCount: 2,
+          stockKey: "missing",
+        },
+      ],
+    });
+    expect(result.success).toBe(false);
+    if (!result.success)
+      expect(result.errors.map((error) => error.code)).toEqual(
+        expect.arrayContaining(["missing_inventory_key", "required_stamp_count_exceeds_spots"]),
+      );
+  });
 });

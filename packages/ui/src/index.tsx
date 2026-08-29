@@ -20,7 +20,11 @@ import type {
   SyncEventListener,
   UserRallyState,
 } from "@stamprally/core";
+import { type SyncStateContext, SyncStatusBanner } from "./components/SyncStatusBanner.js";
 import { DEFAULT_UI_DICTIONARY } from "./locales/index.js";
+
+export type { SyncStateContext, SyncStatusBannerProps } from "./components/SyncStatusBanner.js";
+export { SyncStatusBanner } from "./components/SyncStatusBanner.js";
 
 export { DEFAULT_UI_DICTIONARY, UI_DICTIONARIES } from "./locales/index.js";
 
@@ -59,6 +63,8 @@ export type ViewerClassName =
   | "feedback"
   | "reward"
   | "footer";
+
+export type ViewerSyncStateContext = SyncStateContext;
 export type ViewerStyle = CSSProperties & {
   readonly [key: `--${string}`]: string | number | undefined;
 };
@@ -107,6 +113,7 @@ export interface RallyViewerSlots<TLocale extends string = string> {
         readonly state: UserRallyState;
       }) => ReactNode);
   readonly footerSlot?: ReactNode;
+  readonly renderSyncStatus?: (status: SyncStateContext) => ReactNode;
   readonly renderSpotCard?: (props: SpotCardProps<TLocale>) => ReactNode;
   readonly renderRewardCard?: (props: RewardCardProps<TLocale>) => ReactNode;
   readonly renderStatusBadge?: (props: { readonly status: SpotStatus }) => ReactNode;
@@ -138,6 +145,7 @@ export interface RallyViewerProps<TLocale extends string = string>
     Record<PublicCheckInCondition["type"], ConditionRenderer<TLocale>>
   >;
   readonly onSyncEvent?: SyncEventListener;
+  readonly showSyncStatus?: boolean;
 }
 
 const label = <TLocale extends string>(
@@ -403,11 +411,21 @@ export function RallyViewer<TLocale extends string = string>({
   renderVerifyingState,
   renderSuccessFeedback,
   renderErrorFeedback,
+  renderSyncStatus,
+  showSyncStatus = true,
 }: RallyViewerProps<TLocale>): ReactElement {
   const config = providedConfig ?? client?.getConfig() ?? adapter?.config;
   const [state, setState] = useState<UserRallyState | null>(() => client?.getState() ?? null);
   const [busy, setBusy] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<CheckInResult | null>(null);
+  const [syncStatus, setSyncStatus] = useState<SyncStateContext>(() => ({
+    syncState: client?.syncState ?? "idle",
+    isSyncing: client?.syncState === "syncing",
+    pendingCount: client?.pendingCount ?? 0,
+    rejectedHistory: client?.rejectedHistory ?? [],
+    storageCapability: client?.storageCapability ?? "custom",
+    isStoragePersistent: client?.isStoragePersistent ?? true,
+  }));
   useEffect(() => {
     if (client === undefined) return;
     const unsubscribe = client.subscribe(setState);
@@ -418,6 +436,20 @@ export function RallyViewer<TLocale extends string = string>({
     if (client === undefined || onSyncEvent === undefined) return;
     return client.subscribeSyncEvents(onSyncEvent);
   }, [client, onSyncEvent]);
+  useEffect(() => {
+    if (client === undefined) return;
+    const update = (): void =>
+      setSyncStatus({
+        syncState: client.syncState,
+        isSyncing: client.syncState === "syncing",
+        pendingCount: client.pendingCount,
+        rejectedHistory: client.rejectedHistory,
+        storageCapability: client.storageCapability,
+        isStoragePersistent: client.isStoragePersistent,
+      });
+    update();
+    return client.subscribeSyncState(update);
+  }, [client]);
   if (config === undefined) throw new Error("RallyViewer requires config, client, or adapter.");
   const currentState = state ?? {
     rallyId: config.id,
@@ -505,6 +537,16 @@ export function RallyViewer<TLocale extends string = string>({
           <div className={classNames.feedback} style={styles.feedback} role="alert">
             {"message" in feedback.error ? feedback.error.message : feedback.error.code}
           </div>
+        ))}
+      {showSyncStatus &&
+        (renderSyncStatus?.(syncStatus) ?? (
+          <SyncStatusBanner
+            status={syncStatus}
+            locale={locale}
+            {...(dictionary === undefined ? {} : { dictionary })}
+            {...(classNames.feedback === undefined ? {} : { className: classNames.feedback })}
+            {...(styles.feedback === undefined ? {} : { style: styles.feedback })}
+          />
         ))}
       <div>
         {config.spots.map((spot) => {

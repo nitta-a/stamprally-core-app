@@ -33,6 +33,10 @@ export const DEFAULT_UI_DICTIONARY: LocaleDictionary<"ja" | "en"> = {
     "reward.remaining": "remaining",
     "reward.sharedRemaining": "Overall remaining",
     "reward.validUntil": "Valid until",
+    "sync.syncing": "Sending unsynced operations to the server...",
+    "sync.offline": "Recording offline",
+    "sync.unsynced": "unsynced",
+    "sync.rollback": "Some check-ins were rolled back by the server",
   },
   ja: {
     viewer: "スタンプラリー",
@@ -65,6 +69,10 @@ export const DEFAULT_UI_DICTIONARY: LocaleDictionary<"ja" | "en"> = {
     "reward.remaining": "残り",
     "reward.sharedRemaining": "全体で残り",
     "reward.validUntil": "有効期限",
+    "sync.syncing": "未同期の操作をサーバーへ送信中...",
+    "sync.offline": "オフラインで記録中",
+    "sync.unsynced": "未同期",
+    "sync.rollback": "一部のチェックインがサーバーにより取り消されました",
   },
 };
 

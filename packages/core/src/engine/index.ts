@@ -14,7 +14,7 @@ export {
   createUniqueClaimTicketNumber,
   issueClaimTicketNumber,
 } from "./rewards.js";
-export type { ConflictResolutionPolicy, MergeConflictOptions } from "./sync.js";
+export type { ConflictResolutionPolicy } from "./sync.js";
 export { resolveRallyStateConflict } from "./sync.js";
 export type {
   ConsumeResult,
