@@ -5,6 +5,7 @@ import type {
   CheckInCondition,
   ExternalReference,
   LocaleDictionary,
+  LocalizationWarning,
   LocalizedText,
   Reward,
   RewardUnlockCondition,
@@ -17,6 +18,7 @@ import {
   resolveLocalizedText,
   safeParseAdminConfig,
   updateLocalizedField,
+  validateLocalizationCompleteness,
 } from "@stamprally/core";
 import {
   type Dispatch,
@@ -36,6 +38,8 @@ export interface AdminRallyEditorProps<
   readonly onChange: (config: AdminRallyConfig<TLocale, TMeta>) => void;
   readonly locale?: string;
   readonly dictionary?: LocaleDictionary<TLocale>;
+  readonly locales?: ReadonlyArray<TLocale>;
+  readonly showLocalizationPreview?: boolean;
 }
 
 export interface UseAdminRallyEditorOptions<
@@ -1303,11 +1307,108 @@ export function MetadataEditor<TLocale extends string = SupportedLocale>({
   );
 }
 
+export interface LocalizationSplitPreviewProps<
+  TLocale extends string = SupportedLocale,
+  TMeta extends Record<string, unknown> = Record<string, unknown>,
+> {
+  readonly config: AdminRallyConfig<TLocale, TMeta>;
+  readonly locales: ReadonlyArray<TLocale>;
+  readonly onChange?: (config: AdminRallyConfig<TLocale, TMeta>) => void;
+  readonly dictionary?: LocaleDictionary<TLocale>;
+}
+
+function warningKey(warning: LocalizationWarning): string {
+  return `${warning.path}-${warning.locale}`;
+}
+
+/** Side-by-side translation editor for the spot content that participants see. */
+export function LocalizationSplitPreview<
+  TLocale extends string = SupportedLocale,
+  TMeta extends Record<string, unknown> = Record<string, unknown>,
+>({
+  config,
+  locales,
+  onChange,
+  dictionary,
+}: LocalizationSplitPreviewProps<TLocale, TMeta>): ReactElement {
+  const warnings = validateLocalizationCompleteness(config, locales);
+  const labelLocale = locales[0] ?? ("en" as TLocale);
+  const label = (locale: TLocale, key: string, fallback: string): string =>
+    dictionary?.[locale]?.[key] ?? fallback;
+  const update = (
+    spotId: string,
+    locale: TLocale,
+    field: "name" | "description" | "hint",
+    value: string,
+  ): void => {
+    if (onChange === undefined) return;
+    onChange({
+      ...config,
+      spots: config.spots.map((spot) =>
+        spot.id !== spotId
+          ? spot
+          : { ...spot, [field]: updateLocalizedField(spot[field], locale, value) },
+      ),
+    });
+  };
+  return (
+    <section aria-label={label(labelLocale, "localizationPreview", "Localization preview")}>
+      <h2>{label(labelLocale, "localizationPreview", "Localization preview")}</h2>
+      {warnings.length > 0 && (
+        <ul role="alert">
+          {warnings.map((warning) => (
+            <li key={warningKey(warning)}>
+              {warning.path}: {warning.message}
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="admin-localization-preview">
+        {config.spots.map((spot) => (
+          <article key={spot.id}>
+            <h3>{spot.id}</h3>
+            <div className="admin-localization-preview__columns">
+              {locales.map((locale) => (
+                <fieldset key={`${spot.id}-${locale}`}>
+                  <legend>{locale}</legend>
+                  {(["name", "description", "hint"] as const).map((field) => (
+                    <label key={field}>
+                      {field}
+                      <textarea
+                        aria-label={`${spot.id} ${field} ${locale}`}
+                        value={resolveLocalizedText(spot[field], locale)}
+                        disabled={onChange === undefined}
+                        onChange={(event) => update(spot.id, locale, field, event.target.value)}
+                      />
+                    </label>
+                  ))}
+                </fieldset>
+              ))}
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 export function AdminRallyEditor<
   TLocale extends string = SupportedLocale,
   TMeta extends Record<string, unknown> = Record<string, unknown>,
->({ config, onChange, locale, dictionary }: AdminRallyEditorProps<TLocale, TMeta>): ReactElement {
+>({
+  config,
+  onChange,
+  locale,
+  dictionary,
+  locales,
+  showLocalizationPreview = true,
+}: AdminRallyEditorProps<TLocale, TMeta>): ReactElement {
   const activeLocale = (locale ?? "en") as TLocale;
+  const previewLocales =
+    locales ??
+    ([activeLocale, "ja", "en"] as TLocale[]).filter(
+      (item, index, values) => values.indexOf(item) === index,
+    );
   const field = (key: string, fallback: string): string =>
     text(dictionary, activeLocale, key, fallback);
   const update = (next: Partial<AdminRallyConfig<TLocale, TMeta>>): void =>
@@ -1399,6 +1500,14 @@ export function AdminRallyEditor<
           </div>
         ))}
       </div>
+      {showLocalizationPreview && (
+        <LocalizationSplitPreview
+          config={config}
+          locales={previewLocales}
+          {...(dictionary === undefined ? {} : { dictionary })}
+          onChange={onChange}
+        />
+      )}
       <button
         type="button"
         onClick={() => update({ rewards: [...config.rewards, newReward(config.rewards.length)] })}

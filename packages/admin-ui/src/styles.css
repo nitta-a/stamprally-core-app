@@ -46,3 +46,16 @@
     grid-template-columns: repeat(2, 1fr);
   }
 }
+.admin-localization-preview__columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: 0.75rem;
+}
+.admin-localization-preview fieldset {
+  min-width: 0;
+}
+.admin-localization-preview textarea {
+  display: block;
+  width: 100%;
+  min-height: 3rem;
+}

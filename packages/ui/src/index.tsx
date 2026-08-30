@@ -11,9 +11,11 @@ import type {
   PublicRallyConfig,
   PublicReward,
   PublicSpotItem,
+  RallyAdapterSyncState,
   RallyConfig,
   RallyInventoryState,
   RewardState,
+  SpotItem,
   StampRallyClient,
   StampRallyProgress,
   StampRallyState,
@@ -21,11 +23,15 @@ import type {
   UserRallyState,
 } from "@stamprally/core";
 import { type SyncStateContext, SyncStatusBanner } from "./components/SyncStatusBanner.js";
-import { DEFAULT_UI_DICTIONARY } from "./locales/index.js";
+import { type BuiltInUiLocale, DEFAULT_UI_DICTIONARY } from "./locales/index.js";
 
+export type { GpsProximityMeterProps } from "./components/GpsProximityMeter.js";
+export { GpsProximityMeter } from "./components/GpsProximityMeter.js";
+export type { StaffRedemptionViewProps } from "./components/StaffRedemptionView.js";
+export { StaffRedemptionView } from "./components/StaffRedemptionView.js";
 export type { SyncStateContext, SyncStatusBannerProps } from "./components/SyncStatusBanner.js";
 export { SyncStatusBanner } from "./components/SyncStatusBanner.js";
-
+export type { BuiltInUiLocale } from "./locales/index.js";
 export { DEFAULT_UI_DICTIONARY, UI_DICTIONARIES } from "./locales/index.js";
 
 import {
@@ -120,6 +126,8 @@ export interface RallyViewerSlots<TLocale extends string = string> {
   readonly renderVerifyingState?: () => ReactNode;
   readonly renderSuccessFeedback?: (result: CheckInResult) => ReactNode;
   readonly renderErrorFeedback?: (error: string) => ReactNode;
+  readonly renderStampEffect?: (spot: PublicSpotItem<TLocale>) => ReactNode;
+  readonly onStampStamped?: (spot: SpotItem<TLocale>) => void;
 }
 
 export interface RallyViewerAdapter<TLocale extends string = string> {
@@ -130,6 +138,12 @@ export interface RallyViewerAdapter<TLocale extends string = string> {
     options?: CheckInOptions,
   ) => Promise<CheckInResult>;
   readonly onClaimReward?: (rewardId: string, options?: ClaimOptions) => Promise<ClaimResult>;
+  readonly state?: UserRallyState;
+  readonly isLoading?: boolean;
+  readonly error?: Error | null;
+  readonly onSync?: () => Promise<void>;
+  readonly syncState?: RallyAdapterSyncState;
+  readonly subscribe?: (listener: (state: UserRallyState) => void) => () => void;
 }
 export interface RallyViewerProps<TLocale extends string = string>
   extends RallyViewerSlots<TLocale> {
@@ -154,7 +168,9 @@ const label = <TLocale extends string>(
   key: string,
   fallback: string,
 ): string =>
-  dictionary?.[locale]?.[key] ?? DEFAULT_UI_DICTIONARY[locale as "ja" | "en"]?.[key] ?? fallback;
+  dictionary?.[locale]?.[key] ??
+  DEFAULT_UI_DICTIONARY[locale as BuiltInUiLocale]?.[key] ??
+  fallback;
 const join = (...names: ReadonlyArray<string | undefined>): string | undefined => {
   const value = names.filter((name): name is string => name !== undefined && name !== "").join(" ");
   return value === "" ? undefined : value;
@@ -411,11 +427,15 @@ export function RallyViewer<TLocale extends string = string>({
   renderVerifyingState,
   renderSuccessFeedback,
   renderErrorFeedback,
+  renderStampEffect,
+  onStampStamped,
   renderSyncStatus,
   showSyncStatus = true,
 }: RallyViewerProps<TLocale>): ReactElement {
   const config = providedConfig ?? client?.getConfig() ?? adapter?.config;
-  const [state, setState] = useState<UserRallyState | null>(() => client?.getState() ?? null);
+  const [state, setState] = useState<UserRallyState | null>(
+    () => client?.getState() ?? adapter?.state ?? null,
+  );
   const [busy, setBusy] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<CheckInResult | null>(null);
   const [syncStatus, setSyncStatus] = useState<SyncStateContext>(() => ({
@@ -427,11 +447,14 @@ export function RallyViewer<TLocale extends string = string>({
     isStoragePersistent: client?.isStoragePersistent ?? false,
   }));
   useEffect(() => {
-    if (client === undefined) return;
+    if (client === undefined) {
+      if (adapter?.subscribe === undefined) return;
+      return adapter.subscribe(setState);
+    }
     const unsubscribe = client.subscribe(setState);
     void client.init().then(setState);
     return unsubscribe;
-  }, [client]);
+  }, [adapter, client]);
   useEffect(() => {
     if (client === undefined || onSyncEvent === undefined) return;
     return client.subscribeSyncEvents(onSyncEvent);
@@ -492,9 +515,11 @@ export function RallyViewer<TLocale extends string = string>({
       setBusy(spotId);
       const result = await checkIn(spotId, proof).finally(() => setBusy(null));
       setFeedback(result);
+      if (result.ok && onStampStamped !== undefined && target !== undefined)
+        onStampStamped(target as unknown as SpotItem<TLocale>);
       return result;
     },
-    [checkIn, config.spots, currentState],
+    [checkIn, config.spots, currentState, onStampStamped],
   );
   return (
     <section
@@ -527,6 +552,17 @@ export function RallyViewer<TLocale extends string = string>({
       {feedback?.ok === true &&
         (renderSuccessFeedback?.(feedback) ?? (
           <div className={classNames.feedback} style={styles.feedback} role="status">
+            <div className="stamp-celebration" aria-hidden="true">
+              {["one", "two", "three", "four", "five", "six", "seven", "eight"].map((piece) => (
+                <span key={piece} />
+              ))}
+            </div>
+            {(() => {
+              const stampedSpot = config.spots.find(
+                (spot) => spot.id === feedback.value.record.stampId,
+              );
+              return stampedSpot === undefined ? null : renderStampEffect?.(stampedSpot);
+            })()}
             {label(dictionary, locale, "verified", "Verified")}
           </div>
         ))}

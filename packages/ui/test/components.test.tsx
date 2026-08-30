@@ -1,7 +1,12 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { describe, expect, it, vi } from "vitest";
-import { RallyViewer, SyncStatusBanner } from "../src/index.js";
+import {
+  GpsProximityMeter,
+  RallyViewer,
+  StaffRedemptionView,
+  SyncStatusBanner,
+} from "../src/index.js";
 
 describe("SyncStatusBanner", () => {
   it("renders pending offline operations", () => {
@@ -160,5 +165,28 @@ describe("RallyViewer", () => {
     expect(screen.getByRole("button", { name: "Check in" })).toHaveProperty("disabled", true);
     fireEvent.click(screen.getByRole("button", { name: "Check in" }));
     expect(onCheckIn).not.toHaveBeenCalled();
+  });
+});
+
+describe("participant utility components", () => {
+  it("shows GPS proximity and completes a staff redemption", async () => {
+    render(
+      <>
+        <GpsProximityMeter
+          currentPosition={{ latitude: 35, longitude: 135 }}
+          targetPosition={{ latitude: 35.0001, longitude: 135 }}
+          radiusMeters={100}
+          locale="en"
+        />
+        <StaffRedemptionView onRedeem={vi.fn(async () => ({ ok: true }))} locale="en" />
+      </>,
+    );
+    expect(screen.getByText("You are inside the check-in area")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Ticket number or QR value"), {
+      target: { value: "T-1" },
+    });
+    fireEvent.change(screen.getByLabelText("Staff passcode"), { target: { value: "secret" } });
+    fireEvent.click(screen.getByRole("button", { name: "Redeem ticket" }));
+    expect(await screen.findByText("Exchange completed")).toBeTruthy();
   });
 });

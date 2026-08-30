@@ -1,4 +1,4 @@
-export type SupportedLocale = "ja" | "en";
+export type SupportedLocale = "ja" | "en" | "zh-CN" | "zh-TW" | "ko";
 export type LocalizedText<TLocale extends string = string> =
   | string
   | Partial<Record<TLocale, string>>;

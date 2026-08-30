@@ -1,6 +1,6 @@
 import type { ThemePreset } from "./models.js";
 
-export const THEME_PRESETS: ReadonlyArray<ThemePreset> = [
+export const THEME_PRESETS: ReadonlyArray<ThemePreset<"ja" | "en">> = [
   {
     id: "default",
     name: { ja: "クラシックブルー", en: "Classic Blue" },

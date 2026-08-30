@@ -1,4 +1,4 @@
-# stamprally-core-app v0.23.0
+# stamprally-core-app v0.24.0
 
 A headless, storage-agnostic stamp rally engine with React, participant UI, authoring UI, and Web Standard server integration.
 
@@ -35,7 +35,7 @@ import { RallyViewer } from "@stamprally/ui";
 
 const adminConfig: AdminRallyConfig = {
   id: "city-tour",
-  version: "0.23.0",
+  version: "0.24.0",
   title: { ja: "街歩きラリー", en: "City Tour" },
   spots: [
     {

@@ -7,6 +7,58 @@ import type {
   SheetTheme,
 } from "./models.js";
 
+export interface LocalizationWarning {
+  readonly path: string;
+  readonly locale: string;
+  readonly field: "name" | "description" | "hint";
+  readonly message: string;
+  readonly code: "missing_translation";
+}
+
+function hasLocalizedValue(value: unknown, locale: string): boolean {
+  if (typeof value === "string") return value.trim() !== "";
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const localized = value as Record<string, unknown>;
+  const exact = localized[locale];
+  if (typeof exact === "string" && exact.trim() !== "") return true;
+  const normalized = locale.replaceAll("_", "-").toLowerCase();
+  return Object.entries(localized).some(
+    ([key, item]) =>
+      key.replaceAll("_", "-").toLowerCase() === normalized &&
+      typeof item === "string" &&
+      item.trim() !== "",
+  );
+}
+
+/** Finds empty or absent spot translations for each explicitly requested locale. */
+export function validateLocalizationCompleteness<
+  TLocale extends string = string,
+  TMeta extends Record<string, unknown> = Record<string, unknown>,
+>(
+  config: AdminRallyConfig<TLocale, TMeta>,
+  targetLocales: readonly string[],
+): ReadonlyArray<LocalizationWarning> {
+  const warnings: LocalizationWarning[] = [];
+  const fields = ["name", "description", "hint"] as const;
+  config.spots.forEach((spot, index) => {
+    for (const locale of targetLocales) {
+      for (const field of fields) {
+        const value = spot[field];
+        if (value === undefined && field !== "name") continue;
+        if (hasLocalizedValue(value, locale)) continue;
+        warnings.push({
+          path: `spots[${index}].${field}.${locale}`,
+          locale,
+          field,
+          message: `A ${field} translation is missing for ${locale}.`,
+          code: "missing_translation",
+        });
+      }
+    }
+  });
+  return warnings;
+}
+
 export interface ValidationError {
   readonly path: string;
   readonly message: string;

@@ -2,6 +2,74 @@
   min-height: 1.5rem;
   color: var(--stamprally-feedback-color, currentColor);
 }
+.stamp-celebration {
+  position: relative;
+  display: inline-block;
+  width: 2.5rem;
+  height: 2.5rem;
+  margin-inline: 0.35rem;
+  vertical-align: middle;
+}
+.stamp-celebration span {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0.35rem;
+  height: 0.8rem;
+  border-radius: 999px;
+  background: var(--stamprally-celebration-color, #e4572e);
+  animation: stamp-confetti 0.85s ease-out both;
+}
+.stamp-celebration span:nth-child(2n) {
+  background: var(--stamprally-celebration-alt, #f3c969);
+}
+.stamp-celebration span:nth-child(1) {
+  transform: rotate(0deg) translateY(-1.1rem);
+}
+.stamp-celebration span:nth-child(2) {
+  transform: rotate(45deg) translateY(-1.1rem);
+}
+.stamp-celebration span:nth-child(3) {
+  transform: rotate(90deg) translateY(-1.1rem);
+}
+.stamp-celebration span:nth-child(4) {
+  transform: rotate(135deg) translateY(-1.1rem);
+}
+.stamp-celebration span:nth-child(5) {
+  transform: rotate(180deg) translateY(-1.1rem);
+}
+.stamp-celebration span:nth-child(6) {
+  transform: rotate(225deg) translateY(-1.1rem);
+}
+.stamp-celebration span:nth-child(7) {
+  transform: rotate(270deg) translateY(-1.1rem);
+}
+.stamp-celebration span:nth-child(8) {
+  transform: rotate(315deg) translateY(-1.1rem);
+}
+@keyframes stamp-confetti {
+  from {
+    opacity: 0;
+    scale: 0.4;
+  }
+  to {
+    opacity: 1;
+    scale: 1;
+  }
+}
+.gps-proximity-meter__track {
+  overflow: hidden;
+  height: 0.35rem;
+  margin-block: 0.35rem;
+  border-radius: 999px;
+  background: #0002;
+}
+.gps-proximity-meter__fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--stamprally-primary, #9e551e);
+  transition: width 0.25s ease;
+}
 .sry-action {
   margin-block: 0.35rem;
 }

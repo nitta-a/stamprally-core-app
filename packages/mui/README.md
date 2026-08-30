@@ -1,4 +1,4 @@
-# @stamprally/mui v0.23.0
+# @stamprally/mui v0.24.0
 
 MUI (Material UI) adapter components for `@stamprally/core`. The package provides a themed
 participant viewer and an authoring editor while keeping the domain engine and existing UI packages

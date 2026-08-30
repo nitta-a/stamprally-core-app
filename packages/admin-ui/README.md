@@ -1,4 +1,4 @@
-# @stamprally/admin-ui v0.23.0
+# @stamprally/admin-ui v0.24.0
 
 Accessible authoring forms and a headless editor for rally management screens.
 

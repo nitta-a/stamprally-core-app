@@ -1,6 +1,13 @@
 "use client";
 
 export type {
+  MockRallyAdapter,
+  MockRallyAdapterOptions,
+  RallyAdapterSyncState,
+  RallyViewerAdapter,
+} from "@stamprally/core";
+export { createMockRallyAdapter } from "@stamprally/core";
+export type {
   UseStampRallyOptions,
   UseStampRallyReturn,
   UseStampRallySyncState,

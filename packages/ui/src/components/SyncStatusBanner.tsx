@@ -5,7 +5,7 @@ import type {
   SyncState,
 } from "@stamprally/core";
 import type { CSSProperties, ReactElement } from "react";
-import { DEFAULT_UI_DICTIONARY } from "../locales/index.js";
+import { type BuiltInUiLocale, DEFAULT_UI_DICTIONARY } from "../locales/index.js";
 
 export interface SyncStateContext {
   readonly syncState: SyncState;
@@ -31,7 +31,9 @@ function text<TLocale extends string>(
   fallback: string,
 ): string {
   return (
-    dictionary?.[locale]?.[key] ?? DEFAULT_UI_DICTIONARY[locale as "ja" | "en"]?.[key] ?? fallback
+    dictionary?.[locale]?.[key] ??
+    DEFAULT_UI_DICTIONARY[locale as BuiltInUiLocale]?.[key] ??
+    fallback
   );
 }
 

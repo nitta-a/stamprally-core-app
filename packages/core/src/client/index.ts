@@ -18,6 +18,13 @@ export type {
 } from "./client.js";
 export { StampRallyClient } from "./client.js";
 export type {
+  MockRallyAdapter,
+  MockRallyAdapterOptions,
+  RallyAdapterSyncState,
+  RallyViewerAdapter,
+} from "./mock.js";
+export { createMockRallyAdapter } from "./mock.js";
+export type {
   IndexedDBOfflineQueueOptions,
   LegacyQueueCapability,
   LegacyQueueCapabilityString,
