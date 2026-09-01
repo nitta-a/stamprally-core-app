@@ -1,6 +1,6 @@
 {
   "name": "@stamprally/mui",
-  "version": "0.25.0",
+  "version": "0.25.1",
   "description": "Material UI adapters for stamp rally viewers and editors.",
   "license": "MIT",
   "repository": {
