@@ -61,5 +61,23 @@ console.log(
 );
 EOF
 
-npx tsc --noEmit test.ts
-node test.ts
+npx tsc --noEmit --project tsconfig.json
+cat > test.cjs <<'EOF'
+const { parseAdminConfig } = require("@stamprally/core");
+const { StampRallyServer } = require("@stamprally/server");
+const { useStampRally } = require("@stamprally/react");
+const { RallyViewer } = require("@stamprally/ui");
+const { AdminRallyEditor } = require("@stamprally/admin-ui");
+const { MuiRallyViewer } = require("@stamprally/mui");
+
+console.log(
+  "All packages imported successfully.",
+  parseAdminConfig,
+  StampRallyServer,
+  useStampRally,
+  RallyViewer,
+  AdminRallyEditor,
+  MuiRallyViewer,
+);
+EOF
+node test.cjs
