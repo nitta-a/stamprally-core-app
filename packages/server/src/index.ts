@@ -82,6 +82,12 @@ export type {
 } from "./persistence.js";
 export { InMemoryServerPersistenceAdapter } from "./persistence.js";
 export {
+  createGoogleAuthContext,
+  GoogleAuthVerificationError,
+  type GoogleAuthVerificationErrorCode,
+  type GoogleAuthVerifierOptions,
+} from "./security/googleAuth.js";
+export {
   assertValidCheckInParams,
   assertValidClaimParams,
   assertValidSyncParams,

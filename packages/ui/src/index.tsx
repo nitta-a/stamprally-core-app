@@ -25,6 +25,10 @@ import type {
 import { type SyncStateContext, SyncStatusBanner } from "./components/SyncStatusBanner.js";
 import { type BuiltInUiLocale, DEFAULT_UI_DICTIONARY } from "./locales/index.js";
 
+export type { AccountBackupBannerProps } from "./components/AccountBackupBanner.js";
+export { AccountBackupBanner } from "./components/AccountBackupBanner.js";
+export type { CloudSyncButtonProps } from "./components/CloudSyncButton.js";
+export { CloudSyncButton } from "./components/CloudSyncButton.js";
 export type { GpsProximityMeterProps } from "./components/GpsProximityMeter.js";
 export { GpsProximityMeter } from "./components/GpsProximityMeter.js";
 export type { StaffRedemptionViewProps } from "./components/StaffRedemptionView.js";

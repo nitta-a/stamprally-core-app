@@ -5,6 +5,44 @@ import { cloneState } from "./storage.js";
 
 export type SyncOperationAction = "CHECK_IN" | "CLAIM_REWARD";
 
+export type AccountAuthProvider = "google" | "oidc" | "custom";
+
+export type AnonymousProgressMergePolicy = "union" | "authoritative_replay";
+
+export interface LinkAccountRequest {
+  readonly authProviderToken: string;
+  readonly provider: AccountAuthProvider;
+  readonly rallyId: string;
+  readonly anonymousSessionId: string;
+  readonly anonymousState: UserRallyState;
+  readonly operations: ReadonlyArray<OfflineOperation>;
+}
+
+export interface LinkAccountResponse {
+  readonly userId: string;
+  readonly authenticatedState?: UserRallyState;
+  readonly mergePolicy?: AnonymousProgressMergePolicy;
+}
+
+export interface CloudSnapshotRequest {
+  readonly rallyId: string;
+  readonly userId: string;
+  readonly state: UserRallyState;
+}
+
+export interface CloudSnapshotImportRequest {
+  readonly rallyId: string;
+  readonly userId: string;
+  readonly snapshot: string;
+}
+
+/** Host-owned transport for provider-specific account linking and signed snapshots. */
+export interface CloudSyncAdapter {
+  readonly linkAccount: (request: LinkAccountRequest) => Promise<LinkAccountResponse>;
+  readonly exportCloudSnapshot: (request: CloudSnapshotRequest) => Promise<string>;
+  readonly importCloudSnapshot: (request: CloudSnapshotImportRequest) => Promise<UserRallyState>;
+}
+
 export type SyncOperationResult =
   | {
       readonly operationId: string;
@@ -42,6 +80,81 @@ export interface RebuildUserStateOptions {
 export interface RebuildUserStateResult {
   readonly state: UserRallyState;
   readonly rejectedOperationIds: ReadonlyArray<string>;
+}
+
+export interface MigrateAnonymousProgressOptions {
+  readonly anonymousState: UserRallyState;
+  readonly authenticatedState?: UserRallyState | null;
+  readonly userId: string;
+  readonly policy?: AnonymousProgressMergePolicy;
+}
+
+function rewardRank(status: UserRallyState["rewards"][number]["status"]): number {
+  return { LOCKED: 0, AVAILABLE: 1, EXPIRED: 1, CONSUMED: 2 }[status];
+}
+
+function mergeRewardStates(
+  anonymous: ReadonlyArray<UserRallyState["rewards"][number]>,
+  authenticated: ReadonlyArray<UserRallyState["rewards"][number]>,
+  policy: AnonymousProgressMergePolicy,
+): UserRallyState["rewards"] {
+  const merged = new Map(authenticated.map((reward) => [reward.rewardId, { ...reward }]));
+  for (const reward of anonymous) {
+    const existing = merged.get(reward.rewardId);
+    if (existing === undefined) {
+      merged.set(reward.rewardId, { ...reward });
+      continue;
+    }
+    if (policy === "authoritative_replay") continue;
+    if (rewardRank(reward.status) > rewardRank(existing.status))
+      merged.set(reward.rewardId, { ...reward });
+  }
+  return [...merged.values()];
+}
+
+/** Merges anonymous progress into an authenticated account without mutating either input. */
+export function migrateAnonymousProgress(
+  anonymousState: UserRallyState,
+  authenticatedState: UserRallyState | null | undefined,
+  userId: string,
+  policy?: AnonymousProgressMergePolicy,
+): UserRallyState;
+export function migrateAnonymousProgress(options: MigrateAnonymousProgressOptions): UserRallyState;
+export function migrateAnonymousProgress(
+  anonymousOrOptions: UserRallyState | MigrateAnonymousProgressOptions,
+  authenticatedArgument?: UserRallyState | null,
+  userIdArgument?: string,
+  policyArgument: AnonymousProgressMergePolicy = "union",
+): UserRallyState {
+  const isOptions = "anonymousState" in anonymousOrOptions;
+  const anonymousState = isOptions ? anonymousOrOptions.anonymousState : anonymousOrOptions;
+  const authenticatedState = isOptions
+    ? anonymousOrOptions.authenticatedState
+    : authenticatedArgument;
+  const userId = isOptions ? anonymousOrOptions.userId : userIdArgument;
+  const policy = isOptions ? (anonymousOrOptions.policy ?? "union") : policyArgument;
+  if (userId === undefined || userId.trim() === "") throw new Error("A userId is required.");
+  if (
+    authenticatedState !== undefined &&
+    authenticatedState !== null &&
+    anonymousState.rallyId !== authenticatedState.rallyId
+  )
+    throw new Error("Progress belongs to another rally.");
+  const records = new Map(
+    (authenticatedState?.records ?? []).map((record) => [record.stampId, { ...record }]),
+  );
+  for (const record of anonymousState.records) {
+    if (!records.has(record.stampId)) records.set(record.stampId, { ...record });
+  }
+  const base = authenticatedState ?? anonymousState;
+  return {
+    ...cloneState(base),
+    userId,
+    records: [...records.values()],
+    rewards: mergeRewardStates(anonymousState.rewards, authenticatedState?.rewards ?? [], policy),
+    updatedAt:
+      anonymousState.updatedAt > base.updatedAt ? anonymousState.updatedAt : base.updatedAt,
+  };
 }
 
 function isReplayable(operation: OfflineOperation): boolean {

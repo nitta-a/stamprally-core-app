@@ -610,6 +610,60 @@ export class OfflineQueue {
     await this.setScope(this.#rallyId, newUserId);
   }
 
+  /** Moves pending operations and rejection history from the current user to another account. */
+  async migrateUser(newUserId: string): Promise<void> {
+    if (this.#rallyId === undefined)
+      throw new Error("OfflineQueue.migrateUser requires a rally scope.");
+    if (newUserId.trim() === "") throw new Error("OfflineQueue.migrateUser requires a userId.");
+    await this.initialize();
+    const sourceKey = this.#storageKey();
+    const migrateOperation = (operation: OfflineOperation): OfflineOperation => {
+      const { anonymousSessionId: _anonymousSessionId, ...request } = operation.request;
+      return { ...operation, request: { ...request, userId: newUserId } } as OfflineOperation;
+    };
+    const migratedOperations = this.#operations.map(migrateOperation);
+    const migratedHistory = this.#rejectedHistory.map((entry) => ({
+      ...entry,
+      operation: migrateOperation(entry.operation),
+    }));
+    if (this.#configuredKey !== undefined) {
+      this.#userId = newUserId;
+      this.#operations = migratedOperations;
+      this.#rejectedHistory = migratedHistory;
+      await this.#storage.save(sourceKey, this.#operations);
+      await this.#saveRejectedHistory();
+      this.#announceChange();
+      return;
+    }
+    const destinationKey = `stamprally:queue:${this.#rallyId}:${newUserId}`;
+    const destinationOperations = (await this.#storage.load(destinationKey)).map(
+      normalizeOperation,
+    );
+    const destinationHistory =
+      (await this.#storage.loadRejectedHistory?.(destinationKey))?.map(normalizeRejectedHistory) ??
+      [];
+    const operations = new Map(
+      [...destinationOperations, ...migratedOperations].map((operation) => [
+        offlineOperationId(operation),
+        operation,
+      ]),
+    );
+    const history = new Map(
+      [...destinationHistory, ...migratedHistory].map((entry) => [
+        offlineOperationId(entry.operation),
+        entry,
+      ]),
+    );
+    await this.#storage.save(sourceKey, []);
+    await this.#storage.saveRejectedHistory?.(sourceKey, []);
+    await this.#storage.save(destinationKey, [...operations.values()]);
+    await this.#storage.saveRejectedHistory?.(destinationKey, [...history.values()]);
+    this.#userId = newUserId;
+    this.#operations = [...operations.values()];
+    this.#rejectedHistory = [...history.values()];
+    this.#announceChange();
+  }
+
   setSender(sender: OfflineSender): void {
     this.#sender = sender;
   }
@@ -1069,6 +1123,7 @@ export class OfflineQueue {
   }
 
   #hasWebLocks(): boolean {
+    if ((globalThis as { readonly window?: unknown }).window === undefined) return false;
     const locks = (
       globalThis as {
         readonly navigator?: {

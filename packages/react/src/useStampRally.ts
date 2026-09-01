@@ -1,4 +1,5 @@
 import type {
+  AccountAuthProvider,
   CheckInOptions,
   CheckInResult,
   ClaimOptions,
@@ -38,6 +39,13 @@ export interface UseStampRallyReturn {
   ) => Promise<CheckInResult>;
   readonly onClaimReward: (rewardId: string, options?: ClaimOptions) => Promise<ClaimResult>;
   readonly onSync: () => Promise<void>;
+  readonly syncProgress: () => Promise<void>;
+  readonly linkAccount: (
+    authProviderToken: string,
+    provider: AccountAuthProvider,
+  ) => Promise<UserRallyState>;
+  readonly exportCloudSnapshot: () => Promise<string>;
+  readonly importCloudSnapshot: (snapshot: string) => Promise<UserRallyState>;
   readonly retrySync: () => Promise<void>;
   readonly syncState: UseStampRallySyncState;
   readonly syncStatus: SyncState;
@@ -131,6 +139,36 @@ export function useStampRally(
     (listener: SyncEventListener) => client.subscribeSyncEvents(listener),
     [client],
   );
+  const linkAccount = useCallback(
+    (authProviderToken: string, provider: AccountAuthProvider) => {
+      setError(null);
+      return client.linkAccount(authProviderToken, provider).catch((reason: unknown) => {
+        const next = errorFrom(reason);
+        setError(next);
+        throw next;
+      });
+    },
+    [client],
+  );
+  const exportCloudSnapshot = useCallback(() => {
+    setError(null);
+    return client.exportCloudSnapshot().catch((reason: unknown) => {
+      const next = errorFrom(reason);
+      setError(next);
+      throw next;
+    });
+  }, [client]);
+  const importCloudSnapshot = useCallback(
+    (snapshot: string) => {
+      setError(null);
+      return client.importCloudSnapshot(snapshot).catch((reason: unknown) => {
+        const next = errorFrom(reason);
+        setError(next);
+        throw next;
+      });
+    },
+    [client],
+  );
   void syncRevision;
   return {
     state,
@@ -140,6 +178,10 @@ export function useStampRally(
     onCheckIn,
     onClaimReward,
     onSync,
+    syncProgress: onSync,
+    linkAccount,
+    exportCloudSnapshot,
+    importCloudSnapshot,
     retrySync: onSync,
     syncState: {
       isSyncing: client.syncState === "syncing",

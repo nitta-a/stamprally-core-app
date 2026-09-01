@@ -1,4 +1,4 @@
-# @stamprally/react v0.24.0
+# @stamprally/react v0.25.0
 
 React integration for `@stamprally/core`. `useStampRally` subscribes to immutable client state and exposes check-in, reward-claim, synchronization, and user-switching operations.
 
@@ -9,7 +9,7 @@ import { useStampRally } from "@stamprally/react";
 
 const config: PublicRallyConfig = {
   id: "city-tour",
-  version: "0.24.0",
+  version: "0.25.0",
   title: "City Tour",
   spots: [{ id: "station", orderIndex: 0, name: "Station", conditions: [{ type: "passcode" }] }],
   rewards: [],
@@ -23,7 +23,10 @@ export function Rally() {
 }
 ```
 
-The hook return value includes `state`, `isLoading`, `error`, `onCheckIn`, `onClaimReward`, `onSync`, `switchUser`, and `clearUserState`.
+The hook return value includes `state`, `isLoading`, `error`, `onCheckIn`, `onClaimReward`, `onSync`,
+`syncProgress`, `linkAccount`, `exportCloudSnapshot`, `importCloudSnapshot`, `switchUser`, and
+`clearUserState`. The cloud methods call a host-provided `CloudSyncAdapter`; no Google SDK is
+required by this package.
 
 Offline queue responses are reflected immediately in `state`. Permanent server
 rejections are delivered through `error`, while retryable transport failures

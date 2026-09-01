@@ -3,6 +3,8 @@ import {
   createAnonymousSessionId,
   evaluateSpotStatus,
   InMemoryOfflineQueueStorage,
+  InMemoryStorage,
+  migrateAnonymousProgress,
   OfflineQueue,
   rebuildUserStateFromLog,
   resolveRallyStateConflict,
@@ -42,6 +44,82 @@ describe("resolveRallyStateConflict", () => {
     const local = state(["local"], "CONSUMED");
     expect(resolveRallyStateConflict(server, local)).not.toBe(server);
     expect(resolveRallyStateConflict(server, local)).toEqual(server);
+  });
+});
+
+describe("migrateAnonymousProgress", () => {
+  it("unions anonymous stamps and unclaimed rewards without mutating either account", () => {
+    const anonymous = {
+      ...state(["anonymous"], "AVAILABLE"),
+      userId: "anonymous-session",
+    };
+    const authenticated = state(["account"], "LOCKED");
+    const merged = migrateAnonymousProgress(anonymous, authenticated, "google-sub");
+    expect(merged.userId).toBe("google-sub");
+    expect(merged.records.map((record) => record.stampId)).toEqual(["account", "anonymous"]);
+    expect(merged.rewards).toEqual([{ rewardId: "r1", status: "AVAILABLE" }]);
+    expect(anonymous.userId).toBe("anonymous-session");
+    expect(authenticated.rewards[0]?.status).toBe("LOCKED");
+  });
+
+  it("keeps the authenticated reward authoritative when requested", () => {
+    const merged = migrateAnonymousProgress(
+      state(["anonymous"], "CONSUMED"),
+      state(["account"], "LOCKED"),
+      "google-sub",
+      "authoritative_replay",
+    );
+    expect(merged.records.map((record) => record.stampId)).toEqual(["account", "anonymous"]);
+    expect(merged.rewards).toEqual([{ rewardId: "r1", status: "LOCKED" }]);
+  });
+});
+
+describe("cloud account linking", () => {
+  it("links anonymous progress and exposes cloud snapshot adapters", async () => {
+    const config = toPublicConfig({
+      id: "rally",
+      version: "1",
+      title: "Rally",
+      spots: [
+        { id: "anonymous-spot", orderIndex: 0, name: "Spot", conditions: [] },
+        { id: "cloud-spot", orderIndex: 1, name: "Cloud spot", conditions: [] },
+      ],
+      rewards: [],
+    });
+    const storage = new InMemoryStorage();
+    let savedSnapshot = "";
+    const client = new StampRallyClient(config, {
+      storage,
+      cloudSyncAdapter: {
+        linkAccount: async (request) => {
+          expect(request.provider).toBe("google");
+          expect(request.authProviderToken).toBe("id-token");
+          return { userId: "google-sub" };
+        },
+        exportCloudSnapshot: async (request) => {
+          savedSnapshot = JSON.stringify(request.state);
+          return "signed-snapshot";
+        },
+        importCloudSnapshot: async (request) => {
+          expect(request.snapshot).toBe("signed-snapshot");
+          return {
+            rallyId: request.rallyId,
+            userId: request.userId,
+            records: [{ stampId: "cloud-spot", acquiredAt: "2026-01-02T00:00:00.000Z" }],
+            rewards: [],
+            updatedAt: "2026-01-02T00:00:00.000Z",
+          };
+        },
+      },
+    });
+    await client.checkIn("anonymous-spot", "proof", { sync: false });
+    const linked = await client.linkAccount("id-token", "google");
+    expect(linked.userId).toBe("google-sub");
+    expect(linked.records.map((record) => record.stampId)).toEqual(["anonymous-spot"]);
+    await expect(client.exportCloudSnapshot()).resolves.toBe("signed-snapshot");
+    expect(savedSnapshot).toContain("anonymous-spot");
+    const imported = await client.importCloudSnapshot("signed-snapshot");
+    expect(imported.records[0]?.stampId).toBe("cloud-spot");
   });
 });
 

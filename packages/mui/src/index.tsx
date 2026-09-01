@@ -79,6 +79,10 @@ import type { UseStampRallyReturn, UseStampRallySyncState } from "@stamprally/re
 import type { ChangeEvent, ElementType, ReactNode, SyntheticEvent } from "react";
 import { useEffect, useState } from "react";
 
+export type { MuiAccountBackupBannerProps } from "./AccountBackupBanner.js";
+export { MuiAccountBackupBanner } from "./AccountBackupBanner.js";
+export type { MuiCloudSyncButtonProps } from "./CloudSyncButton.js";
+export { MuiCloudSyncButton } from "./CloudSyncButton.js";
 export type { MuiGpsProximityMeterProps } from "./GpsProximityMeter.js";
 export {
   MuiGpsProximityMeter,

@@ -1,6 +1,6 @@
 {
   "name": "@stamprally/react",
-  "version": "0.24.0",
+  "version": "0.25.0",
   "description": "React hooks for @stamprally/core.",
   "license": "MIT",
   "repository": {

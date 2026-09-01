@@ -87,10 +87,22 @@ export {
   storageKey,
 } from "./storage.js";
 export type {
+  AccountAuthProvider,
+  AnonymousProgressMergePolicy,
+  CloudSnapshotImportRequest,
+  CloudSnapshotRequest,
+  CloudSyncAdapter,
+  LinkAccountRequest,
+  LinkAccountResponse,
+  MigrateAnonymousProgressOptions,
   RebuildUserStateOptions,
   RebuildUserStateResult,
   SyncOperationAction,
   SyncOperationResult,
   SyncProgressResponse,
 } from "./sync.js";
-export { rebuildUserStateFromLog, rebuildUserStateLog } from "./sync.js";
+export {
+  migrateAnonymousProgress,
+  rebuildUserStateFromLog,
+  rebuildUserStateLog,
+} from "./sync.js";

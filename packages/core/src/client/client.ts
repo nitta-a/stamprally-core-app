@@ -30,7 +30,16 @@ import {
   type StampStorage,
   storageKey,
 } from "./storage.js";
-import { rebuildUserStateFromLog, type SyncProgressResponse } from "./sync.js";
+import {
+  type AccountAuthProvider,
+  type CloudSnapshotImportRequest,
+  type CloudSnapshotRequest,
+  type CloudSyncAdapter,
+  type LinkAccountRequest,
+  migrateAnonymousProgress,
+  rebuildUserStateFromLog,
+  type SyncProgressResponse,
+} from "./sync.js";
 
 export type CheckInOptions = {
   readonly now?: string;
@@ -137,6 +146,7 @@ export interface SyncAdapter {
 export interface ClientOptions {
   readonly storage?: StampStorage;
   readonly syncAdapter?: SyncAdapter;
+  readonly cloudSyncAdapter?: CloudSyncAdapter;
   readonly customValidator?: Validator;
   readonly customValidators?: Readonly<Record<string, Validator>>;
   readonly clock?: () => string;
@@ -382,6 +392,79 @@ export class StampRallyClient {
       return this.initialize();
     });
   }
+  linkAccount(authProviderToken: string, provider: AccountAuthProvider): Promise<UserRallyState> {
+    return this.#enqueue(async () => {
+      const anonymousState = await this.initialize();
+      if (this.#userId !== this.#anonymousSessionId)
+        throw new Error("Only an anonymous session can be linked to an account.");
+      const adapter = this.#options.cloudSyncAdapter;
+      if (adapter === undefined) throw new Error("No cloud sync adapter is configured.");
+      const request: LinkAccountRequest = {
+        authProviderToken,
+        provider,
+        rallyId: this.#config.id,
+        anonymousSessionId: this.#anonymousSessionId,
+        anonymousState: cloneState(anonymousState),
+        operations: this.#offlineQueue?.operations ?? [],
+      };
+      const response = await adapter.linkAccount(request);
+      const authenticatedState =
+        response.authenticatedState ??
+        (await this.#storage.load(this.#config.id, response.userId)) ??
+        null;
+      const merged = migrateAnonymousProgress(
+        anonymousState,
+        authenticatedState,
+        response.userId,
+        response.mergePolicy,
+      );
+      await this.#offlineQueue?.migrateUser(response.userId);
+      this.#userId = response.userId;
+      const next = this.#reconcile(merged);
+      await this.#storage.save(next);
+      this.#state = next;
+      this.#initialization = Promise.resolve(next);
+      this.#emit(next);
+      return next;
+    });
+  }
+  exportCloudSnapshot(): Promise<string> {
+    return this.#enqueue(async () => {
+      const state = await this.initialize();
+      const userId = this.#authenticatedUserId();
+      const adapter = this.#options.cloudSyncAdapter;
+      if (adapter === undefined) throw new Error("No cloud sync adapter is configured.");
+      const request: CloudSnapshotRequest = {
+        rallyId: this.#config.id,
+        userId,
+        state: cloneState(state),
+      };
+      return adapter.exportCloudSnapshot(request);
+    });
+  }
+  importCloudSnapshot(snapshot: string): Promise<UserRallyState> {
+    return this.#enqueue(async () => {
+      await this.initialize();
+      const userId = this.#authenticatedUserId();
+      const adapter = this.#options.cloudSyncAdapter;
+      if (adapter === undefined) throw new Error("No cloud sync adapter is configured.");
+      const request: CloudSnapshotImportRequest = {
+        rallyId: this.#config.id,
+        userId,
+        snapshot,
+      };
+      const imported = await adapter.importCloudSnapshot(request);
+      if (imported.rallyId !== this.#config.id || imported.userId !== userId)
+        throw new Error("Imported snapshot belongs to another rally or user.");
+      const next = this.#reconcile(imported);
+      await this.#storage.save(next);
+      this.#state = next;
+      this.#initialization = Promise.resolve(next);
+      this.#emit(next);
+      this.#emitEvent({ type: "sync", state: next });
+      return next;
+    });
+  }
   async getUserState(rallyId: string, userId: string): Promise<UserRallyState | null> {
     return this.#storage.load(rallyId, userId);
   }
@@ -608,6 +691,9 @@ export class StampRallyClient {
   retrySync(): Promise<void> {
     return this.sync();
   }
+  syncProgress(adapter = this.#options.syncAdapter): Promise<void> {
+    return this.sync(adapter);
+  }
   reset(): Promise<UserRallyState> {
     return this.#enqueue(async () => {
       await this.#storage.remove(this.#config.id, this.#userId);
@@ -727,6 +813,12 @@ export class StampRallyClient {
   }
   #now(): string {
     return this.#options.clock?.() ?? new Date().toISOString();
+  }
+  #authenticatedUserId(): string {
+    const userId = this.#userId;
+    if (userId === null || userId === this.#anonymousSessionId)
+      throw new Error("An authenticated account is required for cloud snapshots.");
+    return userId;
   }
   #fail(error: ClientError): { readonly ok: false; readonly error: ClientError } {
     this.#emitEvent({ type: "error", error });

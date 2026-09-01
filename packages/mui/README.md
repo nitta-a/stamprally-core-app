@@ -1,4 +1,7 @@
-# @stamprally/mui v0.24.0
+# @stamprally/mui v0.25.0
+
+`MuiAccountBackupBanner` and `MuiCloudSyncButton` provide Material UI adapters for the
+host-provided account-link and cloud-sync callbacks.
 
 MUI (Material UI) adapter components for `@stamprally/core`. The package provides a themed
 participant viewer and an authoring editor while keeping the domain engine and existing UI packages

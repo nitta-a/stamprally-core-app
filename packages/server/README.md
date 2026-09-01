@@ -1,4 +1,4 @@
-# @stamprally/server v0.24.0
+# @stamprally/server v0.25.0
 
 Web Standard `Request` / `Response` handlers for server-authoritative check-ins and reward claims.
 
@@ -27,6 +27,18 @@ HTTP 401 when no authenticated identity is present. Request validation failures 
 HTTP 400 with `{ error: "VALIDATION_FAILED", details: [...] }`.
 
 ## Batch sync and trusted authentication
+
+For Google Identity Services, verify the credential before passing it to the server boundary:
+
+```ts
+import { createGoogleAuthContext } from "@stamprally/server";
+
+const authContext = await createGoogleAuthContext(idToken, { clientId: GOOGLE_CLIENT_ID });
+await server.syncProgress(request, authContext);
+```
+
+The helper validates the Google issuer, audience, `sub`, time claims, and RS256 signature using
+Google's JWKS endpoint. A custom `fetch`/JWKS URL can be injected for tests or a controlled proxy.
 
 `syncProgress(request, authContext)` evaluates `operations` by their request
 timestamp, preserving FIFO order for equal timestamps, and returns

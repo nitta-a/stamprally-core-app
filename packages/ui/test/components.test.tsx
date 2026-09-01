@@ -2,6 +2,8 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { describe, expect, it, vi } from "vitest";
 import {
+  AccountBackupBanner,
+  CloudSyncButton,
   GpsProximityMeter,
   RallyViewer,
   StaffRedemptionView,
@@ -25,6 +27,24 @@ describe("SyncStatusBanner", () => {
     );
     expect(screen.getByRole("status").textContent).toContain("オフラインで記録中");
     expect(screen.getByRole("status").textContent).toContain("2件");
+  });
+});
+
+describe("cloud account components", () => {
+  it("offers account linking and manual sync callbacks", () => {
+    const onLinkAccount = vi.fn();
+    const onSync = vi.fn();
+    render(
+      <>
+        <AccountBackupBanner onLinkAccount={onLinkAccount} />
+        <CloudSyncButton onSync={onSync} accountLabel="member@gmail.com" />
+      </>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Google で連携" }));
+    fireEvent.click(screen.getByRole("button", { name: "今すぐ同期" }));
+    expect(onLinkAccount).toHaveBeenCalledOnce();
+    expect(onSync).toHaveBeenCalledOnce();
+    expect(screen.getByText("同期済み: member@gmail.com")).toBeTruthy();
   });
 });
 
