@@ -1,6 +1,6 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ReactElement } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   AccountBackupBanner,
   CloudSyncButton,
@@ -9,6 +9,8 @@ import {
   StaffRedemptionView,
   SyncStatusBanner,
 } from "../src/index.js";
+
+afterEach(() => cleanup());
 
 describe("SyncStatusBanner", () => {
   it("renders pending offline operations", () => {
@@ -49,6 +51,54 @@ describe("cloud account components", () => {
 });
 
 describe("RallyViewer", () => {
+  it("shows next spots and completion without firing the completion callback on initial load", () => {
+    const onNavigate = vi.fn();
+    const onCompleted = vi.fn();
+    render(
+      <RallyViewer
+        locale="en"
+        nextAction={{ strategy: "nearest", currentLocation: { latitude: 35, longitude: 139 } }}
+        onNavigate={onNavigate}
+        onCompleted={onCompleted}
+        adapter={{
+          config: {
+            id: "r",
+            version: "1",
+            title: "Rally",
+            completion: { condition: { type: "stamp_count", count: 1 } },
+            spots: [
+              {
+                id: "s1",
+                orderIndex: 0,
+                name: "Near",
+                conditions: [],
+                location: { latitude: 35, longitude: 139 },
+              },
+              { id: "s2", orderIndex: 1, name: "Done", conditions: [] },
+            ],
+            rewards: [],
+          },
+          state: {
+            rallyId: "r",
+            userId: null,
+            records: [{ stampId: "s2", acquiredAt: "" }],
+            rewards: [],
+            updatedAt: "",
+          },
+          onCheckIn: vi.fn(),
+        }}
+      />,
+    );
+    expect(screen.getByRole("heading", { name: "Next spots" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "View directions" }));
+    expect(onNavigate).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "s1" }),
+      expect.objectContaining({ spot: expect.objectContaining({ id: "s1" }) }),
+    );
+    expect(screen.getByRole("heading", { name: "Stamp rally complete!" })).toBeTruthy();
+    expect(onCompleted).not.toHaveBeenCalled();
+  });
+
   it("renders spot and feedback slots with the deepest style hooks", () => {
     render(
       <RallyViewer

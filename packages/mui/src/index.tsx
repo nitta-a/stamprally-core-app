@@ -54,8 +54,11 @@ import { useAdminRallyEditor } from "@stamprally/admin-ui";
 import type {
   AdminRallyConfig,
   CheckInCondition,
+  GeoCoordinates,
   LocaleDictionary,
   LocalizedText,
+  NextSpotStrategy,
+  NextSpotSuggestion,
   PublicRallyConfig,
   PublicReward,
   PublicSpotItem,
@@ -64,6 +67,7 @@ import type {
   SheetTheme,
   SpotItem,
   SpotStatus,
+  StampRallyProgress,
   StampRallyState,
   SupportedLocale,
 } from "@stamprally/core";
@@ -71,18 +75,25 @@ import {
   calculateProgress,
   DEFAULT_SHEET_THEME,
   evaluateSpotStatus,
+  getNextSpotSuggestions,
   resolveLocalizedText,
   updateLocalizedField,
   validateLocalizationCompleteness,
 } from "@stamprally/core";
 import type { UseStampRallyReturn, UseStampRallySyncState } from "@stamprally/react";
 import type { ChangeEvent, ElementType, ReactNode, SyntheticEvent } from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { MuiCompletionPanelProps } from "./CompletionPanel.js";
+import { MuiCompletionPanel } from "./CompletionPanel.js";
+import type { MuiNextActionPanelProps } from "./NextActionPanel.js";
+import { MuiNextActionPanel } from "./NextActionPanel.js";
 
 export type { MuiAccountBackupBannerProps } from "./AccountBackupBanner.js";
 export { MuiAccountBackupBanner } from "./AccountBackupBanner.js";
 export type { MuiCloudSyncButtonProps } from "./CloudSyncButton.js";
 export { MuiCloudSyncButton } from "./CloudSyncButton.js";
+export type { MuiCompletionPanelProps } from "./CompletionPanel.js";
+export { MuiCompletionPanel as CompletionPanel } from "./CompletionPanel.js";
 export type { MuiGpsProximityMeterProps } from "./GpsProximityMeter.js";
 export {
   MuiGpsProximityMeter,
@@ -90,6 +101,8 @@ export {
 } from "./GpsProximityMeter.js";
 export type { BuiltInMuiLocale } from "./locales.js";
 export { DEFAULT_MUI_DICTIONARY, MUI_DICTIONARIES } from "./locales.js";
+export type { MuiNextActionPanelProps } from "./NextActionPanel.js";
+export { MuiNextActionPanel as NextActionPanel } from "./NextActionPanel.js";
 export type { MuiStaffRedemptionViewProps } from "./StaffRedemptionView.js";
 export {
   MuiStaffRedemptionView,
@@ -205,6 +218,16 @@ export interface MuiRallyViewerProps<TLocale extends string = SupportedLocale> {
   readonly renderSpotCard?: (props: MuiSpotCardProps<TLocale>) => ReactNode;
   readonly renderRewardCard?: (props: MuiRewardCardProps<TLocale>) => ReactNode;
   readonly onStampStamped?: (spot: SpotItem<TLocale>) => void;
+  readonly renderNextAction?: (props: MuiNextActionPanelProps<TLocale>) => ReactNode;
+  readonly renderCompletion?: (props: MuiCompletionPanelProps<TLocale>) => ReactNode;
+  readonly nextAction?: {
+    readonly enabled?: boolean;
+    readonly strategy?: NextSpotStrategy;
+    readonly maxSuggestions?: number;
+    readonly currentLocation?: GeoCoordinates;
+  };
+  readonly onNavigate?: (spot: PublicSpotItem<TLocale>, suggestion: NextSpotSuggestion) => void;
+  readonly onCompleted?: (progress: StampRallyProgress, state: StampRallyState) => void;
 }
 
 export interface MuiLocalizationSplitPreviewProps<
@@ -597,21 +620,43 @@ export function MuiRallyViewer<TLocale extends string = SupportedLocale>({
   renderSpotCard,
   renderRewardCard,
   onStampStamped,
+  renderNextAction,
+  renderCompletion,
+  nextAction,
+  onNavigate,
+  onCompleted,
 }: MuiRallyViewerProps<TLocale>): ReactNode {
   const [stampedSpot, setStampedSpot] = useState<PublicSpotItem<TLocale> | null>(null);
   const [subscribedState, setSubscribedState] = useState<StampRallyState | null>(null);
+  const completedRef = useRef<boolean | null>(null);
   useEffect(() => {
     if (adapter?.subscribe === undefined) return;
     return adapter.subscribe(setSubscribedState);
   }, [adapter]);
   const config = configProp ?? (adapter?.config as PublicRallyConfig<TLocale> | undefined);
-  if (config === undefined)
-    return <Alert severity="error">A rally config or adapter is required.</Alert>;
   const state =
-    adapter?.subscribe === undefined
-      ? (adapter?.state ?? defaultState(config.id))
-      : (subscribedState ?? adapter.state ?? defaultState(config.id));
-  const progress = calculateProgress(state, config);
+    config === undefined
+      ? defaultState("")
+      : adapter?.subscribe === undefined
+        ? (adapter?.state ?? defaultState(config.id))
+        : (subscribedState ?? adapter.state ?? defaultState(config.id));
+  const progress = config === undefined ? undefined : calculateProgress(state, config);
+  const suggestions =
+    config === undefined
+      ? []
+      : getNextSpotSuggestions(state, config, {
+          ...(nextAction?.strategy === undefined ? {} : { strategy: nextAction.strategy }),
+          ...(nextAction?.currentLocation === undefined
+            ? {}
+            : { currentLocation: nextAction.currentLocation }),
+        });
+  useEffect(() => {
+    if (progress !== undefined && completedRef.current === false && progress.isCompleted)
+      onCompleted?.(progress, state);
+    if (progress !== undefined) completedRef.current = progress.isCompleted;
+  }, [onCompleted, progress, state]);
+  if (config === undefined || progress === undefined)
+    return <Alert severity="error">A rally config or adapter is required.</Alert>;
   const Root = slots?.root ?? Box;
   const Header = slots?.header ?? Box;
   const Progress = slots?.progress ?? LinearProgress;
@@ -667,6 +712,58 @@ export function MuiRallyViewer<TLocale extends string = SupportedLocale>({
           {...(dictionary === undefined ? {} : { dictionary })}
         />
       )}
+      {nextAction?.enabled !== false &&
+        (renderNextAction?.({
+          suggestions,
+          locale,
+          ...(dictionary === undefined ? {} : { dictionary }),
+          ...(nextAction?.currentLocation === undefined
+            ? {}
+            : { currentLocation: nextAction.currentLocation }),
+          ...(onNavigate === undefined
+            ? {}
+            : { onNavigate: (suggestion) => onNavigate(suggestion.spot, suggestion) }),
+          ...(nextAction?.maxSuggestions === undefined
+            ? {}
+            : { maxSuggestions: nextAction.maxSuggestions }),
+        }) ?? (
+          <MuiNextActionPanel
+            suggestions={suggestions}
+            locale={locale}
+            {...(dictionary === undefined ? {} : { dictionary })}
+            {...(nextAction?.currentLocation === undefined
+              ? {}
+              : { currentLocation: nextAction.currentLocation })}
+            {...(onNavigate === undefined
+              ? {}
+              : { onNavigate: (suggestion) => onNavigate(suggestion.spot, suggestion) })}
+            {...(nextAction?.maxSuggestions === undefined
+              ? {}
+              : { maxSuggestions: nextAction.maxSuggestions })}
+          />
+        ))}
+      {progress.isCompleted &&
+        (renderCompletion?.({
+          progress,
+          rewards: config.rewards,
+          rewardStates: state.rewards,
+          locale,
+          ...(dictionary === undefined ? {} : { dictionary }),
+          ...(adapter?.onClaimReward === undefined
+            ? {}
+            : { onClaimReward: (rewardId) => void adapter.onClaimReward?.(rewardId) }),
+        }) ?? (
+          <MuiCompletionPanel
+            progress={progress}
+            rewards={config.rewards}
+            rewardStates={state.rewards}
+            locale={locale}
+            {...(dictionary === undefined ? {} : { dictionary })}
+            {...(adapter?.onClaimReward === undefined
+              ? {}
+              : { onClaimReward: (rewardId) => void adapter.onClaimReward?.(rewardId) })}
+          />
+        ))}
       {busy ? <LinearProgress aria-label="Loading" /> : null}
       <SpotGrid
         {...(slotProps?.spotGrid ?? {})}
@@ -750,6 +847,69 @@ export function MuiSpotEditor<
           label="Hint"
           value={localized(spot.hint, locale)}
           onChange={(event) => updateText("hint", event.target.value)}
+        />
+        <Typography variant="subtitle2">Location</Typography>
+        <TextField
+          label="Latitude"
+          type="number"
+          inputProps={{ min: -90, max: 90, step: "any" }}
+          value={spot.location?.latitude ?? ""}
+          onChange={(event) => {
+            if (event.target.value === "") {
+              if (spot.location === undefined) return;
+              const { location: _removed, ...withoutLocation } = spot;
+              onChange(withoutLocation);
+              return;
+            }
+            onChange({
+              ...spot,
+              location: {
+                latitude: Number(event.target.value),
+                longitude: spot.location?.longitude ?? 0,
+                ...(spot.location?.address === undefined ? {} : { address: spot.location.address }),
+              },
+            });
+          }}
+        />
+        <TextField
+          label="Longitude"
+          type="number"
+          inputProps={{ min: -180, max: 180, step: "any" }}
+          value={spot.location?.longitude ?? ""}
+          onChange={(event) => {
+            if (event.target.value === "") {
+              if (spot.location === undefined) return;
+              const { location: _removed, ...withoutLocation } = spot;
+              onChange(withoutLocation);
+              return;
+            }
+            onChange({
+              ...spot,
+              location: {
+                latitude: spot.location?.latitude ?? 0,
+                longitude: Number(event.target.value),
+                ...(spot.location?.address === undefined ? {} : { address: spot.location.address }),
+              },
+            });
+          }}
+        />
+        <TextField
+          label="Address"
+          value={localized(spot.location?.address, locale)}
+          onChange={(event) =>
+            onChange({
+              ...spot,
+              location: {
+                latitude: spot.location?.latitude ?? 0,
+                longitude: spot.location?.longitude ?? 0,
+                address: updateLocalizedField(
+                  spot.location?.address ?? "",
+                  locale,
+                  event.target.value,
+                ),
+              },
+            })
+          }
         />
         <FormControl fullWidth>
           <InputLabel id={`condition-${spot.id}`}>Verification method</InputLabel>
@@ -1274,6 +1434,70 @@ export function MuiAdminRallyEditor<
                 })
               }
             />
+            <FormControl fullWidth>
+              <InputLabel id="completion-condition-label">Completion condition</InputLabel>
+              <Select
+                labelId="completion-condition-label"
+                label="Completion condition"
+                value={config.completion?.condition.type ?? "all_spots"}
+                onChange={(event) => {
+                  const type = event.target.value;
+                  if (type === "stamp_count")
+                    editor.update({ completion: { condition: { type, count: 1 } } });
+                  else if (type === "stamps")
+                    editor.update({
+                      completion: {
+                        condition: {
+                          type,
+                          stampIds: config.spots[0] === undefined ? [] : [config.spots[0].id],
+                        },
+                      },
+                    });
+                  else editor.update({ completion: { condition: { type: "all_spots" } } });
+                }}
+              >
+                <MenuItem value="all_spots">All spots</MenuItem>
+                <MenuItem value="stamp_count">Stamp count</MenuItem>
+                <MenuItem value="stamps">Selected spots</MenuItem>
+              </Select>
+            </FormControl>
+            {config.completion?.condition.type === "stamp_count" && (
+              <TextField
+                label="Required stamps"
+                type="number"
+                inputProps={{ min: 1 }}
+                value={config.completion.condition.count}
+                onChange={(event) =>
+                  editor.update({
+                    completion: {
+                      condition: { type: "stamp_count", count: Number(event.target.value) },
+                    },
+                  })
+                }
+              />
+            )}
+            {config.completion?.condition.type === "stamps" &&
+              config.spots.map((spot) => (
+                <FormControlLabel
+                  key={spot.id}
+                  control={
+                    <Switch
+                      checked={
+                        config.completion?.condition.type === "stamps" &&
+                        config.completion.condition.stampIds.includes(spot.id)
+                      }
+                      onChange={(event) => {
+                        if (config.completion?.condition.type !== "stamps") return;
+                        const stampIds = event.target.checked
+                          ? [...config.completion.condition.stampIds, spot.id]
+                          : config.completion.condition.stampIds.filter((id) => id !== spot.id);
+                        editor.update({ completion: { condition: { type: "stamps", stampIds } } });
+                      }}
+                    />
+                  }
+                  label={localized(spot.name, locale)}
+                />
+              ))}
             <TextField
               label="Description"
               value={localized(config.description, locale)}

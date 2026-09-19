@@ -6,3 +6,7 @@ verification secrets and gated digital content before the configuration reaches
 participants. The editor supports localized spot and reward fields, condition
 editing, reordering, deletion, and JSON import with `safeParseAdminConfig`
 field-level errors.
+
+Spot forms edit optional participant `location` coordinates/address separately
+from GPS verification conditions. The rally settings also edit the completion
+condition; the core parser remains the final validation boundary.

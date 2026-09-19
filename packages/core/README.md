@@ -1,4 +1,4 @@
-# @stamprally/core v0.25.2
+# @stamprally/core v0.25.3
 
 Dependency-free domain models, immutable state transitions, storage adapters, browser detectors, and safe configuration parsers.
 
@@ -12,7 +12,7 @@ import { InMemoryStorage, StampRallyClient, type PublicRallyConfig } from "@stam
 
 const config: PublicRallyConfig = {
   id: "city-tour",
-  version: "0.25.2",
+  version: "0.25.3",
   title: "City Tour",
   spots: [{ id: "station", orderIndex: 0, name: "Central Station", conditions: [{ type: "passcode" }] }],
   rewards: [],
@@ -27,6 +27,11 @@ Use `toPublicConfig(adminConfig)` to remove QR tokens, passcodes, NFC identifier
 The browser detectors `getCurrentGeoContext`, `readNfcContext`, and `readQrContext` return typed results and do not throw for unsupported environments, denied permissions, timeouts, or device errors. Keep manual fallbacks for browsers without Web NFC or `BarcodeDetector`.
 
 `InMemoryStorage`, `LocalStorageAdapter`, and `IndexedDBAdapter` implement `StampStorage`. `updateLocalizedField` updates one locale without dropping existing translations.
+
+Spots may include validated `location` coordinates and localized addresses. Configure
+`completion.condition` with `all_spots`, `stamp_count`, or selected `stamps`; use
+`getNextSpotSuggestions` to derive order-based or nearest-location suggestions without coupling
+the domain engine to a map or navigation provider.
 
 ## v0.22.0 offline synchronization
 

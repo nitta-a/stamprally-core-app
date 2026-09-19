@@ -1,3 +1,5 @@
+import type { GeoCoordinates } from "../domain/geo.js";
+import { calculateDistanceMeters as calculateGeoDistanceMeters } from "../domain/geo.js";
 import type {
   CheckInCondition,
   ConditionMatch,
@@ -9,20 +11,25 @@ import type {
   VerificationContext,
 } from "../domain/index.js";
 
-const EARTH_RADIUS_METERS = 6_371_000;
+export function calculateDistanceMeters(from: GeoCoordinates, to: GeoCoordinates): number;
 export function calculateDistanceMeters(
   aLat: number,
   aLon: number,
   bLat: number,
   bLon: number,
+): number;
+export function calculateDistanceMeters(
+  fromOrLatitude: GeoCoordinates | number,
+  toOrLongitude: GeoCoordinates | number,
+  bLat?: number,
+  bLon?: number,
 ): number {
-  const radians = (value: number): number => (value * Math.PI) / 180;
-  const dLat = radians(bLat - aLat);
-  const dLon = radians(bLon - aLon);
-  const value =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(radians(aLat)) * Math.cos(radians(bLat)) * Math.sin(dLon / 2) ** 2;
-  return 2 * EARTH_RADIUS_METERS * Math.asin(Math.sqrt(Math.min(1, value)));
+  if (typeof fromOrLatitude === "object" && typeof toOrLongitude === "object")
+    return calculateGeoDistanceMeters(fromOrLatitude, toOrLongitude);
+  return calculateGeoDistanceMeters(
+    { latitude: fromOrLatitude as number, longitude: toOrLongitude as number },
+    { latitude: bLat as number, longitude: bLon as number },
+  );
 }
 function mismatch(
   conditionType: CheckInCondition["type"],

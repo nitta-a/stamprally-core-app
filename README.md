@@ -1,4 +1,4 @@
-# stamprally-core-app v0.25.2
+# stamprally-core-app v0.25.3
 
 A headless, storage-agnostic stamp rally engine with React, participant UI, authoring UI, and Web Standard server integration.
 
@@ -35,7 +35,7 @@ import { RallyViewer } from "@stamprally/ui";
 
 const adminConfig: AdminRallyConfig = {
   id: "city-tour",
-  version: "0.25.2",
+  version: "0.25.3",
   title: { ja: "街歩きラリー", en: "City Tour" },
   spots: [
     {
@@ -58,6 +58,13 @@ export function App() {
 ```
 
 `client.checkIn(spotId, proof, options?)` performs a check-in. `client.claimReward(rewardId, options?)` consumes an available reward. All timestamps are ISO 8601 strings and verification inputs are not stored in progress metadata.
+
+`SpotItem.location` is optional participant navigation metadata and is
+independent from GPS check-in conditions. `RallyViewer` exposes order-based or
+current-location-based next spot suggestions through `nextAction` and
+`onNavigate`; it never imports a map SDK. Configure `completion` with
+`all_spots`, `stamp_count`, or selected `stamps`. Omitted completion preserves
+the legacy all-spots rule.
 
 ## Runtime validation
 

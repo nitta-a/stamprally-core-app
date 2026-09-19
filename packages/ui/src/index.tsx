@@ -6,7 +6,10 @@ import type {
   ClaimOptions,
   ClaimResult,
   SpotStatus as CoreSpotStatus,
+  GeoCoordinates,
   LocaleDictionary,
+  NextSpotStrategy,
+  NextSpotSuggestion,
   PublicCheckInCondition,
   PublicRallyConfig,
   PublicReward,
@@ -22,6 +25,9 @@ import type {
   SyncEventListener,
   UserRallyState,
 } from "@stamprally/core";
+import { getNextSpotSuggestions } from "@stamprally/core";
+import { CompletionPanel, type CompletionPanelProps } from "./components/CompletionPanel.js";
+import { NextActionPanel, type NextActionPanelProps } from "./components/NextActionPanel.js";
 import { type SyncStateContext, SyncStatusBanner } from "./components/SyncStatusBanner.js";
 import { type BuiltInUiLocale, DEFAULT_UI_DICTIONARY } from "./locales/index.js";
 
@@ -29,8 +35,12 @@ export type { AccountBackupBannerProps } from "./components/AccountBackupBanner.
 export { AccountBackupBanner } from "./components/AccountBackupBanner.js";
 export type { CloudSyncButtonProps } from "./components/CloudSyncButton.js";
 export { CloudSyncButton } from "./components/CloudSyncButton.js";
+export type { CompletionPanelProps } from "./components/CompletionPanel.js";
+export { CompletionPanel } from "./components/CompletionPanel.js";
 export type { GpsProximityMeterProps } from "./components/GpsProximityMeter.js";
 export { GpsProximityMeter } from "./components/GpsProximityMeter.js";
+export type { NextActionPanelProps } from "./components/NextActionPanel.js";
+export { NextActionPanel } from "./components/NextActionPanel.js";
 export type { StaffRedemptionViewProps } from "./components/StaffRedemptionView.js";
 export { StaffRedemptionView } from "./components/StaffRedemptionView.js";
 export type { SyncStateContext, SyncStatusBannerProps } from "./components/SyncStatusBanner.js";
@@ -72,6 +82,8 @@ export type ViewerClassName =
   | "action"
   | "feedback"
   | "reward"
+  | "nextAction"
+  | "completion"
   | "footer";
 
 export type ViewerSyncStateContext = SyncStateContext;
@@ -132,6 +144,8 @@ export interface RallyViewerSlots<TLocale extends string = string> {
   readonly renderErrorFeedback?: (error: string) => ReactNode;
   readonly renderStampEffect?: (spot: PublicSpotItem<TLocale>) => ReactNode;
   readonly onStampStamped?: (spot: SpotItem<TLocale>) => void;
+  readonly renderNextAction?: (props: NextActionPanelProps<TLocale>) => ReactNode;
+  readonly renderCompletion?: (props: CompletionPanelProps<TLocale>) => ReactNode;
 }
 
 export interface RallyViewerAdapter<TLocale extends string = string> {
@@ -164,6 +178,14 @@ export interface RallyViewerProps<TLocale extends string = string>
   >;
   readonly onSyncEvent?: SyncEventListener;
   readonly showSyncStatus?: boolean;
+  readonly nextAction?: {
+    readonly enabled?: boolean;
+    readonly strategy?: NextSpotStrategy;
+    readonly maxSuggestions?: number;
+    readonly currentLocation?: GeoCoordinates;
+  };
+  readonly onNavigate?: (spot: PublicSpotItem<TLocale>, suggestion: NextSpotSuggestion) => void;
+  readonly onCompleted?: (progress: StampRallyProgress, state: UserRallyState) => void;
 }
 
 const label = <TLocale extends string>(
@@ -433,8 +455,13 @@ export function RallyViewer<TLocale extends string = string>({
   renderErrorFeedback,
   renderStampEffect,
   onStampStamped,
+  renderNextAction,
+  renderCompletion,
   renderSyncStatus,
   showSyncStatus = true,
+  nextAction,
+  onNavigate,
+  onCompleted,
 }: RallyViewerProps<TLocale>): ReactElement {
   const config = providedConfig ?? client?.getConfig() ?? adapter?.config;
   const [state, setState] = useState<UserRallyState | null>(
@@ -489,6 +516,21 @@ export function RallyViewer<TLocale extends string = string>({
     () => calculateProgress(currentState, config),
     [config, currentState],
   );
+  const completedRef = useRef<boolean | null>(state === null ? null : progress.isCompleted);
+  const suggestions = useMemo(
+    () =>
+      getNextSpotSuggestions(currentState, config, {
+        ...(nextAction?.strategy === undefined ? {} : { strategy: nextAction.strategy }),
+        ...(nextAction?.currentLocation === undefined
+          ? {}
+          : { currentLocation: nextAction.currentLocation }),
+      }),
+    [config, currentState, nextAction?.currentLocation, nextAction?.strategy],
+  );
+  useEffect(() => {
+    if (!completedRef.current && progress.isCompleted) onCompleted?.(progress, currentState);
+    completedRef.current = progress.isCompleted;
+  }, [currentState, onCompleted, progress]);
   const checkIn =
     adapter?.onCheckIn ??
     (client === undefined
@@ -586,6 +628,58 @@ export function RallyViewer<TLocale extends string = string>({
             {...(dictionary === undefined ? {} : { dictionary })}
             {...(classNames.feedback === undefined ? {} : { className: classNames.feedback })}
             {...(styles.feedback === undefined ? {} : { style: styles.feedback })}
+          />
+        ))}
+      {nextAction?.enabled !== false &&
+        (renderNextAction?.({
+          suggestions,
+          locale,
+          ...(dictionary === undefined ? {} : { dictionary }),
+          ...(nextAction?.currentLocation === undefined
+            ? {}
+            : { currentLocation: nextAction.currentLocation }),
+          ...(onNavigate === undefined
+            ? {}
+            : { onNavigate: (suggestion) => onNavigate(suggestion.spot, suggestion) }),
+          ...(nextAction?.maxSuggestions === undefined
+            ? {}
+            : { maxSuggestions: nextAction.maxSuggestions }),
+          className: classNames.nextAction ?? "sry-next-action",
+        }) ?? (
+          <NextActionPanel
+            suggestions={suggestions}
+            locale={locale}
+            {...(dictionary === undefined ? {} : { dictionary })}
+            {...(nextAction?.currentLocation === undefined
+              ? {}
+              : { currentLocation: nextAction.currentLocation })}
+            {...(onNavigate === undefined
+              ? {}
+              : { onNavigate: (suggestion) => onNavigate(suggestion.spot, suggestion) })}
+            {...(nextAction?.maxSuggestions === undefined
+              ? {}
+              : { maxSuggestions: nextAction.maxSuggestions })}
+            className={classNames.nextAction ?? "sry-next-action"}
+          />
+        ))}
+      {progress.isCompleted &&
+        (renderCompletion?.({
+          progress,
+          rewards: config.rewards,
+          rewardStates: currentState.rewards,
+          locale,
+          ...(dictionary === undefined ? {} : { dictionary }),
+          ...(claim === undefined ? {} : { onClaimReward: (rewardId) => void claim(rewardId) }),
+          className: classNames.completion ?? "sry-completion",
+        }) ?? (
+          <CompletionPanel
+            progress={progress}
+            rewards={config.rewards}
+            rewardStates={currentState.rewards}
+            locale={locale}
+            {...(dictionary === undefined ? {} : { dictionary })}
+            {...(claim === undefined ? {} : { onClaimReward: (rewardId) => void claim(rewardId) })}
+            className={classNames.completion ?? "sry-completion"}
           />
         ))}
       <div>

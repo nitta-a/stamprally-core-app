@@ -64,3 +64,18 @@ from the foreground tab runs. The client emits a `storageCapabilityWarning`
 event and logs a warning. localStorage remains available as storage, but is not
 used as an inter-tab lock. `queueCapability` also exposes `mode` (`persistent`
 or `volatile_memory`), `isPersistent`, and the actual `storage` type.
+
+## Navigation and completion
+
+`SpotItem.location` is participant navigation metadata, not a check-in
+condition. `getNextSpotSuggestions(state, config, options)` reuses progress
+eligibility and supports `order` (default) or `nearest`; spots without a
+location remain in the result. `RallyViewer` and `MuiRallyViewer` expose the
+same `nextAction`, `onNavigate`, `renderNextAction`, `renderCompletion`, and
+`onCompleted` extension points. The completion callback fires only on a
+false-to-true transition, not for an already-completed initial state.
+
+`completion` is optional and defaults to `{ condition: { type: "all_spots" } }`.
+The other supported conditions are `stamp_count` and selected `stamps`; the
+runtime parser rejects non-positive counts, empty/duplicate selections, and
+unknown spot IDs.

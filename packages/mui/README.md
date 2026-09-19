@@ -1,4 +1,4 @@
-# @stamprally/mui v0.25.2
+# @stamprally/mui v0.25.3
 
 `MuiAccountBackupBanner` and `MuiCloudSyncButton` provide Material UI adapters for the
 host-provided account-link and cloud-sync callbacks.
@@ -35,6 +35,10 @@ export function RallyPage({ client }: { readonly client: StampRallyClient }) {
 
 All components accept `sx`. Cards and lists also expose `slots` and `slotProps`, and the viewer
 supports `renderSpotCard` and `renderRewardCard` for application-specific content.
+
+`MuiRallyViewer` includes the same Next Spot and completion panels as the headless viewer. The
+host owns navigation through `onNavigate`; configure `nextAction` for order or nearest-location
+suggestions and `onCompleted` for completion transitions.
 
 ## Editor
 

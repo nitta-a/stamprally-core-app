@@ -21,6 +21,7 @@ export {
 export type {
   AdminRallyConfig,
   CheckInCondition,
+  CompletionCondition,
   ExternalReference,
   FontFamily,
   InventoryAggregationMode,
@@ -31,6 +32,7 @@ export type {
   PublicRallyConfig,
   PublicReward,
   PublicSpotItem,
+  RallyCompletionConfig,
   RallyConfig,
   RallyInventory,
   RallyInventoryState,
@@ -43,6 +45,7 @@ export type {
   SheetTheme,
   SlotShape,
   SpotItem,
+  SpotLocation,
   SpotStatus,
   StampRallyState,
   StampRecord,

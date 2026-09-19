@@ -1,4 +1,4 @@
-# @stamprally/ui v0.25.2
+# @stamprally/ui v0.25.3
 
 Participant-facing exports include `AccountBackupBanner` and `CloudSyncButton`. They accept
 host callbacks, so Google Identity Services or another provider can be integrated without adding
@@ -43,6 +43,10 @@ Standard cards render localized descriptions and hints, spot imagery and externa
 reference badges, plus reward descriptions, stock, expiry, and status. Spot cards
 with incomplete prerequisites show a lock and disable verification controls.
 The status badge values are `UNCLAIMED`, `CLAIMED`, `LOCKED`, and `VERIFYING`.
+
+`RallyViewer` renders `NextActionPanel` and `CompletionPanel` by default. Configure
+`nextAction` for order or nearest-location suggestions, provide `onNavigate` for host-owned
+directions, and use `onCompleted` to react when the configured completion condition becomes true.
 
 ## Synchronization status
 

@@ -46,6 +46,12 @@ export interface ExternalReference {
   readonly metadata?: Readonly<Record<string, unknown>>;
 }
 
+export interface SpotLocation<TLocale extends string = string> {
+  readonly latitude: number;
+  readonly longitude: number;
+  readonly address?: LocalizedText<TLocale>;
+}
+
 export type CheckInCondition =
   | { readonly type: "qr"; readonly secretToken: string; readonly qrEntryUrl?: string }
   | { readonly type: "passcode"; readonly code: string; readonly caseSensitive?: boolean }
@@ -90,6 +96,7 @@ export interface SpotItem<
   readonly metadata?: TMeta;
   readonly conditions: ReadonlyArray<CheckInCondition>;
   readonly prerequisites?: ReadonlyArray<string>;
+  readonly location?: SpotLocation<TLocale>;
 }
 export type PublicSpotItem<
   TLocale extends string = string,
@@ -135,6 +142,15 @@ export type PublicReward<TLocale extends string = string> = Omit<
   "digitalContentUrl" | "staffPasscode"
 >;
 
+export type CompletionCondition =
+  | { readonly type: "all_spots" }
+  | { readonly type: "stamp_count"; readonly count: number }
+  | { readonly type: "stamps"; readonly stampIds: ReadonlyArray<string> };
+
+export interface RallyCompletionConfig {
+  readonly condition: CompletionCondition;
+}
+
 export interface AdminRallyConfig<
   TLocale extends string = string,
   TMeta extends Record<string, unknown> = Record<string, unknown>,
@@ -154,6 +170,7 @@ export interface AdminRallyConfig<
   readonly metadata?: TMeta;
   /** Explicit public metadata name. `metadata` remains supported for compatibility. */
   readonly publicMetadata?: TMeta;
+  readonly completion?: RallyCompletionConfig;
   readonly serverEndpoint?: string;
 }
 export interface PublicRallyConfig<
@@ -168,6 +185,7 @@ export interface PublicRallyConfig<
   readonly spots: ReadonlyArray<PublicSpotItem<TLocale, TMeta>>;
   readonly rewards: ReadonlyArray<PublicReward<TLocale>>;
   readonly metadata?: TMeta;
+  readonly completion?: RallyCompletionConfig;
   readonly serverEndpoint?: string;
 }
 export type RallyConfig<
@@ -212,6 +230,7 @@ export function toPublicConfig<TLocale extends string, TMeta extends Record<stri
     rewards: config.rewards.map(
       ({ digitalContentUrl: _content, staffPasscode: _passcode, ...reward }) => reward,
     ),
+    ...(config.completion === undefined ? {} : { completion: config.completion }),
     ...(config.publicMetadata !== undefined
       ? { metadata: config.publicMetadata }
       : config.metadata === undefined

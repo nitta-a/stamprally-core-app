@@ -3,6 +3,7 @@ import {
   parseAdminConfig,
   safeParseAdminConfig,
   safeParsePublicConfig,
+  toPublicConfig,
   updateLocalizedField,
   validateRallyConfigRelations,
 } from "../src/index.js";
@@ -74,6 +75,36 @@ describe("configuration parsing", () => {
     const result = safeParsePublicConfig({ ...validAdmin, staffPasscode: "secret" });
     expect(result.success).toBe(false);
     if (!result.success) expect(result.errors[0]?.code).toBe("private_field");
+  });
+
+  it("validates public location and completion fields", () => {
+    const result = safeParseAdminConfig({
+      ...validAdmin,
+      completion: { condition: { type: "stamps", stampIds: ["spot-1", "spot-1"] } },
+      spots: [{ ...validAdmin.spots[0], location: { latitude: 91, longitude: 139 } }],
+    });
+    expect(result.success).toBe(false);
+    if (!result.success)
+      expect(result.errors.map((error) => error.path)).toEqual(
+        expect.arrayContaining([
+          "spots[0].location.latitude",
+          "$.completion.condition.stampIds[1]",
+        ]),
+      );
+  });
+
+  it("preserves location and completion in the public projection", () => {
+    const config = {
+      ...validAdmin,
+      completion: { condition: { type: "stamp_count" as const, count: 1 } },
+      spots: [
+        { ...validAdmin.spots[0], location: { latitude: 35, longitude: 139, address: "Tokyo" } },
+      ],
+    };
+    expect(toPublicConfig(parseAdminConfig(config))).toMatchObject({
+      completion: config.completion,
+      spots: [{ location: config.spots[0]?.location }],
+    });
   });
 });
 

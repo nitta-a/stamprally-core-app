@@ -12,17 +12,24 @@ const initialConfig: AdminRallyConfig = {
     en: "A small viewer and editor integration.",
     ja: "ViewerとEditorの統合サンプルです。",
   },
+  completion: { condition: { type: "stamp_count", count: 2 } },
   spots: [
     {
       id: "station",
       orderIndex: 0,
       name: { en: "Station", ja: "駅" },
+      location: {
+        latitude: 35.681236,
+        longitude: 139.767125,
+        address: { en: "Station", ja: "駅" },
+      },
       conditions: [{ type: "passcode", code: "" }],
     },
     {
       id: "park",
       orderIndex: 1,
       name: { en: "Park", ja: "公園" },
+      location: { latitude: 35.682, longitude: 139.768, address: { en: "Park", ja: "公園" } },
       conditions: [{ type: "passcode", code: "" }],
     },
   ],
@@ -53,7 +60,12 @@ function App() {
           <Tab label="Editor" />
         </Tabs>
         {tab === 0 ? (
-          <MuiRallyViewer config={config} sx={{ mt: 3 }} />
+          <MuiRallyViewer
+            config={config}
+            nextAction={{ strategy: "order", maxSuggestions: 3 }}
+            onNavigate={(spot) => window.alert(`Navigate to ${spot.id}`)}
+            sx={{ mt: 3 }}
+          />
         ) : (
           <MuiAdminRallyEditor config={config} onChange={setConfig} sx={{ mt: 3 }} />
         )}

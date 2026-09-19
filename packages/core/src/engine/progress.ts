@@ -4,6 +4,9 @@ export interface StampRallyProgress {
   readonly total: number;
   readonly percentage: number;
   readonly isCompleted: boolean;
+  readonly completionAcquired: number;
+  readonly completionRequired: number;
+  readonly completionPercentage: number;
   readonly nextAvailableSpots: ReadonlyArray<PublicSpotItem>;
 }
 export function calculateProgress(state: StampRallyState, config: RallyConfig): StampRallyProgress {
@@ -16,11 +19,27 @@ export function calculateProgress(state: StampRallyState, config: RallyConfig): 
       !acquired.has(spot.id) &&
       (spot.prerequisites === undefined || spot.prerequisites.every((id) => acquired.has(id))),
   );
+  const condition = config.completion?.condition ?? { type: "all_spots" as const };
+  const completionRequired =
+    condition.type === "all_spots"
+      ? config.spots.length
+      : condition.type === "stamp_count"
+        ? condition.count
+        : condition.stampIds.length;
+  const completionAcquired =
+    condition.type === "stamps"
+      ? condition.stampIds.filter((id) => acquired.has(id)).length
+      : Math.min(acquired.size, completionRequired);
+  const completionPercentage =
+    completionRequired === 0 ? 0 : (completionAcquired / completionRequired) * 100;
   return {
     acquired: acquired.size,
     total: config.spots.length,
     percentage: config.spots.length === 0 ? 0 : (acquired.size / config.spots.length) * 100,
-    isCompleted: config.spots.length > 0 && acquired.size === config.spots.length,
+    isCompleted: completionRequired > 0 && completionAcquired >= completionRequired,
+    completionAcquired,
+    completionRequired,
+    completionPercentage,
     nextAvailableSpots: [...remaining].sort((left, right) => left.orderIndex - right.orderIndex),
   };
 }

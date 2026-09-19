@@ -173,6 +173,68 @@ function localizedText(value: unknown, path: string, errors: ValidationError[]):
   }
 }
 
+function location(value: unknown, path: string, errors: ValidationError[]): void {
+  if (!isRecord(value)) {
+    add(errors, path, "Expected a location object.", "invalid_type");
+    return;
+  }
+  finiteNumber(value, "latitude", path, errors, -90);
+  if (typeof value.latitude === "number" && value.latitude > 90)
+    add(errors, `${path}.latitude`, "Expected a latitude between -90 and 90.", "out_of_range");
+  finiteNumber(value, "longitude", path, errors, -180);
+  if (typeof value.longitude === "number" && value.longitude > 180)
+    add(errors, `${path}.longitude`, "Expected a longitude between -180 and 180.", "out_of_range");
+  if (hasOwn(value, "address") && value.address !== undefined)
+    localizedText(value.address, `${path}.address`, errors);
+}
+
+function completion(value: unknown, path: string, errors: ValidationError[]): void {
+  if (!isRecord(value)) {
+    add(errors, path, "Expected a completion object.", "invalid_type");
+    return;
+  }
+  if (!isRecord(value.condition)) {
+    add(errors, `${path}.condition`, "Expected a completion condition.", "invalid_type");
+    return;
+  }
+  const condition = value.condition;
+  if (condition.type === "all_spots") return;
+  if (condition.type === "stamp_count") {
+    finiteNumber(condition, "count", `${path}.condition`, errors, 1);
+    if (typeof condition.count === "number" && !Number.isInteger(condition.count))
+      add(errors, `${path}.condition.count`, "Expected an integer.", "invalid_integer");
+    return;
+  }
+  if (condition.type === "stamps") {
+    if (!Array.isArray(condition.stampIds)) {
+      add(errors, `${path}.condition.stampIds`, "Expected an array.", "invalid_type");
+      return;
+    }
+    if (condition.stampIds.length === 0)
+      add(errors, `${path}.condition.stampIds`, "At least one spot is required.", "empty_array");
+    const seen = new Set<string>();
+    condition.stampIds.forEach((stampId, index) => {
+      if (typeof stampId !== "string" || stampId.length === 0)
+        add(
+          errors,
+          `${path}.condition.stampIds[${index}]`,
+          "Expected a non-empty string.",
+          "required_string",
+        );
+      else if (seen.has(stampId))
+        add(
+          errors,
+          `${path}.condition.stampIds[${index}]`,
+          "Spot IDs must be unique.",
+          "duplicate_spot_id",
+        );
+      else seen.add(stampId);
+    });
+    return;
+  }
+  add(errors, `${path}.condition.type`, "Unknown completion condition type.", "invalid_enum");
+}
+
 function theme(value: unknown, path: string, errors: ValidationError[]): void {
   if (!isRecord(value)) {
     add(errors, path, "Expected a theme object.", "invalid_type");
@@ -329,6 +391,8 @@ function spot(value: unknown, path: string, errors: ValidationError[], isPublic:
     if (hasOwn(value, key)) localizedText(value[key], `${path}.${key}`, errors);
   for (const key of ["imageUrl", "iconUrl", "redirectUrlAfterClaim"])
     optionalString(value, key, path, errors);
+  if (hasOwn(value, "location") && value.location !== undefined)
+    location(value.location, `${path}.location`, errors);
   if (hasOwn(value, "externalReferences") && value.externalReferences !== undefined)
     externalReferences(value.externalReferences, `${path}.externalReferences`, errors);
   if (hasOwn(value, "prerequisites") && value.prerequisites !== undefined) {
@@ -409,6 +473,8 @@ function validate(value: unknown, isPublic: boolean): ReadonlyArray<ValidationEr
   localizedText(value.title, "$.title", errors);
   if (hasOwn(value, "description")) localizedText(value.description, "$.description", errors);
   if (hasOwn(value, "theme") && value.theme !== undefined) theme(value.theme, "$.theme", errors);
+  if (hasOwn(value, "completion") && value.completion !== undefined)
+    completion(value.completion, "$.completion", errors);
   if (!Array.isArray(value.spots)) add(errors, "spots", "Expected an array.", "invalid_type");
   else
     value.spots.forEach((item, index) => {
@@ -517,6 +583,20 @@ export function validateRallyConfigRelations(
         );
     });
   });
+
+  const completionCondition = config.completion?.condition;
+  if (completionCondition?.type === "stamps") {
+    const knownSpotIds = new Set(config.spots.map((spot) => spot.id));
+    completionCondition.stampIds.forEach((stampId, stampIndex) => {
+      if (!knownSpotIds.has(stampId))
+        add(
+          errors,
+          `completion.condition.stampIds[${stampIndex}]`,
+          "Referenced spot does not exist.",
+          "missing_completion_spot",
+        );
+    });
+  }
 
   config.rewards.forEach((reward, index) => {
     if (rewardIds.has(reward.id))

@@ -14,6 +14,12 @@ export {
   createUniqueClaimTicketNumber,
   issueClaimTicketNumber,
 } from "./rewards.js";
+export type {
+  NextSpotStrategy,
+  NextSpotSuggestion,
+  NextSpotSuggestionOptions,
+} from "./suggestions.js";
+export { getNextSpotSuggestions } from "./suggestions.js";
 export type { ConflictResolutionPolicy } from "./sync.js";
 export { resolveRallyStateConflict } from "./sync.js";
 export type {

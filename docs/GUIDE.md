@@ -1,4 +1,4 @@
-# Stamp Rally v0.25.2 Guide
+# Stamp Rally v0.25.3 Guide
 
 ## Viewer
 
@@ -19,6 +19,25 @@ import { RallyViewer } from "@stamprally/ui";
   renderSuccessFeedback={() => <p>Stamp added!</p>}
 />
 ```
+
+`SpotItem.location` is navigation metadata for participants; it does not turn
+QR, NFC, passcode, or custom spots into GPS check-ins. The host owns maps and
+route handling:
+
+```tsx
+<RallyViewer
+  config={publicConfig}
+  locale="en"
+  nextAction={{ strategy: "nearest", currentLocation: { latitude: 35, longitude: 139 } }}
+  onNavigate={(spot) => openHostRoute(spot.location)}
+  onCompleted={(progress) => analytics.track("rally_completed", progress)}
+/>
+```
+
+Set `completion` to `{ condition: { type: "stamp_count", count: 5 } }` or
+`{ condition: { type: "stamps", stampIds: ["entrance", "museum"] } }` when
+completion is not all spots. Omitted completion keeps the legacy all-spots
+behavior.
 
 `StampSheet` exposes the same card, slot, header, footer, class, and style
 extension points for read-only progress views.

@@ -690,6 +690,57 @@ export function SpotItemForm<
           />
         </label>
       ))}
+      <fieldset>
+        <legend>{field("location", "Location")}</legend>
+        {(["latitude", "longitude"] as const).map((key) => (
+          <label key={key}>
+            {field(key, key)}
+            <input
+              type="number"
+              min={key === "latitude" ? -90 : -180}
+              max={key === "latitude" ? 90 : 180}
+              step="any"
+              value={spot.location?.[key] ?? ""}
+              onChange={(event) => {
+                if (event.target.value === "") {
+                  if (spot.location === undefined) return;
+                  const { location: _removed, ...withoutLocation } = spot;
+                  onChange(withoutLocation);
+                  return;
+                }
+                onChange({
+                  ...spot,
+                  location: {
+                    latitude: spot.location?.latitude ?? 0,
+                    longitude: spot.location?.longitude ?? 0,
+                    [key]: Number(event.target.value),
+                  },
+                });
+              }}
+            />
+          </label>
+        ))}
+        <label>
+          {field("address", "Address")}
+          <input
+            value={resolveLocalizedText(spot.location?.address ?? "", activeLocale)}
+            onChange={(event) =>
+              onChange({
+                ...spot,
+                location: {
+                  latitude: spot.location?.latitude ?? 0,
+                  longitude: spot.location?.longitude ?? 0,
+                  address: updateLocalizedField(
+                    spot.location?.address ?? "",
+                    activeLocale,
+                    event.target.value,
+                  ),
+                },
+              })
+            }
+          />
+        </label>
+      </fieldset>
       <label>
         {field("prerequisites", "Prerequisite spots")}
         <input
@@ -1463,6 +1514,73 @@ export function AdminRallyEditor<
         onPublicMetadataChange={(metadata) => update({ publicMetadata: metadata as TMeta })}
         onServerMetadataChange={(metadata) => update({ serverMetadata: metadata })}
       />
+      <fieldset>
+        <legend>{field("completion", "Completion condition")}</legend>
+        <label>
+          {field("completionType", "Condition")}
+          <select
+            value={config.completion?.condition.type ?? "all_spots"}
+            onChange={(event) => {
+              const type = event.target.value;
+              if (type === "stamp_count") update({ completion: { condition: { type, count: 1 } } });
+              else if (type === "stamps")
+                update({
+                  completion: {
+                    condition: {
+                      type,
+                      stampIds: config.spots[0] === undefined ? [] : [config.spots[0].id],
+                    },
+                  },
+                });
+              else update({ completion: { condition: { type: "all_spots" } } });
+            }}
+          >
+            <option value="all_spots">{field("completion.allSpots", "All spots")}</option>
+            <option value="stamp_count">{field("completion.stampCount", "Stamp count")}</option>
+            <option value="stamps">{field("completion.selectedSpots", "Selected spots")}</option>
+          </select>
+        </label>
+        {config.completion?.condition.type === "stamp_count" && (
+          <label>
+            {field("completion.requiredStamps", "Required stamps")}
+            <input
+              type="number"
+              min={1}
+              value={config.completion.condition.count}
+              onChange={(event) =>
+                update({
+                  completion: {
+                    condition: { type: "stamp_count", count: Number(event.target.value) },
+                  },
+                })
+              }
+            />
+          </label>
+        )}
+        {config.completion?.condition.type === "stamps" && (
+          <div>
+            {config.spots.map((spot) => (
+              <label key={spot.id}>
+                <input
+                  type="checkbox"
+                  checked={
+                    config.completion?.condition.type === "stamps" &&
+                    config.completion.condition.stampIds.includes(spot.id)
+                  }
+                  onChange={(event) => {
+                    if (config.completion?.condition.type !== "stamps") return;
+                    const stampIds = event.target.checked
+                      ? [...config.completion.condition.stampIds, spot.id]
+                      : config.completion.condition.stampIds.filter((id) => id !== spot.id);
+                    update({ completion: { condition: { type: "stamps", stampIds } } });
+                  }}
+                />
+                {resolveLocalizedText(spot.name, activeLocale)}
+              </label>
+            ))}
+          </div>
+        )}
+      </fieldset>
       <button
         type="button"
         onClick={() => updateSpots([...config.spots, newSpot<TLocale, TMeta>(config.spots.length)])}

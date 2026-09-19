@@ -31,3 +31,8 @@ client state and operations, including `switchUser` and `clearUserState`.
 renderer can be replaced through `customConditionRenderers`; labels are supplied
 through `LocaleDictionary<TLocale>`. `@stamprally/admin-ui` edits only
 `AdminRallyConfig` and never publishes it directly.
+
+Spot locations are public navigation metadata and remain independent from GPS
+verification. Core owns distance calculation, eligible next-spot selection, and
+completion progress; host applications own map and route providers. React and
+MUI provide equivalent panels and callbacks without adding a mapping SDK.
