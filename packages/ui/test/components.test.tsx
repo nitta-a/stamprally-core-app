@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -51,7 +51,7 @@ describe("cloud account components", () => {
 });
 
 describe("RallyViewer", () => {
-  it("shows next spots and completion without firing the completion callback on initial load", () => {
+  it("switches to completed mode without firing the completion callback on initial load", () => {
     const onNavigate = vi.fn();
     const onCompleted = vi.fn();
     render(
@@ -89,14 +89,106 @@ describe("RallyViewer", () => {
         }}
       />,
     );
-    expect(screen.getByRole("heading", { name: "Next spots" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "View directions" }));
-    expect(onNavigate).toHaveBeenCalledWith(
-      expect.objectContaining({ id: "s1" }),
-      expect.objectContaining({ spot: expect.objectContaining({ id: "s1" }) }),
-    );
+    expect(screen.queryByRole("heading", { name: "Next spots" })).toBeNull();
+    expect(screen.getByRole("heading", { name: "More to explore" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Stamp rally complete!" })).toBeTruthy();
     expect(onCompleted).not.toHaveBeenCalled();
+  });
+
+  it("uses completion progress as primary progress for partial completion", () => {
+    render(
+      <RallyViewer
+        locale="en"
+        adapter={{
+          config: {
+            id: "r",
+            version: "1",
+            title: "Rally",
+            completion: { condition: { type: "stamp_count", count: 1 } },
+            spots: [
+              { id: "s1", orderIndex: 0, name: "One", conditions: [] },
+              { id: "s2", orderIndex: 1, name: "Two", conditions: [] },
+            ],
+            rewards: [],
+          },
+          state: {
+            rallyId: "r",
+            userId: null,
+            records: [],
+            rewards: [],
+            updatedAt: "",
+          },
+          onCheckIn: vi.fn(),
+        }}
+      />,
+    );
+    expect((screen.getByRole("progressbar") as HTMLProgressElement).value).toBe(0);
+    expect(screen.getByText("0/1")).toBeTruthy();
+    expect(screen.getByText("Overall: 0/2")).toBeTruthy();
+  });
+
+  it("reports the stamped spot and current completion progress", async () => {
+    const onCheckIn = vi.fn(async () => ({
+      ok: true as const,
+      value: {
+        state: {
+          rallyId: "r",
+          userId: null,
+          records: [{ stampId: "s", acquiredAt: "" }],
+          rewards: [],
+          updatedAt: "",
+        },
+        record: { stampId: "s", acquiredAt: "" },
+      },
+    }));
+    render(
+      <RallyViewer
+        locale="en"
+        adapter={{
+          config: {
+            id: "r",
+            version: "1",
+            title: "Rally",
+            completion: { condition: { type: "stamp_count", count: 2 } },
+            spots: [
+              {
+                id: "s",
+                orderIndex: 0,
+                name: "Park",
+                conditions: [{ type: "custom", validatorName: "demo" }],
+              },
+            ],
+            rewards: [],
+          },
+          onCheckIn,
+        }}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText("Proof"), { target: { value: "proof" } });
+    fireEvent.click(screen.getByRole("button", { name: "Check in" }));
+    await waitFor(() =>
+      expect(screen.getByRole("status").textContent).toContain("Park collected. 1/2 to complete."),
+    );
+  });
+
+  it("keeps QR manual entry as a single fallback check-in action", () => {
+    render(
+      <RallyViewer
+        locale="en"
+        adapter={{
+          config: {
+            id: "r",
+            version: "1",
+            title: "Rally",
+            spots: [{ id: "s", orderIndex: 0, name: "QR spot", conditions: [{ type: "qr" }] }],
+            rewards: [],
+          },
+          onCheckIn: vi.fn(),
+        }}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Scan QR" })).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: "Check in" })).toHaveLength(1);
   });
 
   it("renders spot and feedback slots with the deepest style hooks", () => {
@@ -232,6 +324,7 @@ describe("RallyViewer", () => {
     expect(screen.getByText("Prize details")).toBeTruthy();
     expect(screen.getByText("Only a few left")).toBeTruthy();
     expect(screen.getAllByText(/LOCKED/).length).toBeGreaterThan(0);
+    expect(screen.getByText("Complete First to unlock this spot.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Check in" })).toHaveProperty("disabled", true);
     fireEvent.click(screen.getByRole("button", { name: "Check in" }));
     expect(onCheckIn).not.toHaveBeenCalled();

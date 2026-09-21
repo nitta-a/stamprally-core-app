@@ -83,6 +83,16 @@
   border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
   border-radius: 0.75rem;
 }
+.sry-next-action__primary {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.75rem;
+  border: 2px solid currentColor;
+  border-radius: 0.5rem;
+}
+.sry-next-action__primary strong {
+  font-size: 1.15rem;
+}
 .sry-next-action ul {
   display: grid;
   gap: 0.5rem;
@@ -94,6 +104,16 @@
   flex-wrap: wrap;
   gap: 0.75rem;
   align-items: center;
+}
+.sry-progress__secondary {
+  display: block;
+  font-size: 0.85rem;
+  opacity: 0.75;
+}
+.sry-spot-card,
+.sry-reward-card {
+  display: block;
+  margin-block: 1rem;
 }
 
 .stamp-sheet,

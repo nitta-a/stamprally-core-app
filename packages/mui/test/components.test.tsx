@@ -71,7 +71,6 @@ function adapter(overrides: Partial<MuiRallyAdapter> = {}): MuiRallyAdapter {
 
 describe("MuiRallyViewer", () => {
   it("renders next action and completion panels", () => {
-    const onNavigate = vi.fn();
     const firstSpot = config.spots[0];
     const secondSpot = config.spots[1];
     if (firstSpot === undefined || secondSpot === undefined) throw new Error("Test spots missing");
@@ -83,7 +82,6 @@ describe("MuiRallyViewer", () => {
           spots: [{ ...firstSpot, location: { latitude: 35, longitude: 139 } }, secondSpot],
         }}
         nextAction={{ currentLocation: { latitude: 35, longitude: 139 } }}
-        onNavigate={onNavigate}
         adapter={adapter({
           config: {
             ...config,
@@ -94,10 +92,9 @@ describe("MuiRallyViewer", () => {
         })}
       />,
     );
-    expect(screen.getByRole("heading", { name: "Next spots" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Next spots" })).toBeNull();
+    expect(screen.getByRole("heading", { name: "More to explore" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Stamp rally complete!" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "View directions" }));
-    expect(onNavigate).toHaveBeenCalled();
   });
 
   it("renders MUI cards, progress, locked status, sx, and render slots", () => {

@@ -628,6 +628,7 @@ export function MuiRallyViewer<TLocale extends string = SupportedLocale>({
 }: MuiRallyViewerProps<TLocale>): ReactNode {
   const [stampedSpot, setStampedSpot] = useState<PublicSpotItem<TLocale> | null>(null);
   const [subscribedState, setSubscribedState] = useState<StampRallyState | null>(null);
+  const [localState, setLocalState] = useState<StampRallyState | null>(null);
   const completedRef = useRef<boolean | null>(null);
   useEffect(() => {
     if (adapter?.subscribe === undefined) return;
@@ -639,7 +640,7 @@ export function MuiRallyViewer<TLocale extends string = SupportedLocale>({
       ? defaultState("")
       : adapter?.subscribe === undefined
         ? (adapter?.state ?? defaultState(config.id))
-        : (subscribedState ?? adapter.state ?? defaultState(config.id));
+        : (subscribedState ?? localState ?? adapter.state ?? defaultState(config.id));
   const progress = config === undefined ? undefined : calculateProgress(state, config);
   const suggestions =
     config === undefined
@@ -669,6 +670,7 @@ export function MuiRallyViewer<TLocale extends string = SupportedLocale>({
     const result = await adapter.onCheckIn(spotId, proof);
     if (result.ok) {
       const spot = config.spots.find((item) => item.id === spotId);
+      setLocalState(result.value.state);
       if (spot !== undefined) {
         setStampedSpot(spot);
         onStampStamped?.(spot as unknown as SpotItem<TLocale>);
@@ -684,12 +686,18 @@ export function MuiRallyViewer<TLocale extends string = SupportedLocale>({
           {localized(config.title, locale)}
         </Typography>
         <Typography variant="body2">
-          {progress.acquired} / {progress.total}
+          {progress.completionAcquired} / {progress.completionRequired}
         </Typography>
+        {progress.completionRequired !== progress.total && (
+          <Typography variant="body2">
+            {muiLabel(dictionary, locale, "overallProgress", "Overall")}: {progress.acquired} /{" "}
+            {progress.total}
+          </Typography>
+        )}
         <Progress
           {...(slotProps?.progress ?? {})}
           variant="determinate"
-          value={progress.percentage}
+          value={progress.completionPercentage}
         />
       </Header>
       {adapter?.error !== null && adapter?.error !== undefined && (
@@ -701,7 +709,8 @@ export function MuiRallyViewer<TLocale extends string = SupportedLocale>({
           role="status"
           sx={{ animation: "stamprally-stamp-pop 600ms ease-out" }}
         >
-          {localized(stampedSpot.name, locale)} — Verified
+          {localized(stampedSpot.name, locale)} —{" "}
+          {muiLabel(dictionary, locale, "feedback.stampAcquired", "Stamp collected")}
         </Alert>
       )}
       {showSyncStatus && adapter !== undefined && (
@@ -712,7 +721,8 @@ export function MuiRallyViewer<TLocale extends string = SupportedLocale>({
           {...(dictionary === undefined ? {} : { dictionary })}
         />
       )}
-      {nextAction?.enabled !== false &&
+      {!progress.isCompleted &&
+        nextAction?.enabled !== false &&
         (renderNextAction?.({
           suggestions,
           locale,
@@ -765,6 +775,11 @@ export function MuiRallyViewer<TLocale extends string = SupportedLocale>({
           />
         ))}
       {busy ? <LinearProgress aria-label="Loading" /> : null}
+      {progress.isCompleted && (
+        <Typography variant="h5" component="h2" sx={{ mt: 4 }}>
+          {muiLabel(dictionary, locale, "moreToExplore", "More to explore")}
+        </Typography>
+      )}
       <SpotGrid
         {...(slotProps?.spotGrid ?? {})}
         spots={config.spots}

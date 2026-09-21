@@ -272,15 +272,6 @@ function DefaultCondition<TLocale extends string>({
     <div>
       {condition.type === "qr" && (
         <>
-          <label>
-            {text("qrValue", "QR value")}
-            <input
-              aria-label={text("qrValue", "QR value")}
-              placeholder={condition.qrEntryUrl ?? text("qrPlaceholder", "Paste a QR value")}
-              value={value}
-              onChange={(event) => setValue(event.target.value)}
-            />
-          </label>
           <video
             ref={videoRef}
             aria-label={text("qrCamera", "QR camera")}
@@ -297,6 +288,33 @@ function DefaultCondition<TLocale extends string>({
           >
             {text("scanQr", "Scan QR")}
           </button>
+          <details>
+            <summary>{text("qrManualFallback", "Enter the code manually")}</summary>
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                void verify(value);
+              }}
+            >
+              <label>
+                {text("qrValue", "QR value")}
+                <input
+                  aria-label={text("qrValue", "QR value")}
+                  placeholder={condition.qrEntryUrl ?? text("qrPlaceholder", "Paste a QR value")}
+                  value={value}
+                  onChange={(event) => setValue(event.target.value)}
+                />
+              </label>
+              <button
+                type="submit"
+                className={join("sry-action", classNames?.action, classNames?.button)}
+                style={styles?.button ?? styles?.action}
+                disabled={disabled || value.trim() === ""}
+              >
+                {text("checkIn", "Check in")}
+              </button>
+            </form>
+          </details>
         </>
       )}
       {condition.type === "gps" && (
@@ -321,9 +339,7 @@ function DefaultCondition<TLocale extends string>({
           {text("readNfc", "Read NFC")}
         </button>
       )}
-      {(condition.type === "passcode" ||
-        condition.type === "custom" ||
-        condition.type === "qr") && (
+      {(condition.type === "passcode" || condition.type === "custom") && (
         <form
           onSubmit={(event) => {
             event.preventDefault();
@@ -336,7 +352,10 @@ function DefaultCondition<TLocale extends string>({
               condition.type === "passcode" ? "Passcode" : "Proof",
             )}
             <input
-              aria-label={text("proof", "Proof")}
+              aria-label={text(
+                condition.type === "passcode" ? "passcode" : "proof",
+                condition.type === "passcode" ? "Passcode" : "Proof",
+              )}
               value={value}
               onChange={(event) => setValue(event.target.value)}
             />
@@ -358,7 +377,6 @@ function DefaultCondition<TLocale extends string>({
         role={status === "error" ? "alert" : undefined}
       >
         {status === "loading" && text("verifying", "Verifying…")}
-        {status === "success" && text("verified", "Verified")}
         {status === "error" && (error ?? text("verificationFailed", "Verification failed."))}
       </div>
     </div>
@@ -392,7 +410,7 @@ function DefaultRewardCard<TLocale extends string>({
     configuredRemaining === 0;
   const expiry = reward.validUntil === undefined ? undefined : new Date(reward.validUntil);
   return (
-    <article className={classNames?.reward} style={styles?.reward}>
+    <article className={join("sry-reward-card", classNames?.reward)} style={styles?.reward}>
       <h3>{resolveLocalizedText(reward.title, locale)}</h3>
       {reward.description !== undefined && (
         <p>{resolveLocalizedText(reward.description, locale)}</p>
@@ -428,7 +446,9 @@ function DefaultRewardCard<TLocale extends string>({
           if (onClaim !== undefined) void onClaim(reward.id);
         }}
       >
-        {label(dictionary, locale, `status.${status.toLowerCase()}`, status)}
+        {status === "AVAILABLE"
+          ? label(dictionary, locale, "reward.claim", "View reward")
+          : label(dictionary, locale, `status.${status.toLowerCase()}`, status)}
       </button>
     </article>
   );
@@ -561,19 +581,22 @@ export function RallyViewer<TLocale extends string = string>({
       setBusy(spotId);
       const result = await checkIn(spotId, proof).finally(() => setBusy(null));
       setFeedback(result);
-      if (result.ok && onStampStamped !== undefined && target !== undefined)
-        onStampStamped(target as unknown as SpotItem<TLocale>);
+      if (result.ok) {
+        setState(result.value.state);
+        if (onStampStamped !== undefined && target !== undefined)
+          onStampStamped(target as unknown as SpotItem<TLocale>);
+      }
       return result;
     },
     [checkIn, config.spots, currentState, onStampStamped],
   );
   return (
     <section
-      className={classNames.root}
+      className={join("sry-viewer", classNames.root)}
       style={styles.root ?? style}
       aria-label={label(dictionary, locale, "viewer", "Stamp rally")}
     >
-      <header className={classNames.header} style={styles.header}>
+      <header className={join("sry-header", classNames.header)} style={styles.header}>
         {typeof headerSlot === "function"
           ? headerSlot({ config, state: currentState })
           : headerSlot}
@@ -581,13 +604,20 @@ export function RallyViewer<TLocale extends string = string>({
           <h1>{resolveLocalizedText(config.title, locale) || config.id}</h1>
         )}
         <progress
-          aria-label={label(dictionary, locale, "progress", "Progress")}
+          className="sry-progress"
+          aria-label={label(dictionary, locale, "completionProgress", "Clear progress")}
           max={100}
-          value={progress.percentage}
+          value={progress.completionPercentage}
         />
-        <span>
-          {progress.acquired}/{progress.total}
+        <span className="sry-progress__primary">
+          {progress.completionAcquired}/{progress.completionRequired}
         </span>
+        {progress.completionRequired !== progress.total && (
+          <span className="sry-progress__secondary">
+            {label(dictionary, locale, "overallProgress", "Overall")}: {progress.acquired}/
+            {progress.total}
+          </span>
+        )}
       </header>
       {busy !== null &&
         (renderVerifyingState?.() ?? (
@@ -609,7 +639,25 @@ export function RallyViewer<TLocale extends string = string>({
               );
               return stampedSpot === undefined ? null : renderStampEffect?.(stampedSpot);
             })()}
-            {label(dictionary, locale, "verified", "Verified")}
+            {(() => {
+              const stampedSpot = config.spots.find(
+                (spot) => spot.id === feedback.value.record.stampId,
+              );
+              return label(
+                dictionary,
+                locale,
+                "feedback.stampAcquired",
+                "{spot} collected. {acquired}/{required} to complete.",
+              )
+                .replace(
+                  "{spot}",
+                  stampedSpot === undefined
+                    ? "Stamp"
+                    : resolveLocalizedText(stampedSpot.name, locale),
+                )
+                .replace("{acquired}", String(progress.completionAcquired))
+                .replace("{required}", String(progress.completionRequired));
+            })()}
           </div>
         ))}
       {feedback?.ok === false &&
@@ -630,7 +678,8 @@ export function RallyViewer<TLocale extends string = string>({
             {...(styles.feedback === undefined ? {} : { style: styles.feedback })}
           />
         ))}
-      {nextAction?.enabled !== false &&
+      {!progress.isCompleted &&
+        nextAction?.enabled !== false &&
         (renderNextAction?.({
           suggestions,
           locale,
@@ -644,7 +693,7 @@ export function RallyViewer<TLocale extends string = string>({
           ...(nextAction?.maxSuggestions === undefined
             ? {}
             : { maxSuggestions: nextAction.maxSuggestions }),
-          className: classNames.nextAction ?? "sry-next-action",
+          ...(classNames.nextAction === undefined ? {} : { className: classNames.nextAction }),
         }) ?? (
           <NextActionPanel
             suggestions={suggestions}
@@ -659,7 +708,7 @@ export function RallyViewer<TLocale extends string = string>({
             {...(nextAction?.maxSuggestions === undefined
               ? {}
               : { maxSuggestions: nextAction.maxSuggestions })}
-            className={classNames.nextAction ?? "sry-next-action"}
+            {...(classNames.nextAction === undefined ? {} : { className: classNames.nextAction })}
           />
         ))}
       {progress.isCompleted &&
@@ -682,12 +731,42 @@ export function RallyViewer<TLocale extends string = string>({
             className={classNames.completion ?? "sry-completion"}
           />
         ))}
-      <div>
+      <section
+        aria-label={label(
+          dictionary,
+          locale,
+          progress.isCompleted ? "moreToExplore" : "spots",
+          progress.isCompleted ? "More to explore" : "Spots",
+        )}
+      >
+        {progress.isCompleted && (
+          <h2>{label(dictionary, locale, "moreToExplore", "More to explore")}</h2>
+        )}
         {config.spots.map((spot) => {
           const status: SpotStatus =
             busy === spot.id ? "VERIFYING" : evaluateSpotStatus(spot, currentState);
           const claimed = status === "CLAIMED";
           const locked = status === "LOCKED";
+          const prerequisiteNames = (spot.prerequisites ?? [])
+            .map((prerequisiteId) =>
+              config.spots.find((candidate) => candidate.id === prerequisiteId),
+            )
+            .filter((candidate): candidate is PublicSpotItem<TLocale> => candidate !== undefined)
+            .map((candidate) => resolveLocalizedText(candidate.name, locale));
+          const lockedMessage =
+            prerequisiteNames.length === 0
+              ? label(
+                  dictionary,
+                  locale,
+                  "prerequisitesNotMet",
+                  "Complete the prerequisite spots before checking in.",
+                )
+              : label(
+                  dictionary,
+                  locale,
+                  "lockedPrerequisites",
+                  "Complete {spots} to unlock this spot.",
+                ).replace("{spots}", prerequisiteNames.join(", "));
           const children = spot.conditions.map((condition) => {
             const Renderer = customConditionRenderers[condition.type] ?? DefaultCondition;
             return (
@@ -720,7 +799,7 @@ export function RallyViewer<TLocale extends string = string>({
           return (
             <div
               key={spot.id}
-              className={classNames.card}
+              className={join("sry-spot-card", classNames.card)}
               style={styles.card}
               data-status={status}
               aria-disabled={locked}
@@ -747,23 +826,14 @@ export function RallyViewer<TLocale extends string = string>({
                       {label(dictionary, locale, `status.${status.toLowerCase()}`, status)}
                     </span>
                   )}
-                  {locked && (
-                    <p role="status">
-                      {label(
-                        dictionary,
-                        locale,
-                        "prerequisitesNotMet",
-                        "Complete the prerequisite spots before checking in.",
-                      )}
-                    </p>
-                  )}
+                  {locked && <p role="status">{lockedMessage}</p>}
                   {children}
                 </article>
               )}
             </div>
           );
         })}
-      </div>
+      </section>
       <section aria-label={label(dictionary, locale, "rewards", "Rewards")}>
         {config.rewards.map((reward) => {
           const props: RewardCardProps<TLocale> = {
