@@ -27,6 +27,43 @@ const validAdmin = {
 } as const;
 
 describe("configuration parsing", () => {
+  it("validates availability timezones, hours, and rally date ranges", () => {
+    const result = safeParseAdminConfig({
+      ...validAdmin,
+      availability: {
+        startsAt: "2026-09-27T00:00:00Z",
+        endsAt: "2026-09-26T00:00:00Z",
+        timezone: "Invalid/Zone",
+      },
+      spots: [
+        {
+          ...validAdmin.spots[0],
+          availability: {
+            timezone: "UTC",
+            weekly: [
+              {
+                dayOfWeek: 7,
+                hours: [
+                  { opensAt: "10:00", closesAt: "12:00" },
+                  { opensAt: "11:00", closesAt: "13:00" },
+                ],
+              },
+            ],
+          },
+        },
+      ],
+    });
+    expect(result.success).toBe(false);
+    if (!result.success)
+      expect(result.errors.map(({ code }) => code)).toEqual(
+        expect.arrayContaining([
+          "invalid_availability_range",
+          "invalid_timezone",
+          "invalid_weekday",
+          "overlapping_hours",
+        ]),
+      );
+  });
   it("rejects negative and fractional inventory values", () => {
     const result = safeParseAdminConfig({
       id: "rally",

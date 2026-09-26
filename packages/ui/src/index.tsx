@@ -1,6 +1,8 @@
 "use client";
 
 import type {
+  AvailabilityStatus,
+  AvailabilitySuggestionMode,
   CheckInOptions,
   CheckInResult,
   ClaimOptions,
@@ -17,6 +19,7 @@ import type {
   RallyAdapterSyncState,
   RallyConfig,
   RallyInventoryState,
+  RewardProgress,
   RewardState,
   SpotItem,
   StampRallyClient,
@@ -29,7 +32,7 @@ import { getNextSpotSuggestions } from "@stamprally/core";
 import { CompletionPanel, type CompletionPanelProps } from "./components/CompletionPanel.js";
 import { NextActionPanel, type NextActionPanelProps } from "./components/NextActionPanel.js";
 import { type SyncStateContext, SyncStatusBanner } from "./components/SyncStatusBanner.js";
-import { type BuiltInUiLocale, DEFAULT_UI_DICTIONARY } from "./locales/index.js";
+import { resolveUiLabel } from "./locales/index.js";
 
 export type { AccountBackupBannerProps } from "./components/AccountBackupBanner.js";
 export { AccountBackupBanner } from "./components/AccountBackupBanner.js";
@@ -50,6 +53,9 @@ export { DEFAULT_UI_DICTIONARY, UI_DICTIONARIES } from "./locales/index.js";
 
 import {
   calculateProgress,
+  calculateRewardProgress,
+  evaluateRallyAvailability,
+  evaluateSpotAvailability,
   evaluateSpotStatus,
   getCurrentGeoContext,
   isNfcSupported,
@@ -113,6 +119,7 @@ export interface SpotCardProps<TLocale extends string = string> {
   readonly spot: PublicSpotItem<TLocale>;
   readonly state: UserRallyState;
   readonly status: SpotStatus;
+  readonly availabilityStatus?: AvailabilityStatus;
   readonly locale: TLocale;
   readonly dictionary?: LocaleDictionary<TLocale>;
   readonly children: ReactNode;
@@ -120,9 +127,13 @@ export interface SpotCardProps<TLocale extends string = string> {
 export interface RewardCardProps<TLocale extends string = string> {
   readonly reward: PublicReward<TLocale>;
   readonly state: RewardState | undefined;
+  readonly progress: RewardProgress;
+  readonly missingSpotIds: ReadonlyArray<string>;
+  readonly missingSpotNames: ReadonlyArray<string>;
   readonly inventory?: RallyInventoryState;
   readonly locale: TLocale;
   readonly dictionary?: LocaleDictionary<TLocale>;
+  readonly onViewReward?: (rewardId: string) => void;
   readonly onClaim:
     | ((rewardId: string, options?: ClaimOptions) => Promise<ClaimResult>)
     | undefined;
@@ -181,10 +192,14 @@ export interface RallyViewerProps<TLocale extends string = string>
   readonly nextAction?: {
     readonly enabled?: boolean;
     readonly strategy?: NextSpotStrategy;
+    readonly rewardId?: string;
+    readonly availability?: AvailabilitySuggestionMode;
+    readonly now?: string;
     readonly maxSuggestions?: number;
     readonly currentLocation?: GeoCoordinates;
   };
   readonly onNavigate?: (spot: PublicSpotItem<TLocale>, suggestion: NextSpotSuggestion) => void;
+  readonly onViewReward?: (rewardId: string) => void;
   readonly onCompleted?: (progress: StampRallyProgress, state: UserRallyState) => void;
 }
 
@@ -193,10 +208,27 @@ const label = <TLocale extends string>(
   locale: TLocale,
   key: string,
   fallback: string,
-): string =>
-  dictionary?.[locale]?.[key] ??
-  DEFAULT_UI_DICTIONARY[locale as BuiltInUiLocale]?.[key] ??
-  fallback;
+): string => resolveUiLabel(dictionary, locale, key, fallback);
+function availabilityConfigured(config: PublicRallyConfig): boolean {
+  return (
+    config.availability !== undefined ||
+    config.spots.some(({ availability }) => availability !== undefined)
+  );
+}
+function availabilityText<TLocale extends string>(
+  dictionary: LocaleDictionary<TLocale> | undefined,
+  locale: TLocale,
+  status: AvailabilityStatus,
+): string {
+  const key = `availability.${status.toLowerCase()}`;
+  const fallback: Record<AvailabilityStatus, string> = {
+    OPEN: "Open",
+    CLOSED: "Closed",
+    UPCOMING: "Opens soon",
+    ENDED: "Ended",
+  };
+  return label(dictionary, locale, key, fallback[status]);
+}
 const join = (...names: ReadonlyArray<string | undefined>): string | undefined => {
   const value = names.filter((name): name is string => name !== undefined && name !== "").join(" ");
   return value === "" ? undefined : value;
@@ -386,9 +418,13 @@ function DefaultCondition<TLocale extends string>({
 function DefaultRewardCard<TLocale extends string>({
   reward,
   state,
+  progress,
+  missingSpotIds,
+  missingSpotNames,
   inventory,
   locale,
   dictionary,
+  onViewReward,
   onClaim,
   classNames,
   styles,
@@ -403,9 +439,11 @@ function DefaultRewardCard<TLocale extends string>({
       ? undefined
       : Math.max(0, reward.stockLimit - (state?.redeemedCount ?? 0)));
   const sharedRemaining = inventory?.sharedRemaining;
+  const canView = reward.redemptionMethod === "view_only" && onViewReward !== undefined;
+  const canRedeem = reward.redemptionMethod !== "view_only" && onClaim !== undefined;
   const unavailable =
     status !== "AVAILABLE" ||
-    onClaim === undefined ||
+    (!canView && !canRedeem) ||
     sharedRemaining === 0 ||
     configuredRemaining === 0;
   const expiry = reward.validUntil === undefined ? undefined : new Date(reward.validUntil);
@@ -414,6 +452,26 @@ function DefaultRewardCard<TLocale extends string>({
       <h3>{resolveLocalizedText(reward.title, locale)}</h3>
       {reward.description !== undefined && (
         <p>{resolveLocalizedText(reward.description, locale)}</p>
+      )}
+      {!progress.isUnlocked && (
+        <fieldset aria-label={label(dictionary, locale, "reward.progress", "Reward progress")}>
+          <legend>{label(dictionary, locale, "reward.progress", "Reward progress")}</legend>
+          <progress
+            max={100}
+            value={progress.percentage}
+            aria-label={label(dictionary, locale, "reward.progress", "Reward progress")}
+          />
+          <span>
+            {progress.acquired} / {progress.required}
+          </span>
+          {missingSpotNames.length > 0 && (
+            <ul aria-label={label(dictionary, locale, "reward.missingSpots", "Spots still needed")}>
+              {missingSpotNames.map((name, index) => (
+                <li key={missingSpotIds[index]}>{name}</li>
+              ))}
+            </ul>
+          )}
+        </fieldset>
       )}
       {sharedRemaining !== undefined && (
         <span>
@@ -443,11 +501,14 @@ function DefaultRewardCard<TLocale extends string>({
         style={styles?.button}
         disabled={unavailable}
         onClick={() => {
-          if (onClaim !== undefined) void onClaim(reward.id);
+          if (canView) onViewReward?.(reward.id);
+          else if (canRedeem) void onClaim?.(reward.id);
         }}
       >
         {status === "AVAILABLE"
-          ? label(dictionary, locale, "reward.claim", "View reward")
+          ? canView
+            ? label(dictionary, locale, "reward.claim", "View reward")
+            : label(dictionary, locale, "reward.redeem", "Redeem reward")
           : label(dictionary, locale, `status.${status.toLowerCase()}`, status)}
       </button>
     </article>
@@ -481,6 +542,7 @@ export function RallyViewer<TLocale extends string = string>({
   showSyncStatus = true,
   nextAction,
   onNavigate,
+  onViewReward,
   onCompleted,
 }: RallyViewerProps<TLocale>): ReactElement {
   const config = providedConfig ?? client?.getConfig() ?? adapter?.config;
@@ -537,15 +599,29 @@ export function RallyViewer<TLocale extends string = string>({
     [config, currentState],
   );
   const completedRef = useRef<boolean | null>(state === null ? null : progress.isCompleted);
+  const availabilityNow = nextAction?.now ?? new Date().toISOString();
   const suggestions = useMemo(
     () =>
       getNextSpotSuggestions(currentState, config, {
         ...(nextAction?.strategy === undefined ? {} : { strategy: nextAction.strategy }),
+        ...(nextAction?.rewardId === undefined ? {} : { rewardId: nextAction.rewardId }),
+        ...(nextAction?.availability === undefined
+          ? { availability: "open_first" as const }
+          : { availability: nextAction.availability }),
+        now: availabilityNow,
         ...(nextAction?.currentLocation === undefined
           ? {}
           : { currentLocation: nextAction.currentLocation }),
       }),
-    [config, currentState, nextAction?.currentLocation, nextAction?.strategy],
+    [
+      availabilityNow,
+      config,
+      currentState,
+      nextAction?.availability,
+      nextAction?.currentLocation,
+      nextAction?.rewardId,
+      nextAction?.strategy,
+    ],
   );
   useEffect(() => {
     if (!completedRef.current && progress.isCompleted) onCompleted?.(progress, currentState);
@@ -612,6 +688,15 @@ export function RallyViewer<TLocale extends string = string>({
         <span className="sry-progress__primary">
           {progress.completionAcquired}/{progress.completionRequired}
         </span>
+        {availabilityConfigured(config) && (
+          <p role="status">
+            {availabilityText(
+              dictionary,
+              locale,
+              evaluateRallyAvailability(config.availability, availabilityNow).status,
+            )}
+          </p>
+        )}
         {progress.completionRequired !== progress.total && (
           <span className="sry-progress__secondary">
             {label(dictionary, locale, "overallProgress", "Overall")}: {progress.acquired}/
@@ -718,6 +803,7 @@ export function RallyViewer<TLocale extends string = string>({
           rewardStates: currentState.rewards,
           locale,
           ...(dictionary === undefined ? {} : { dictionary }),
+          ...(onViewReward === undefined ? {} : { onViewReward }),
           ...(claim === undefined ? {} : { onClaimReward: (rewardId) => void claim(rewardId) }),
           className: classNames.completion ?? "sry-completion",
         }) ?? (
@@ -727,22 +813,19 @@ export function RallyViewer<TLocale extends string = string>({
             rewardStates={currentState.rewards}
             locale={locale}
             {...(dictionary === undefined ? {} : { dictionary })}
+            {...(onViewReward === undefined ? {} : { onViewReward })}
             {...(claim === undefined ? {} : { onClaimReward: (rewardId) => void claim(rewardId) })}
             className={classNames.completion ?? "sry-completion"}
           />
         ))}
-      <section
-        aria-label={label(
-          dictionary,
-          locale,
-          progress.isCompleted ? "moreToExplore" : "spots",
-          progress.isCompleted ? "More to explore" : "Spots",
-        )}
-      >
-        {progress.isCompleted && (
-          <h2>{label(dictionary, locale, "moreToExplore", "More to explore")}</h2>
-        )}
-        {config.spots.map((spot) => {
+      {(() => {
+        const spots = progress.isCompleted
+          ? config.spots.filter((spot) => evaluateSpotStatus(spot, currentState) !== "CLAIMED")
+          : config.spots;
+        const claimedSpots = progress.isCompleted
+          ? config.spots.filter((spot) => evaluateSpotStatus(spot, currentState) === "CLAIMED")
+          : [];
+        const renderSpot = (spot: PublicSpotItem<TLocale>): ReactElement => {
           const status: SpotStatus =
             busy === spot.id ? "VERIFYING" : evaluateSpotStatus(spot, currentState);
           const claimed = status === "CLAIMED";
@@ -792,6 +875,12 @@ export function RallyViewer<TLocale extends string = string>({
             spot,
             state: currentState,
             status,
+            ...(availabilityConfigured(config)
+              ? {
+                  availabilityStatus: evaluateSpotAvailability(spot.availability, availabilityNow)
+                    .status,
+                }
+              : {}),
             locale,
             ...(dictionary === undefined ? {} : { dictionary }),
             children,
@@ -810,6 +899,11 @@ export function RallyViewer<TLocale extends string = string>({
                     <img src={spot.iconUrl} alt="" width={32} height={32} />
                   )}
                   <h2>{resolveLocalizedText(spot.name, locale)}</h2>
+                  {props.availabilityStatus !== undefined && (
+                    <p role="status">
+                      {availabilityText(dictionary, locale, props.availabilityStatus)}
+                    </p>
+                  )}
                   {spot.imageUrl !== undefined && <img src={spot.imageUrl} alt="" loading="lazy" />}
                   {spot.description !== undefined && (
                     <p>{resolveLocalizedText(spot.description, locale)}</p>
@@ -832,16 +926,61 @@ export function RallyViewer<TLocale extends string = string>({
               )}
             </div>
           );
-        })}
-      </section>
+        };
+        return (
+          <>
+            {(!progress.isCompleted || spots.length > 0) && (
+              <section
+                aria-label={label(
+                  dictionary,
+                  locale,
+                  progress.isCompleted ? "moreToExplore" : "spots",
+                  progress.isCompleted ? "More to explore" : "Spots",
+                )}
+              >
+                {progress.isCompleted && (
+                  <h2>{label(dictionary, locale, "moreToExplore", "More to explore")}</h2>
+                )}
+                {spots.map(renderSpot)}
+              </section>
+            )}
+            {claimedSpots.length > 0 && (
+              <details>
+                <summary>
+                  {label(dictionary, locale, "completedSpots", "Claimed spots")} (
+                  {claimedSpots.length})
+                </summary>
+                <section aria-label={label(dictionary, locale, "completedSpots", "Claimed spots")}>
+                  {claimedSpots.map(renderSpot)}
+                </section>
+              </details>
+            )}
+          </>
+        );
+      })()}
       <section aria-label={label(dictionary, locale, "rewards", "Rewards")}>
         {config.rewards.map((reward) => {
+          const rewardProgress = calculateRewardProgress(reward.id, currentState, config) ?? {
+            rewardId: reward.id,
+            isUnlocked: false,
+            acquired: 0,
+            required: 0,
+            percentage: 0,
+            missingStampIds: [],
+          };
           const props: RewardCardProps<TLocale> = {
             reward,
             state: currentState.rewards.find((item) => item.rewardId === reward.id),
+            progress: rewardProgress,
+            missingSpotIds: rewardProgress.missingStampIds,
+            missingSpotNames: rewardProgress.missingStampIds
+              .map((id) => config.spots.find((spot) => spot.id === id))
+              .filter((spot): spot is PublicSpotItem<TLocale> => spot !== undefined)
+              .map((spot) => resolveLocalizedText(spot.name, locale)),
             ...(currentState.inventory === undefined ? {} : { inventory: currentState.inventory }),
             locale,
             ...(dictionary === undefined ? {} : { dictionary }),
+            ...(onViewReward === undefined ? {} : { onViewReward }),
             onClaim: claim,
           };
           return (

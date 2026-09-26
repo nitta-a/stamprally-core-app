@@ -8,6 +8,7 @@ import type {
 import { resolveLocalizedText } from "@stamprally/core";
 import type { ReactNode } from "react";
 import type { MuiSx } from "./index.js";
+import { resolveMuiLabel } from "./locales.js";
 
 export interface MuiCompletionPanelProps<TLocale extends string = string> {
   readonly progress: StampRallyProgress;
@@ -15,16 +16,10 @@ export interface MuiCompletionPanelProps<TLocale extends string = string> {
   readonly rewardStates: ReadonlyArray<RewardState>;
   readonly locale: TLocale;
   readonly dictionary?: LocaleDictionary<TLocale>;
+  readonly onViewReward?: (rewardId: string) => void;
   readonly onClaimReward?: (rewardId: string) => void;
   readonly sx?: MuiSx;
 }
-
-const label = <TLocale extends string>(
-  dictionary: LocaleDictionary<TLocale> | undefined,
-  locale: TLocale,
-  key: string,
-  fallback: string,
-): string => dictionary?.[locale]?.[key] ?? fallback;
 
 export function MuiCompletionPanel<TLocale extends string = string>({
   progress,
@@ -32,6 +27,7 @@ export function MuiCompletionPanel<TLocale extends string = string>({
   rewardStates,
   locale,
   dictionary,
+  onViewReward,
   onClaimReward,
   sx,
 }: MuiCompletionPanelProps<TLocale>): ReactNode {
@@ -43,14 +39,14 @@ export function MuiCompletionPanel<TLocale extends string = string>({
       {...(sx === undefined ? {} : { sx })}
       component="section"
       aria-live="polite"
-      aria-label={label(dictionary, locale, "completion.title", "Rally complete")}
+      aria-label={resolveMuiLabel(dictionary, locale, "completion.title", "Rally complete")}
     >
       <Stack spacing={1}>
         <Typography variant="h5" component="h2">
-          {label(dictionary, locale, "completion.title", "Stamp rally complete!")}
+          {resolveMuiLabel(dictionary, locale, "completion.title", "Stamp rally complete!")}
         </Typography>
         <Typography>
-          {label(
+          {resolveMuiLabel(
             dictionary,
             locale,
             "completion.description",
@@ -60,14 +56,24 @@ export function MuiCompletionPanel<TLocale extends string = string>({
         {availableRewards.length > 0 && (
           <Stack spacing={1}>
             <Typography>
-              {label(dictionary, locale, "completion.rewardAvailable", "A reward is available")}
+              {resolveMuiLabel(
+                dictionary,
+                locale,
+                "completion.rewardAvailable",
+                "A reward is available",
+              )}
             </Typography>
             {availableRewards.map((reward) => (
               <Stack direction="row" spacing={1} alignItems="center" key={reward.id}>
                 <Typography>{resolveLocalizedText(reward.title, locale)}</Typography>
-                {onClaimReward === undefined ? null : (
+                {onViewReward !== undefined && (
+                  <Button onClick={() => onViewReward(reward.id)}>
+                    {resolveMuiLabel(dictionary, locale, "completion.viewReward", "View reward")}
+                  </Button>
+                )}
+                {onClaimReward !== undefined && reward.redemptionMethod !== "view_only" && (
                   <Button onClick={() => onClaimReward(reward.id)}>
-                    {label(dictionary, locale, "completion.viewReward", "View reward")}
+                    {resolveMuiLabel(dictionary, locale, "reward.redeem", "Redeem reward")}
                   </Button>
                 )}
               </Stack>

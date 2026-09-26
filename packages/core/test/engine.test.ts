@@ -152,6 +152,37 @@ describe("stamp and reward transitions", () => {
     ]);
   });
 
+  it("reconciles nested reward stamp conditions", () => {
+    const reward: Reward = {
+      id: "reward",
+      title: "Reward",
+      type: "digital",
+      redemptionMethod: "view_only",
+      requiredStampCount: 1,
+      conditions: [
+        {
+          type: "all",
+          conditions: [
+            { type: "stamps", stampIds: ["first"] },
+            {
+              type: "any",
+              conditions: [
+                { type: "stamps", stampIds: ["second"] },
+                { type: "stamps", stampIds: ["third"] },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    expect(reconcileRewardStates([reward], [], 1, "now", new Set(["first"]))).toEqual([
+      { rewardId: "reward", status: "LOCKED" },
+    ]);
+    expect(reconcileRewardStates([reward], [], 2, "now", new Set(["first", "second"]))).toEqual([
+      { rewardId: "reward", status: "AVAILABLE", unlockedAt: "now" },
+    ]);
+  });
+
   it("enforces claim status, expiry, stock, limits, and staff passcodes", () => {
     const reward: Reward = {
       id: "reward",

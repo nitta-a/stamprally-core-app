@@ -1,5 +1,6 @@
 import type {
   AdminRallyConfig,
+  AvailabilityHours,
   CheckInCondition,
   PublicRallyConfig,
   Reward,
@@ -393,6 +394,8 @@ function spot(value: unknown, path: string, errors: ValidationError[], isPublic:
     optionalString(value, key, path, errors);
   if (hasOwn(value, "location") && value.location !== undefined)
     location(value.location, `${path}.location`, errors);
+  if (hasOwn(value, "availability") && value.availability !== undefined)
+    spotAvailability(value.availability, `${path}.availability`, errors);
   if (hasOwn(value, "externalReferences") && value.externalReferences !== undefined)
     externalReferences(value.externalReferences, `${path}.externalReferences`, errors);
   if (hasOwn(value, "prerequisites") && value.prerequisites !== undefined) {
@@ -415,6 +418,153 @@ function spot(value: unknown, path: string, errors: ValidationError[], isPublic:
     value.conditions.forEach((item, index) => {
       condition(item, `${path}.conditions[${index}]`, errors, isPublic);
     });
+}
+
+function timezone(value: unknown, path: string, errors: ValidationError[]): void {
+  if (typeof value !== "string") {
+    add(errors, path, "Expected a timezone string.", "invalid_type");
+    return;
+  }
+  try {
+    new Intl.DateTimeFormat("en", { timeZone: value });
+  } catch {
+    add(errors, path, "Expected a valid IANA timezone.", "invalid_timezone");
+  }
+}
+
+function availabilityHours(value: unknown, path: string, errors: ValidationError[]): void {
+  if (!Array.isArray(value)) {
+    add(errors, path, "Expected an array of hours.", "invalid_type");
+    return;
+  }
+  const valid: AvailabilityHours[] = [];
+  value.forEach((item, index) => {
+    const itemPath = `${path}[${index}]`;
+    if (!isRecord(item)) {
+      add(errors, itemPath, "Expected an hours object.", "invalid_type");
+      return;
+    }
+    const timePattern = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
+    if (typeof item.opensAt !== "string" || !timePattern.test(item.opensAt))
+      add(errors, `${itemPath}.opensAt`, "Expected a time in HH:mm format.", "invalid_time");
+    if (typeof item.closesAt !== "string" || !timePattern.test(item.closesAt))
+      add(errors, `${itemPath}.closesAt`, "Expected a time in HH:mm format.", "invalid_time");
+    if (typeof item.opensAt === "string" && typeof item.closesAt === "string")
+      valid.push({ opensAt: item.opensAt, closesAt: item.closesAt });
+  });
+  const toMinutes = (time: string): number => Number(time.slice(0, 2)) * 60 + Number(time.slice(3));
+  const segments: ReadonlyArray<ReadonlyArray<readonly [number, number]>> = valid.map(
+    ({ opensAt, closesAt }) => {
+      const start = toMinutes(opensAt);
+      const end = toMinutes(closesAt);
+      if (end === start) return [[0, 1440]];
+      return end > start
+        ? [[start, end]]
+        : [
+            [start, 1440],
+            [0, end],
+          ];
+    },
+  );
+  for (let first = 0; first < segments.length; first += 1)
+    for (let second = first + 1; second < segments.length; second += 1)
+      if (
+        segments[first]?.some(([start, end]) =>
+          segments[second]?.some(([otherStart, otherEnd]) => start < otherEnd && otherStart < end),
+        )
+      )
+        add(errors, path, "Hours must not overlap.", "overlapping_hours");
+}
+
+function spotAvailability(value: unknown, path: string, errors: ValidationError[]): void {
+  if (!isRecord(value)) {
+    add(errors, path, "Expected an availability object.", "invalid_type");
+    return;
+  }
+  if (hasOwn(value, "timezone")) timezone(value.timezone, `${path}.timezone`, errors);
+  if (hasOwn(value, "weekly")) {
+    if (!Array.isArray(value.weekly))
+      add(errors, `${path}.weekly`, "Expected an array.", "invalid_type");
+    else {
+      const weekdays = new Set<number>();
+      value.weekly.forEach((item, index) => {
+        const itemPath = `${path}.weekly[${index}]`;
+        if (!isRecord(item)) {
+          add(errors, itemPath, "Expected a weekday schedule.", "invalid_type");
+          return;
+        }
+        const day = item.dayOfWeek;
+        if (typeof day !== "number" || !Number.isInteger(day) || day < 0 || day > 6)
+          add(
+            errors,
+            `${itemPath}.dayOfWeek`,
+            "Expected a weekday from 0 to 6.",
+            "invalid_weekday",
+          );
+        else if (weekdays.has(day))
+          add(errors, `${itemPath}.dayOfWeek`, "Weekday is duplicated.", "duplicate_weekday");
+        else weekdays.add(day);
+        availabilityHours(item.hours, `${itemPath}.hours`, errors);
+      });
+      const schedules = value.weekly.filter(isRecord);
+      for (const schedule of schedules) {
+        if (typeof schedule.dayOfWeek !== "number" || !Array.isArray(schedule.hours)) continue;
+        const nextSchedule = schedules.find(
+          (candidate) => candidate.dayOfWeek === ((schedule.dayOfWeek as number) + 1) % 7,
+        );
+        if (nextSchedule === undefined || !Array.isArray(nextSchedule.hours)) continue;
+        for (const period of schedule.hours) {
+          if (
+            !isRecord(period) ||
+            typeof period.opensAt !== "string" ||
+            typeof period.closesAt !== "string" ||
+            period.closesAt > period.opensAt
+          )
+            continue;
+          for (const nextPeriod of nextSchedule.hours) {
+            if (
+              isRecord(nextPeriod) &&
+              typeof nextPeriod.opensAt === "string" &&
+              nextPeriod.opensAt < period.closesAt
+            )
+              add(
+                errors,
+                `${path}.weekly`,
+                "Overnight hours must not overlap the next day's hours.",
+                "overlapping_hours",
+              );
+          }
+        }
+      }
+    }
+  }
+  if (hasOwn(value, "exceptions")) {
+    if (!Array.isArray(value.exceptions))
+      add(errors, `${path}.exceptions`, "Expected an array.", "invalid_type");
+    else {
+      const dates = new Set<string>();
+      value.exceptions.forEach((item, index) => {
+        const itemPath = `${path}.exceptions[${index}]`;
+        if (!isRecord(item)) {
+          add(errors, itemPath, "Expected an exception object.", "invalid_type");
+          return;
+        }
+        const date = item.date;
+        if (
+          typeof date !== "string" ||
+          !/^\d{4}-\d{2}-\d{2}$/.test(date) ||
+          Number.isNaN(Date.parse(`${date}T00:00:00Z`)) ||
+          new Date(`${date}T00:00:00Z`).toISOString().slice(0, 10) !== date
+        )
+          add(errors, `${itemPath}.date`, "Expected a date in YYYY-MM-DD format.", "invalid_date");
+        else if (dates.has(date))
+          add(errors, `${itemPath}.date`, "Date is duplicated.", "duplicate_exception");
+        else dates.add(date);
+        optionalBoolean(item, "closed", itemPath, errors);
+        if (hasOwn(item, "hours")) availabilityHours(item.hours, `${itemPath}.hours`, errors);
+      });
+    }
+  }
 }
 
 function reward(value: unknown, path: string, errors: ValidationError[], isPublic: boolean): void {
@@ -475,6 +625,38 @@ function validate(value: unknown, isPublic: boolean): ReadonlyArray<ValidationEr
   if (hasOwn(value, "theme") && value.theme !== undefined) theme(value.theme, "$.theme", errors);
   if (hasOwn(value, "completion") && value.completion !== undefined)
     completion(value.completion, "$.completion", errors);
+  if (hasOwn(value, "availability") && value.availability !== undefined) {
+    if (!isRecord(value.availability))
+      add(errors, "$.availability", "Expected an availability object.", "invalid_type");
+    else {
+      const availability = value.availability;
+      for (const key of ["startsAt", "endsAt"] as const) {
+        if (hasOwn(availability, key) && availability[key] !== undefined) {
+          if (
+            typeof availability[key] !== "string" ||
+            !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/.test(
+              availability[key] as string,
+            ) ||
+            !Number.isFinite(Date.parse(availability[key] as string))
+          )
+            add(errors, `$.availability.${key}`, "Expected an ISO 8601 date-time.", "invalid_date");
+        }
+      }
+      if (
+        typeof availability.startsAt === "string" &&
+        typeof availability.endsAt === "string" &&
+        Date.parse(availability.endsAt) <= Date.parse(availability.startsAt)
+      )
+        add(
+          errors,
+          "$.availability.endsAt",
+          "End must be after start.",
+          "invalid_availability_range",
+        );
+      if (hasOwn(availability, "timezone"))
+        timezone(availability.timezone, "$.availability.timezone", errors);
+    }
+  }
   if (!Array.isArray(value.spots)) add(errors, "spots", "Expected an array.", "invalid_type");
   else
     value.spots.forEach((item, index) => {

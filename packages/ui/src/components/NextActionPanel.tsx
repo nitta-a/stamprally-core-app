@@ -1,6 +1,7 @@
 import type { GeoCoordinates, LocaleDictionary, NextSpotSuggestion } from "@stamprally/core";
 import { resolveLocalizedText } from "@stamprally/core";
 import type { ReactElement } from "react";
+import { resolveUiLabel } from "../locales/index.js";
 
 export interface NextActionPanelProps<TLocale extends string = string> {
   readonly suggestions: ReadonlyArray<NextSpotSuggestion>;
@@ -12,13 +13,6 @@ export interface NextActionPanelProps<TLocale extends string = string> {
   readonly className?: string;
 }
 
-const label = <TLocale extends string>(
-  dictionary: LocaleDictionary<TLocale> | undefined,
-  locale: TLocale,
-  key: string,
-  fallback: string,
-): string => dictionary?.[locale]?.[key] ?? fallback;
-
 export function NextActionPanel<TLocale extends string = string>({
   suggestions,
   locale,
@@ -29,30 +23,45 @@ export function NextActionPanel<TLocale extends string = string>({
 }: NextActionPanelProps<TLocale>): ReactElement {
   const visible = suggestions.slice(0, Math.max(0, maxSuggestions));
   const [primary, ...secondary] = visible;
+  const remainingCount = Math.max(0, suggestions.length - 1);
   return (
     <section
       className={["sry-next-action", className].filter(Boolean).join(" ")}
-      aria-label={label(dictionary, locale, "nextAction.title", "Next spots")}
+      aria-label={resolveUiLabel(dictionary, locale, "nextAction.title", "Next spots")}
     >
-      <h2>{label(dictionary, locale, "nextAction.title", "Next spots")}</h2>
+      <h2>{resolveUiLabel(dictionary, locale, "nextAction.title", "Next spots")}</h2>
       {visible.length === 0 ? (
-        <p>{label(dictionary, locale, "nextAction.noAvailableSpots", "No available spots")}</p>
+        <p>
+          {resolveUiLabel(dictionary, locale, "nextAction.noAvailableSpots", "No available spots")}
+        </p>
       ) : (
         <>
           {primary === undefined ? null : (
             <article className="sry-next-action__primary">
               <strong>{resolveLocalizedText(primary.spot.name, locale)}</strong>
-              {primary.distanceMeters === undefined ? null : (
-                <span>
-                  {label(dictionary, locale, "nextAction.distance", "About {distance} m").replace(
-                    "{distance}",
-                    String(Math.round(primary.distanceMeters)),
+              {primary.availabilityStatus !== undefined && (
+                <span role="status">
+                  {resolveUiLabel(
+                    dictionary,
+                    locale,
+                    `availability.${primary.availabilityStatus.toLowerCase()}`,
+                    primary.availabilityStatus,
                   )}
                 </span>
               )}
-              {onNavigate === undefined ? null : (
+              {primary.distanceMeters === undefined ? null : (
+                <span>
+                  {resolveUiLabel(
+                    dictionary,
+                    locale,
+                    "nextAction.distance",
+                    "About {distance} m",
+                  ).replace("{distance}", String(Math.round(primary.distanceMeters)))}
+                </span>
+              )}
+              {onNavigate !== undefined && primary.spot.location !== undefined && (
                 <button type="button" onClick={() => onNavigate(primary)}>
-                  {label(dictionary, locale, "nextAction.navigate", "View directions")}
+                  {resolveUiLabel(dictionary, locale, "nextAction.navigate", "View directions")}
                 </button>
               )}
             </article>
@@ -60,16 +69,36 @@ export function NextActionPanel<TLocale extends string = string>({
           {secondary.length > 0 && (
             <details>
               <summary>
-                {label(dictionary, locale, "nextAction.otherSpots", "Other available spots")} (
-                {secondary.length})
+                {resolveUiLabel(
+                  dictionary,
+                  locale,
+                  "nextAction.otherSpots",
+                  "Other available spots",
+                )}{" "}
+                ({remainingCount})
               </summary>
               <ul>
                 {secondary.map((suggestion) => (
                   <li key={suggestion.spot.id}>
                     <span>{resolveLocalizedText(suggestion.spot.name, locale)}</span>
-                    {onNavigate === undefined ? null : (
+                    {suggestion.availabilityStatus !== undefined && (
+                      <span role="status">
+                        {resolveUiLabel(
+                          dictionary,
+                          locale,
+                          `availability.${suggestion.availabilityStatus.toLowerCase()}`,
+                          suggestion.availabilityStatus,
+                        )}
+                      </span>
+                    )}
+                    {onNavigate !== undefined && suggestion.spot.location !== undefined && (
                       <button type="button" onClick={() => onNavigate(suggestion)}>
-                        {label(dictionary, locale, "nextAction.navigate", "View directions")}
+                        {resolveUiLabel(
+                          dictionary,
+                          locale,
+                          "nextAction.navigate",
+                          "View directions",
+                        )}
                       </button>
                     )}
                   </li>

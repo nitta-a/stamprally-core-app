@@ -2,9 +2,28 @@ import type { LocaleDictionary } from "@stamprally/core";
 
 export type BuiltInUiLocale = "ja" | "en" | "zh-CN" | "zh-TW" | "ko";
 
+export function resolveUiLabel<TLocale extends string>(
+  dictionary: LocaleDictionary<TLocale> | undefined,
+  locale: TLocale,
+  key: string,
+  fallback: string,
+): string {
+  return (
+    dictionary?.[locale]?.[key] ??
+    DEFAULT_UI_DICTIONARY[locale as BuiltInUiLocale]?.[key] ??
+    fallback
+  );
+}
+
 /** Complete built-in labels for the standard participant and staff components. */
 export const DEFAULT_UI_DICTIONARY: LocaleDictionary<BuiltInUiLocale> = {
   en: {
+    "availability.open": "Open",
+    "availability.closed": "Closed",
+    "availability.upcoming": "Opens soon",
+    "availability.ended": "Ended",
+    "reward.progress": "Reward progress",
+    "reward.missingSpots": "Spots still needed",
     viewer: "Stamp rally",
     stampSheet: "Stamp sheet",
     progress: "Progress",
@@ -52,6 +71,8 @@ export const DEFAULT_UI_DICTIONARY: LocaleDictionary<BuiltInUiLocale> = {
     "reward.sharedRemaining": "Overall remaining",
     "reward.validUntil": "Valid until",
     "reward.claim": "View reward",
+    "reward.redeem": "Redeem reward",
+    completedSpots: "Claimed spots",
     "sync.syncing": "Sending unsynced operations to the server...",
     "sync.offline": "Recording offline",
     "sync.unsynced": "unsynced",
@@ -69,6 +90,12 @@ export const DEFAULT_UI_DICTIONARY: LocaleDictionary<BuiltInUiLocale> = {
     "redemption.invalid": "Could not redeem this ticket.",
   },
   ja: {
+    "availability.open": "営業中",
+    "availability.closed": "本日の受付終了",
+    "availability.upcoming": "まもなく営業開始",
+    "availability.ended": "開催終了",
+    "reward.progress": "特典の進捗",
+    "reward.missingSpots": "必要なスポット",
     viewer: "スタンプラリー",
     stampSheet: "スタンプシート",
     progress: "進捗",
@@ -117,6 +144,8 @@ export const DEFAULT_UI_DICTIONARY: LocaleDictionary<BuiltInUiLocale> = {
     "reward.sharedRemaining": "全体で残り",
     "reward.validUntil": "有効期限",
     "reward.claim": "特典を見る",
+    "reward.redeem": "特典を受け取る",
+    completedSpots: "取得済み",
     "sync.syncing": "未同期の操作をサーバーへ送信中...",
     "sync.offline": "オフラインで記録中",
     "sync.unsynced": "未同期",
@@ -134,6 +163,12 @@ export const DEFAULT_UI_DICTIONARY: LocaleDictionary<BuiltInUiLocale> = {
     "redemption.invalid": "このチケットを消込できませんでした。",
   },
   "zh-CN": {
+    "availability.open": "营业中",
+    "availability.closed": "今日已结束接待",
+    "availability.upcoming": "即将开放",
+    "availability.ended": "活动已结束",
+    "reward.progress": "奖励进度",
+    "reward.missingSpots": "尚需地点",
     viewer: "集章活动",
     stampSheet: "印章册",
     progress: "进度",
@@ -181,6 +216,8 @@ export const DEFAULT_UI_DICTIONARY: LocaleDictionary<BuiltInUiLocale> = {
     "reward.sharedRemaining": "总剩余",
     "reward.validUntil": "有效期至",
     "reward.claim": "查看奖励",
+    "reward.redeem": "兑换奖励",
+    completedSpots: "已领取地点",
     "sync.syncing": "正在向服务器发送未同步操作…",
     "sync.offline": "离线记录中",
     "sync.unsynced": "未同步",
@@ -198,6 +235,12 @@ export const DEFAULT_UI_DICTIONARY: LocaleDictionary<BuiltInUiLocale> = {
     "redemption.invalid": "无法兑换此票券。",
   },
   "zh-TW": {
+    "availability.open": "營業中",
+    "availability.closed": "今日已結束接待",
+    "availability.upcoming": "即將開放",
+    "availability.ended": "活動已結束",
+    "reward.progress": "獎勵進度",
+    "reward.missingSpots": "尚需地點",
     viewer: "集章活動",
     stampSheet: "印章冊",
     progress: "進度",
@@ -245,6 +288,8 @@ export const DEFAULT_UI_DICTIONARY: LocaleDictionary<BuiltInUiLocale> = {
     "reward.sharedRemaining": "總剩餘",
     "reward.validUntil": "有效期限",
     "reward.claim": "查看獎勵",
+    "reward.redeem": "兌換獎勵",
+    completedSpots: "已取得地點",
     "sync.syncing": "正在向伺服器傳送未同步操作…",
     "sync.offline": "離線記錄中",
     "sync.unsynced": "未同步",
@@ -262,6 +307,12 @@ export const DEFAULT_UI_DICTIONARY: LocaleDictionary<BuiltInUiLocale> = {
     "redemption.invalid": "無法兌換此票券。",
   },
   ko: {
+    "availability.open": "운영 중",
+    "availability.closed": "오늘 접수가 종료되었습니다",
+    "availability.upcoming": "곧 운영을 시작합니다",
+    "availability.ended": "행사가 종료되었습니다",
+    "reward.progress": "보상 진행 상황",
+    "reward.missingSpots": "필요한 장소",
     viewer: "스탬프 랠리",
     stampSheet: "스탬프 시트",
     progress: "진행률",
@@ -310,6 +361,8 @@ export const DEFAULT_UI_DICTIONARY: LocaleDictionary<BuiltInUiLocale> = {
     "reward.sharedRemaining": "전체 잔여",
     "reward.validUntil": "유효 기간",
     "reward.claim": "보상 보기",
+    "reward.redeem": "보상 받기",
+    completedSpots: "획득한 장소",
     "sync.syncing": "동기화되지 않은 작업을 서버로 보내는 중…",
     "sync.offline": "오프라인 기록 중",
     "sync.unsynced": "미동기화",

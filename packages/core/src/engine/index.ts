@@ -1,3 +1,5 @@
+export type { AvailabilityResult, AvailabilityStatus } from "./availability.js";
+export { evaluateRallyAvailability, evaluateSpotAvailability } from "./availability.js";
 export {
   calculateDistanceMeters,
   evaluateCondition,
@@ -6,8 +8,12 @@ export {
   getSpotStatus,
 } from "./evaluate.js";
 export { getOrderedSpots } from "./order.js";
+export type { ExperienceIssue, ExperiencePreflightOptions, RallySimulation } from "./preflight.js";
+export { analyzeRallyExperience, simulateRallyProgression } from "./preflight.js";
 export type { StampRallyProgress } from "./progress.js";
 export { calculateProgress } from "./progress.js";
+export type { RewardProgress } from "./rewardProgress.js";
+export { calculateRewardProgress } from "./rewardProgress.js";
 export type { ClaimTicketOptions } from "./rewards.js";
 export {
   createClaimTicketNumber,
@@ -15,6 +21,7 @@ export {
   issueClaimTicketNumber,
 } from "./rewards.js";
 export type {
+  AvailabilitySuggestionMode,
   NextSpotStrategy,
   NextSpotSuggestion,
   NextSpotSuggestionOptions,

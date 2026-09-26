@@ -1,4 +1,4 @@
-# stamprally-core-app v0.25.3
+# stamprally-core-app v0.25.4
 
 A headless, storage-agnostic stamp rally engine with React, participant UI, authoring UI, and Web Standard server integration.
 
@@ -35,7 +35,7 @@ import { RallyViewer } from "@stamprally/ui";
 
 const adminConfig: AdminRallyConfig = {
   id: "city-tour",
-  version: "0.25.3",
+  version: "0.25.4",
   title: { ja: "街歩きラリー", en: "City Tour" },
   spots: [
     {
@@ -65,6 +65,12 @@ current-location-based next spot suggestions through `nextAction` and
 `onNavigate`; it never imports a map SDK. Configure `completion` with
 `all_spots`, `stamp_count`, or selected `stamps`. Omitted completion preserves
 the legacy all-spots rule.
+
+Availability schedules, reward progress, reward-goal suggestions, and publish
+readiness analysis are available from `@stamprally/core`; the participant and
+admin packages render these results without adding a map or routing dependency.
+See the [feature guide](docs/GUIDE.md#availability-reward-goals-and-preflight) and
+[API reference](docs/API_REFERENCE.md#availability-reward-progress-and-preflight).
 
 ## Runtime validation
 

@@ -79,3 +79,32 @@ false-to-true transition, not for an already-completed initial state.
 The other supported conditions are `stamp_count` and selected `stamps`; the
 runtime parser rejects non-positive counts, empty/duplicate selections, and
 unknown spot IDs.
+
+## Availability, reward progress, and preflight
+
+`RallyAvailability`, `SpotAvailability`, `WeeklyAvailability`,
+`AvailabilityException`, and `AvailabilityHours` are optional public config
+types. Weekly days use JavaScript weekday numbering (`0` is Sunday); hours use
+24-hour `HH:mm` values and may cross midnight. Pass an ISO timestamp explicitly
+to `evaluateRallyAvailability(availability, now)` or
+`evaluateSpotAvailability(availability, now)`. These pure functions return an
+`AvailabilityResult` whose status is `OPEN`, `CLOSED`, `UPCOMING`, or `ENDED`.
+An absent availability setting evaluates to `OPEN`.
+
+`getNextSpotSuggestions` supports `strategy: "order" | "nearest" |
+"reward_goal"`, optional `rewardId`, and optional `now` plus
+`availability: "open_first" | "exclude_closed"`. Existing callers that omit
+these fields keep the old order/nearest behavior.
+
+`calculateRewardProgress(rewardId, state, config)` returns `RewardProgress`
+(`isUnlocked`, `acquired`, `required`, `percentage`, and `missingStampIds`), or
+`undefined` for an unknown reward. `requiredStampCount` remains required, and
+each configured unlock condition is additionally required. Top-level conditions
+are ANDed. The same nested condition evaluation drives reward-state
+reconciliation.
+
+`simulateRallyProgression(config)` returns reachable spot IDs, unlockable reward
+IDs, and completion reachability. `analyzeRallyExperience(config, options?)`
+returns `ExperienceIssue[]` with severity, stable code, path, message, and
+related IDs. It is an advisory pure analysis API; publication remains the host
+application's responsibility.

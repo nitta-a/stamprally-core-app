@@ -14,12 +14,20 @@ import type {
   SupportedLocale,
 } from "@stamprally/core";
 import {
+  analyzeRallyExperience,
   DEFAULT_SHEET_THEME,
   resolveLocalizedText,
   safeParseAdminConfig,
   updateLocalizedField,
   validateLocalizationCompleteness,
 } from "@stamprally/core";
+import { AvailabilityEditor } from "./AvailabilityEditor.js";
+import { formatDateTimeLocal, parseDateTimeLocal } from "./availabilityDateTime.js";
+
+export type { AvailabilityEditorProps } from "./AvailabilityEditor.js";
+export { AvailabilityEditor } from "./AvailabilityEditor.js";
+export { formatDateTimeLocal, parseDateTimeLocal } from "./availabilityDateTime.js";
+
 import {
   type Dispatch,
   type ReactElement,
@@ -755,6 +763,17 @@ export function SpotItemForm<
           }
         />
       </label>
+      <AvailabilityEditor
+        locale={activeLocale}
+        {...(dictionary === undefined ? {} : { dictionary })}
+        {...(spot.availability === undefined ? {} : { value: spot.availability })}
+        onChange={(availability) => {
+          if (availability === undefined) {
+            const { availability: _availability, ...rest } = spot;
+            onChange(rest);
+          } else update({ availability });
+        }}
+      />
       <ExternalReferencesEditor
         references={spot.externalReferences ?? []}
         onChange={(externalReferences) => update({ externalReferences })}
@@ -1466,9 +1485,24 @@ export function AdminRallyEditor<
     onChange({ ...config, ...next });
   const updateSpots = (spots: ReadonlyArray<SpotItem<TLocale, TMeta>>): void =>
     update({ spots: spots.map((spot, index) => ({ ...spot, orderIndex: index })) });
+  const preflight = analyzeRallyExperience(config, { targetLocales: previewLocales });
   return (
     <section aria-label={field("rallyEditor", "Rally editor")}>
       <h1>{resolveLocalizedText(config.title, activeLocale)}</h1>
+      <section aria-label={field("preflight.title", "Publish readiness")}>
+        <h2>{field("preflight.title", "Publish readiness")}</h2>
+        {preflight.length === 0 ? (
+          <p>{field("preflight.clear", "No issues found.")}</p>
+        ) : (
+          preflight.map((issue, index) => (
+            <article key={`${issue.code}-${issue.path ?? index}`} data-severity={issue.severity}>
+              <strong>{field(`preflight.${issue.severity}`, issue.severity.toUpperCase())}</strong>
+              <p>{issue.message}</p>
+              {issue.path !== undefined && <code>{issue.path}</code>}
+            </article>
+          ))
+        )}
+      </section>
       <label>
         {field("title", "Title")}
         <input
@@ -1493,6 +1527,51 @@ export function AdminRallyEditor<
           }
         />
       </label>
+      <fieldset>
+        <legend>{field("rallyAvailability", "Rally availability")}</legend>
+        {(["startsAt", "endsAt"] as const).map((key) => (
+          <label key={key}>
+            {field(`availability.${key}`, key)}
+            <input
+              type="datetime-local"
+              value={
+                config.availability?.[key] === undefined
+                  ? ""
+                  : formatDateTimeLocal(
+                      config.availability[key],
+                      config.availability.timezone ?? "UTC",
+                    )
+              }
+              onChange={(event) => {
+                const availability = { ...config.availability };
+                if (event.target.value === "") delete availability[key];
+                else {
+                  const parsed = parseDateTimeLocal(
+                    event.target.value,
+                    availability.timezone ?? "UTC",
+                  );
+                  if (parsed === undefined) return;
+                  availability[key] = parsed;
+                }
+                update({ availability });
+              }}
+            />
+          </label>
+        ))}
+        <label>
+          {field("availability.timezone", "Timezone")}
+          <input
+            value={config.availability?.timezone ?? ""}
+            placeholder="Asia/Tokyo"
+            onChange={(event) => {
+              const availability = { ...config.availability };
+              if (event.target.value === "") delete availability.timezone;
+              else availability.timezone = event.target.value;
+              update({ availability });
+            }}
+          />
+        </label>
+      </fieldset>
       <ThemeEditor
         theme={config.theme ?? DEFAULT_SHEET_THEME}
         locale={activeLocale}

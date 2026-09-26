@@ -65,7 +65,13 @@ function initialState<TLocale extends string>(
   const spotIds = new Set(config.spots.map((spot) => spot.id));
   const stampIds = [...new Set(options.initialStamps ?? [])].filter((id) => spotIds.has(id));
   const records = stampIds.map((stampId) => ({ stampId, acquiredAt: now }));
-  const configuredRewards = reconcileRewardStates(config.rewards, [], records.length, now);
+  const configuredRewards = reconcileRewardStates(
+    config.rewards,
+    [],
+    records.length,
+    now,
+    new Set(stampIds),
+  );
   const rewardOverrides = options.initialRewards ?? {};
   const rewards = configuredRewards.map((reward) => rewardOverrides[reward.rewardId] ?? reward);
   return { rallyId: config.id, userId: "mock-user", records, rewards, updatedAt: now };

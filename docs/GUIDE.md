@@ -1,4 +1,4 @@
-# Stamp Rally v0.25.3 Guide
+# Stamp Rally v0.25.4 Guide
 
 ## Viewer
 
@@ -41,6 +41,46 @@ behavior.
 
 `StampSheet` exposes the same card, slot, header, footer, class, and style
 extension points for read-only progress views.
+
+## Availability, reward goals, and preflight
+
+Availability is optional. A rally can set ISO 8601 `startsAt` / `endsAt`
+timestamps. A spot can define a timezone, weekday schedules (`dayOfWeek` uses
+Sunday `0` through Saturday `6`), multiple `HH:mm` periods, and date-specific
+closures or replacement hours. A closing time earlier than its opening time
+continues into the next day. Unconfigured spots remain always open.
+
+```ts
+const availability = {
+  timezone: "Asia/Tokyo",
+  weekly: [{ dayOfWeek: 6, hours: [{ opensAt: "09:00", closesAt: "17:00" }] }],
+  exceptions: [{ date: "2026-10-10", closed: true }],
+};
+
+const status = evaluateSpotAvailability(availability, "2026-10-03T02:00:00.000Z");
+// { status: "OPEN" }
+```
+
+`evaluateRallyAvailability` and `evaluateSpotAvailability` are pure: pass the
+instant explicitly. Config parsers validate timezone names, date ranges,
+weekdays, times, and overlapping periods. Both editors expose rally date/time
+fields and structured weekly/special-date inputs. Participant viewers display
+availability, and `nextAction` prioritizes open spots; `availability:
+"exclude_closed"` removes non-open suggestions.
+
+`calculateRewardProgress(rewardId, state, config)` returns the unlock state,
+percentage, and missing spot IDs. The legacy `requiredStampCount` remains in
+effect; configured nested unlock conditions are additional requirements, with
+top-level conditions combined using AND and nested `all` / `any` kept intact.
+Set `nextAction={{ strategy: "reward_goal", rewardId: "prize" }}` to prioritize
+the spots that satisfy that reward. The host still owns map navigation.
+
+`simulateRallyProgression(config)` computes prerequisite reachability and
+unlockable rewards. `analyzeRallyExperience(config, { targetLocales })` reports
+errors, warnings, and info for unreachable spots, impossible completion or
+rewards, missing translations, limited check-in fallbacks, and other usability
+issues. `AdminRallyEditor` and `MuiAdminRallyEditor` show the report; hosts can
+also gate publication with `issues.some(({ severity }) => severity === "error")`.
 
 ## Admin UI and headless editing
 

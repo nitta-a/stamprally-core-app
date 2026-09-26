@@ -1,8 +1,33 @@
-import { act, fireEvent, render, renderHook, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
-import { AdminRallyEditor, JsonConfigIO, useAdminRallyEditor } from "../src/index.js";
+import { act, cleanup, fireEvent, render, renderHook, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { AdminRallyEditor, JsonConfigIO, SpotItemForm, useAdminRallyEditor } from "../src/index.js";
+
+afterEach(() => cleanup());
 
 describe("AdminRallyEditor", () => {
+  it("shows preflight findings and edits structured spot hours", () => {
+    const onChange = vi.fn();
+    render(
+      <>
+        <AdminRallyEditor
+          config={{ id: "r", version: "1", title: "Rally", spots: [], rewards: [] }}
+          onChange={vi.fn()}
+        />
+        <SpotItemForm
+          spot={{ id: "spot", orderIndex: 0, name: "Spot", conditions: [] }}
+          onChange={onChange}
+        />
+      </>,
+    );
+    expect(screen.getByRole("heading", { name: "Publish readiness" })).toBeTruthy();
+    const addHoursButton = screen.getAllByRole("button", { name: "Add hours" })[0];
+    if (addHoursButton === undefined) throw new Error("Expected an add-hours control.");
+    fireEvent.click(addHoursButton);
+    expect(onChange.mock.lastCall?.[0].availability?.weekly).toEqual([
+      { dayOfWeek: 0, hours: [{ opensAt: "09:00", closesAt: "17:00" }] },
+    ]);
+  });
+
   it("edits the canonical admin model", () => {
     const onChange = vi.fn();
     render(

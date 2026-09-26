@@ -1,10 +1,13 @@
+import type { PublicReward } from "@stamprally/core";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   AccountBackupBanner,
   CloudSyncButton,
+  CompletionPanel,
   GpsProximityMeter,
+  NextActionPanel,
   RallyViewer,
   StaffRedemptionView,
   SyncStatusBanner,
@@ -51,6 +54,182 @@ describe("cloud account components", () => {
 });
 
 describe("RallyViewer", () => {
+  it("keeps reward viewing separate from claiming and hides navigation without a location", () => {
+    const onViewReward = vi.fn();
+    const onClaimReward = vi.fn();
+    const onNavigate = vi.fn();
+    const reward: PublicReward = {
+      id: "reward",
+      title: "Prize",
+      type: "digital",
+      redemptionMethod: "view_only",
+      requiredStampCount: 0,
+    };
+    render(
+      <>
+        <CompletionPanel
+          progress={{
+            acquired: 1,
+            total: 1,
+            percentage: 100,
+            isCompleted: true,
+            completionAcquired: 1,
+            completionRequired: 1,
+            completionPercentage: 100,
+            nextAvailableSpots: [],
+          }}
+          rewards={[reward]}
+          rewardStates={[{ rewardId: "reward", status: "AVAILABLE" }]}
+          locale="ja"
+          onViewReward={onViewReward}
+          onClaimReward={onClaimReward}
+        />
+        <NextActionPanel
+          suggestions={[
+            { spot: { id: "without", orderIndex: 0, name: "No location", conditions: [] } },
+            {
+              spot: {
+                id: "with",
+                orderIndex: 1,
+                name: "With location",
+                conditions: [],
+                location: { latitude: 35, longitude: 139 },
+              },
+            },
+          ]}
+          locale="ja"
+          onNavigate={onNavigate}
+        />
+      </>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "特典を見る" }));
+    expect(onViewReward).toHaveBeenCalledWith("reward");
+    expect(onClaimReward).not.toHaveBeenCalled();
+    expect(screen.getAllByRole("button", { name: "案内を見る" })).toHaveLength(1);
+  });
+
+  it("shows only unclaimed spots as the completed primary list", () => {
+    render(
+      <RallyViewer
+        locale="ja"
+        adapter={{
+          config: {
+            id: "r",
+            version: "1",
+            title: "Rally",
+            completion: { condition: { type: "stamp_count", count: 1 } },
+            spots: [
+              { id: "done", orderIndex: 0, name: "取得済み", conditions: [] },
+              { id: "left", orderIndex: 1, name: "未取得", conditions: [] },
+            ],
+            rewards: [],
+          },
+          state: {
+            rallyId: "r",
+            userId: null,
+            records: [{ stampId: "done", acquiredAt: "" }],
+            rewards: [],
+            updatedAt: "",
+          },
+          onCheckIn: vi.fn(),
+        }}
+      />,
+    );
+    expect(screen.getByRole("heading", { name: "もっと楽しむ" })).toBeTruthy();
+    expect(screen.getAllByText("未取得")).toHaveLength(2);
+    expect(screen.getByText(/取得済み\s*\(1\)/)).toBeTruthy();
+  });
+
+  it("shows availability and remaining spots for a reward goal", () => {
+    render(
+      <RallyViewer
+        locale="ja"
+        nextAction={{ strategy: "reward_goal", rewardId: "prize", now: "2026-09-26T12:00:00Z" }}
+        adapter={{
+          config: {
+            id: "r",
+            version: "1",
+            title: "Rally",
+            spots: [
+              {
+                id: "closed",
+                orderIndex: 0,
+                name: "Closed spot",
+                conditions: [],
+                availability: { timezone: "UTC", weekly: [] },
+              },
+              {
+                id: "target",
+                orderIndex: 1,
+                name: "Target spot",
+                conditions: [],
+                availability: {
+                  timezone: "UTC",
+                  weekly: [{ dayOfWeek: 6, hours: [{ opensAt: "09:00", closesAt: "17:00" }] }],
+                },
+              },
+            ],
+            rewards: [
+              {
+                id: "prize",
+                title: "Prize",
+                type: "digital",
+                redemptionMethod: "view_only",
+                requiredStampCount: 1,
+                conditions: [{ type: "stamps", stampIds: ["target"] }],
+              },
+            ],
+          },
+          state: {
+            rallyId: "r",
+            userId: null,
+            records: [],
+            rewards: [{ rewardId: "prize", status: "LOCKED" }],
+            updatedAt: "",
+          },
+          onCheckIn: vi.fn(),
+        }}
+      />,
+    );
+    expect(screen.getAllByText("営業中").length).toBeGreaterThan(0);
+    expect(screen.getByRole("heading", { name: "Target spot" })).toBeTruthy();
+    expect(screen.getByText("0 / 1")).toBeTruthy();
+    expect(screen.getByText("Target spot", { selector: "li" })).toBeTruthy();
+  });
+
+  it("omits explore mode when every spot is claimed and counts all next candidates", () => {
+    const suggestions = Array.from({ length: 10 }, (_, index) => ({
+      spot: { id: `spot-${index}`, orderIndex: index, name: `Spot ${index}`, conditions: [] },
+    }));
+    render(
+      <>
+        <RallyViewer
+          locale="en"
+          adapter={{
+            config: {
+              id: "r",
+              version: "1",
+              title: "Rally",
+              spots: [{ id: "done", orderIndex: 0, name: "Done", conditions: [] }],
+              rewards: [],
+            },
+            state: {
+              rallyId: "r",
+              userId: null,
+              records: [{ stampId: "done", acquiredAt: "" }],
+              rewards: [],
+              updatedAt: "",
+            },
+            onCheckIn: vi.fn(),
+          }}
+        />
+        <NextActionPanel suggestions={suggestions} locale="ja" maxSuggestions={3} />
+      </>,
+    );
+    expect(screen.queryByRole("heading", { name: "More to explore" })).toBeNull();
+    expect(screen.getByText(/他に行けるスポット\s*\(9\)/)).toBeTruthy();
+  });
+
   it("switches to completed mode without firing the completion callback on initial load", () => {
     const onNavigate = vi.fn();
     const onCompleted = vi.fn();

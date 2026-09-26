@@ -52,6 +52,30 @@ export interface SpotLocation<TLocale extends string = string> {
   readonly address?: LocalizedText<TLocale>;
 }
 
+export interface AvailabilityHours {
+  readonly opensAt: string;
+  readonly closesAt: string;
+}
+export interface WeeklyAvailability {
+  readonly dayOfWeek: number;
+  readonly hours: ReadonlyArray<AvailabilityHours>;
+}
+export interface AvailabilityException {
+  readonly date: string;
+  readonly closed?: boolean;
+  readonly hours?: ReadonlyArray<AvailabilityHours>;
+}
+export interface SpotAvailability {
+  readonly timezone?: string;
+  readonly weekly?: ReadonlyArray<WeeklyAvailability>;
+  readonly exceptions?: ReadonlyArray<AvailabilityException>;
+}
+export interface RallyAvailability {
+  readonly startsAt?: string;
+  readonly endsAt?: string;
+  readonly timezone?: string;
+}
+
 export type CheckInCondition =
   | { readonly type: "qr"; readonly secretToken: string; readonly qrEntryUrl?: string }
   | { readonly type: "passcode"; readonly code: string; readonly caseSensitive?: boolean }
@@ -97,6 +121,7 @@ export interface SpotItem<
   readonly conditions: ReadonlyArray<CheckInCondition>;
   readonly prerequisites?: ReadonlyArray<string>;
   readonly location?: SpotLocation<TLocale>;
+  readonly availability?: SpotAvailability;
 }
 export type PublicSpotItem<
   TLocale extends string = string,
@@ -171,6 +196,7 @@ export interface AdminRallyConfig<
   /** Explicit public metadata name. `metadata` remains supported for compatibility. */
   readonly publicMetadata?: TMeta;
   readonly completion?: RallyCompletionConfig;
+  readonly availability?: RallyAvailability;
   readonly serverEndpoint?: string;
 }
 export interface PublicRallyConfig<
@@ -186,6 +212,7 @@ export interface PublicRallyConfig<
   readonly rewards: ReadonlyArray<PublicReward<TLocale>>;
   readonly metadata?: TMeta;
   readonly completion?: RallyCompletionConfig;
+  readonly availability?: RallyAvailability;
   readonly serverEndpoint?: string;
 }
 export type RallyConfig<

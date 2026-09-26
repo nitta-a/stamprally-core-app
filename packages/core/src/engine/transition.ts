@@ -4,6 +4,7 @@ import type {
   Result,
   Reward,
   RewardState,
+  RewardUnlockCondition,
   StampError,
   StampRallyState,
   StampRecord,
@@ -43,12 +44,23 @@ export interface ConsumeRewardParams {
   readonly now: string;
   readonly userRedemptionCount?: number;
 }
+function unlockConditionMet(
+  condition: RewardUnlockCondition,
+  stampIds: ReadonlySet<string>,
+  count: number,
+): boolean {
+  if (condition.type === "stamp_count") return count >= condition.count;
+  if (condition.type === "stamps") return condition.stampIds.every((id) => stampIds.has(id));
+  const results = condition.conditions.map((child) => unlockConditionMet(child, stampIds, count));
+  return condition.type === "all" ? results.every(Boolean) : results.some(Boolean);
+}
 export type ConsumeResult = Result<RewardState, RewardConsumeError>;
 export function reconcileRewardStates(
   rewards: ReadonlyArray<Reward>,
   currentStates: ReadonlyArray<RewardState>,
   acquiredStampCount: number,
   now: string,
+  acquiredStampIds: ReadonlySet<string> = new Set(),
 ): ReadonlyArray<RewardState> {
   const states = new Map(currentStates.map((state) => [state.rewardId, state]));
   return rewards.map((reward) => {
@@ -58,7 +70,12 @@ export function reconcileRewardStates(
       return { rewardId: reward.id, status: "EXPIRED" };
     if (reward.stockLimit !== undefined && (current?.redeemedCount ?? 0) >= reward.stockLimit)
       return { rewardId: reward.id, status: "EXPIRED" };
-    if (acquiredStampCount >= reward.requiredStampCount)
+    if (
+      acquiredStampCount >= reward.requiredStampCount &&
+      (reward.conditions ?? []).every((condition) =>
+        unlockConditionMet(condition, acquiredStampIds, acquiredStampCount),
+      )
+    )
       return {
         rewardId: reward.id,
         status: "AVAILABLE",
@@ -146,7 +163,13 @@ export function processStamp(
   }
   const record: StampRecord = { stampId: spotId, acquiredAt: now };
   const records = [...state.records, record];
-  const rewards = reconcileRewardStates(config.rewards, state.rewards, records.length, now);
+  const rewards = reconcileRewardStates(
+    config.rewards,
+    state.rewards,
+    records.length,
+    now,
+    new Set(records.map(({ stampId }) => stampId)),
+  );
   return {
     ok: true,
     value: {

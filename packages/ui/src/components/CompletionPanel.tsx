@@ -6,6 +6,7 @@ import type {
 } from "@stamprally/core";
 import { resolveLocalizedText } from "@stamprally/core";
 import type { ReactElement } from "react";
+import { resolveUiLabel } from "../locales/index.js";
 
 export interface CompletionPanelProps<TLocale extends string = string> {
   readonly progress: StampRallyProgress;
@@ -13,16 +14,10 @@ export interface CompletionPanelProps<TLocale extends string = string> {
   readonly rewardStates: ReadonlyArray<RewardState>;
   readonly locale: TLocale;
   readonly dictionary?: LocaleDictionary<TLocale>;
+  readonly onViewReward?: (rewardId: string) => void;
   readonly onClaimReward?: (rewardId: string) => void;
   readonly className?: string;
 }
-
-const label = <TLocale extends string>(
-  dictionary: LocaleDictionary<TLocale> | undefined,
-  locale: TLocale,
-  key: string,
-  fallback: string,
-): string => dictionary?.[locale]?.[key] ?? fallback;
 
 export function CompletionPanel<TLocale extends string = string>({
   progress,
@@ -30,6 +25,7 @@ export function CompletionPanel<TLocale extends string = string>({
   rewardStates,
   locale,
   dictionary,
+  onViewReward,
   onClaimReward,
   className,
 }: CompletionPanelProps<TLocale>): ReactElement {
@@ -40,11 +36,11 @@ export function CompletionPanel<TLocale extends string = string>({
     <section
       className={className}
       aria-live="polite"
-      aria-label={label(dictionary, locale, "completion.title", "Rally complete")}
+      aria-label={resolveUiLabel(dictionary, locale, "completion.title", "Rally complete")}
     >
-      <h2>{label(dictionary, locale, "completion.title", "Stamp rally complete!")}</h2>
+      <h2>{resolveUiLabel(dictionary, locale, "completion.title", "Stamp rally complete!")}</h2>
       <p>
-        {label(
+        {resolveUiLabel(
           dictionary,
           locale,
           "completion.description",
@@ -53,13 +49,25 @@ export function CompletionPanel<TLocale extends string = string>({
       </p>
       {availableRewards.length > 0 && (
         <div>
-          <p>{label(dictionary, locale, "completion.rewardAvailable", "A reward is available")}</p>
+          <p>
+            {resolveUiLabel(
+              dictionary,
+              locale,
+              "completion.rewardAvailable",
+              "A reward is available",
+            )}
+          </p>
           {availableRewards.map((reward) => (
             <div key={reward.id}>
               <span>{resolveLocalizedText(reward.title, locale)}</span>
-              {onClaimReward === undefined ? null : (
+              {onViewReward !== undefined && (
+                <button type="button" onClick={() => onViewReward(reward.id)}>
+                  {resolveUiLabel(dictionary, locale, "completion.viewReward", "View reward")}
+                </button>
+              )}
+              {onClaimReward !== undefined && reward.redemptionMethod !== "view_only" && (
                 <button type="button" onClick={() => onClaimReward(reward.id)}>
-                  {label(dictionary, locale, "completion.viewReward", "View reward")}
+                  {resolveUiLabel(dictionary, locale, "reward.redeem", "Redeem reward")}
                 </button>
               )}
             </div>

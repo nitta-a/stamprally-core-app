@@ -20,6 +20,8 @@ export {
 } from "./i18n.js";
 export type {
   AdminRallyConfig,
+  AvailabilityException,
+  AvailabilityHours,
   CheckInCondition,
   CompletionCondition,
   ExternalReference,
@@ -32,6 +34,7 @@ export type {
   PublicRallyConfig,
   PublicReward,
   PublicSpotItem,
+  RallyAvailability,
   RallyCompletionConfig,
   RallyConfig,
   RallyInventory,
@@ -44,6 +47,7 @@ export type {
   RewardUnlockCondition,
   SheetTheme,
   SlotShape,
+  SpotAvailability,
   SpotItem,
   SpotLocation,
   SpotStatus,
@@ -53,6 +57,7 @@ export type {
   ThemePreset,
   ThemePresetId,
   UserRallyState,
+  WeeklyAvailability,
 } from "./models.js";
 export {
   assertPublicConfig,

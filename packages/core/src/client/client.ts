@@ -743,6 +743,7 @@ export class StampRallyClient {
         state.rewards,
         records.length,
         state.updatedAt,
+        new Set(records.map(({ stampId }) => stampId)),
       ),
     };
   }

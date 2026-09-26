@@ -241,7 +241,13 @@ function applyOperation(
     const rewards =
       config === undefined
         ? state.rewards
-        : reconcileRewardStates(config.rewards, state.rewards, records.length, record.acquiredAt);
+        : reconcileRewardStates(
+            config.rewards,
+            state.rewards,
+            records.length,
+            record.acquiredAt,
+            new Set(records.map(({ stampId }) => stampId)),
+          );
     return {
       state: { ...state, records, rewards, updatedAt: record.acquiredAt },
       prerequisiteFailed: false,
