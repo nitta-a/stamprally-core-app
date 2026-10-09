@@ -1,4 +1,4 @@
-# @stamprally/mui v0.25.5
+# @stamprally/mui v0.25.6
 
 `MuiAccountBackupBanner` and `MuiCloudSyncButton` provide Material UI adapters for the
 host-provided account-link and cloud-sync callbacks.

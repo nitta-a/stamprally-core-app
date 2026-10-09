@@ -1,4 +1,4 @@
-# @stamprally/ui v0.25.5
+# @stamprally/ui v0.25.6
 
 Participant-facing exports include `AccountBackupBanner` and `CloudSyncButton`. They accept
 host callbacks, so Google Identity Services or another provider can be integrated without adding
