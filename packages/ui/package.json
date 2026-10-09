@@ -1,6 +1,6 @@
 {
   "name": "@stamprally/ui",
-  "version": "0.25.4",
+  "version": "0.25.5",
   "description": "Accessible participant UI components for stamp rallies.",
   "license": "MIT",
   "repository": {
@@ -33,7 +33,7 @@
   },
   "scripts": {
     "build": "tsup && node ../../scripts/copy-package-css.mjs packages/ui && node ../../scripts/ensure-client-directive.mjs .",
-    "dev": "tsup --watch",
+    "dev": "tsup --watch --no-clean",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json"
   },

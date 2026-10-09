@@ -4,6 +4,7 @@ import "@stamprally/admin-ui/styles.css";
 import "@stamprally/ui/styles.css";
 import { App } from "./App.js";
 import "./styles.css";
+import "./admin.css";
 
 const rootElement = document.getElementById("root");
 if (rootElement === null) {

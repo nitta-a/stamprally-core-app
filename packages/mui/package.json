@@ -1,6 +1,6 @@
 {
   "name": "@stamprally/mui",
-  "version": "0.25.4",
+  "version": "0.25.5",
   "description": "Material UI adapters for stamp rally viewers and editors.",
   "license": "MIT",
   "repository": {
@@ -35,7 +35,7 @@
   },
   "scripts": {
     "build": "tsup && node ../../scripts/ensure-client-directive.mjs .",
-    "dev": "tsup --watch",
+    "dev": "tsup --watch --no-clean",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json"
   },
