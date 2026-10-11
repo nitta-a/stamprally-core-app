@@ -1,49 +1,31 @@
-# @stamprally/mui v0.25.6
+# @stamprally/mui
 
-`MuiAccountBackupBanner` and `MuiCloudSyncButton` provide Material UI adapters for the
-host-provided account-link and cloud-sync callbacks.
-
-MUI (Material UI) adapter components for `@stamprally/core`. The package provides a themed
-participant viewer and an authoring editor while keeping the domain engine and existing UI packages
-unchanged. MUI, Emotion, React, and React DOM stay in the host application's bundle through peer
-dependencies.
+Material UI participant views and authoring components. Supports React 18 / 19 and MUI 5 / 6; MUI and Emotion are peer dependencies.
 
 ## Install
 
 ```sh
-pnpm add @stamprally/mui @mui/material @mui/icons-material @emotion/react @emotion/styled
+pnpm add @stamprally/core @stamprally/react @stamprally/mui @mui/material @mui/icons-material @emotion/react @emotion/styled
 ```
-
-The package expects React 18 or 19 and MUI 5 or 6. It does not include an authentication provider,
-router, HTTP client, or CMS integration.
 
 ## Viewer
 
-Pass a `PublicRallyConfig` for a read-only sheet, or pass the return value from `useStampRally` as
-`adapter` to enable check-in, reward redemption, and sync status.
+Pass the result of `useStampRally` as `adapter` to enable check-ins, reward redemption, and sync status:
 
 ```tsx
 import { MuiRallyViewer } from "@stamprally/mui";
 import { useStampRally } from "@stamprally/react";
 import type { StampRallyClient } from "@stamprally/core";
 
-export function RallyPage({ client }: { readonly client: StampRallyClient }) {
+export function RallyPage({ client }: { client: StampRallyClient }) {
   const rally = useStampRally(client);
   return <MuiRallyViewer adapter={rally} sx={{ maxWidth: 960, mx: "auto" }} />;
 }
 ```
 
-All components accept `sx`. Cards and lists also expose `slots` and `slotProps`, and the viewer
-supports `renderSpotCard` and `renderRewardCard` for application-specific content.
-
-`MuiRallyViewer` includes the same Next Spot and completion panels as the headless viewer. The
-host owns navigation through `onNavigate`; configure `nextAction` for order or nearest-location
-suggestions and `onCompleted` for completion transitions.
+With only `config={publicConfig}`, the viewer is read-only. Use `nextAction`, `onNavigate`, and `onCompleted` for spot suggestions and completion. Generate public configuration with `toPublicConfig` and verify participant actions on the server.
 
 ## Editor
-
-`MuiAdminRallyEditor` owns `useAdminRallyEditor` internally and returns immutable config updates
-through `onChange`.
 
 ```tsx
 import { MuiAdminRallyEditor } from "@stamprally/mui";
@@ -51,29 +33,14 @@ import { MuiAdminRallyEditor } from "@stamprally/mui";
 <MuiAdminRallyEditor config={adminConfig} onChange={setAdminConfig} locale="ja" />;
 ```
 
-The editor includes Basic settings, Spots, Rewards, Metadata, and Theme tabs. The lower-level
-`MuiSpotEditor`, `MuiSpotList`, `MuiRewardEditor`, and `MuiMetadataEditor` can be composed into a
-custom authoring flow.
+The editor provides rally, spot, reward, availability, metadata, and theme settings with preflight checks. Compose lower-level editors for a custom authoring flow.
 
-## Theme integration
+## Customization
 
-The adapter does not create a theme or override the host theme. Wrap it with MUI's
-`ThemeProvider` to use custom palettes and dark mode:
+Wrap components with the host's `ThemeProvider` for palettes and dark mode. Use `sx`, card/list `slots` and `slotProps`, or viewer render props to customize presentation. `MuiAccountBackupBanner` and `MuiCloudSyncButton` accept host callbacks for account backup.
 
-```tsx
-import { createTheme, ThemeProvider } from "@mui/material/styles";
+See the [MUI example](https://github.com/nitta-a/stamprally-core-app/tree/main/examples/mui-app) for viewer and editor screens.
 
-const theme = createTheme({
-  palette: {
-    mode: "dark",
-    primary: { main: "#8bd3dd" },
-  },
-});
+## License
 
-<ThemeProvider theme={theme}>
-  <MuiRallyViewer config={publicConfig} />
-</ThemeProvider>;
-```
-
-See [`examples/mui-app`](../../examples/mui-app) for a Vite example containing both viewer and
-editor screens.
+MIT

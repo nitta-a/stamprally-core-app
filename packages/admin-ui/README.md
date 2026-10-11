@@ -1,41 +1,41 @@
-# @stamprally/admin-ui v0.25.6
+# @stamprally/admin-ui
 
-Accessible authoring forms and a headless editor for rally management screens.
+Accessible authoring forms and headless editing hooks for React 18 / 19.
 
-## Structured editor
+## Setup
+
+```sh
+pnpm add @stamprally/core @stamprally/admin-ui
+```
 
 ```tsx
 import { AdminRallyEditor } from "@stamprally/admin-ui";
 import "@stamprally/admin-ui/styles.css";
 
-<AdminRallyEditor config={config} locale="en" onChange={setConfig} />
+<AdminRallyEditor config={adminConfig} locale="en" onChange={setAdminConfig} />;
 ```
 
-The editor provides structured fields for localized rally and reward content,
-reward limits and expiry, all condition types, theme properties, and separate
-public/server metadata sections. `JsonConfigIO` remains available for import/export
-and validation workflows, but normal editing does not require JSON.
+Edit rally content, spots, conditions, availability, rewards, localization, metadata, and theme fields. The editor includes publish-readiness analysis; `JsonConfigIO` handles validated JSON import/export.
 
-## Headless API
+## Headless editing
 
-`useAdminRallyEditor(initialConfig)` returns immutable editing actions:
+Use `useAdminRallyEditor` to build a custom editor:
 
 ```tsx
-const editor = useAdminRallyEditor(config, { onChange: saveDraft });
+import { useAdminRallyEditor } from "@stamprally/admin-ui";
+
+const editor = useAdminRallyEditor(adminConfig, { onChange: saveDraft });
 editor.addSpot({ name: { en: "Museum" }, conditions: [{ type: "qr", secretToken: "" }] });
-editor.duplicateReward("reward-1");
 editor.reorderSpots(2, 0);
-editor.reorderRewards(1, 0);
 editor.undo();
 ```
 
-Use `canUndo`/`canRedo` to control history buttons. `resetConfig(newConfig)` replaces
-the current draft when an external CMS update arrives. `updateLocalizedField` accepts
-paths such as `title`, `description`, `spots.0.name`, or `spots.spot-1.name`.
-Updates use functional React state transitions, so consecutive updates are not
-lost. External configuration changes replace a clean draft automatically; call
-`resetConfig(newConfig)` to explicitly accept a conflicting external draft.
+Actions update configuration immutably. Use `canUndo` / `canRedo` for history controls and `resetConfig` to replace the draft. Localized field updates preserve other languages.
 
-The editor preserves inventory configuration fields such as `stockKey` and
-`secondaryStockKey`; the server adapter remains responsible for enforcing the
-atomic secondary-stock contract and its fail-closed behavior.
+Keep the resulting `AdminRallyConfig` private and publish only `toPublicConfig(adminConfig)`. Reward inventory enforcement belongs to the server persistence adapter.
+
+See the [feature guide](https://github.com/nitta-a/stamprally-core-app/blob/main/docs/GUIDE.md#admin-ui-and-headless-editing) for editing and preflight details.
+
+## License
+
+MIT

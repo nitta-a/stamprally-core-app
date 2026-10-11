@@ -1,71 +1,34 @@
-# @stamprally/ui v0.25.6
+# @stamprally/ui
 
-Participant-facing exports include `AccountBackupBanner` and `CloudSyncButton`. They accept
-host callbacks, so Google Identity Services or another provider can be integrated without adding
-an authentication SDK dependency to this package.
-
-Participant-facing React components for `@stamprally/core`.
+Accessible participant components for React 18 / 19: rally viewing, check-ins, progress, rewards, and synchronization status.
 
 ## Setup
+
+```sh
+pnpm add @stamprally/core @stamprally/react @stamprally/ui
+```
 
 ```tsx
 import { RallyViewer } from "@stamprally/ui";
 import "@stamprally/ui/styles.css";
 
-<RallyViewer config={publicConfig} locale="en" />;
+<RallyViewer config={publicConfig} client={client} locale="en" />;
 ```
 
-For a stateful client, pass `client={new StampRallyClient(publicConfig, options)}`.
-The viewer subscribes to client state, renders all configured verification conditions,
-and exposes check-in and reward actions through the same client.
+Pass a stable `StampRallyClient` or a server-backed `adapter` to enable participant actions. With only `config`, the viewer displays a read-only sheet. Publish configuration through `toPublicConfig`; keep verification secrets and server-only metadata on the server.
 
-## Render Props customization
+## Customization
 
-`renderSpotCard`, `renderRewardCard`, `renderStatusBadge`, and the header/footer slots
-allow a host application to replace presentation while retaining the domain engine.
-`customConditionRenderers` can provide an application-specific QR, NFC, or custom
-verification control. A custom renderer calls `onSubmit(proof)` when it has a proof.
+- `locale` and `dictionary`: localized content and UI labels.
+- `renderSpotCard`, `renderRewardCard`, `renderStatusBadge`, and header/footer slots: custom presentation.
+- `customConditionRenderers`: custom verification controls that submit proof through `onSubmit`.
+- `nextAction`, `onNavigate`, `onCompleted`: spot suggestions, host-owned navigation, and completion callbacks.
+- `showSyncStatus`, `renderSyncStatus`: the built-in sync banner or a custom status view.
 
-```tsx
-<RallyViewer
-  config={publicConfig}
-  locale="ja"
-  renderStatusBadge={({ status }) => <span data-status={status}>{status}</span>}
-  renderSpotCard={({ spot, children }) => <article><h2>{spot.name}</h2>{children}</article>}
-/>
-```
+The viewer includes next-action, completion, and sync panels. `StampSheet` provides a read-only progress view; `AccountBackupBanner` and `CloudSyncButton` accept host callbacks for account backup.
 
-Keep private condition secrets, staff passcodes, digital content URLs, and
-`serverMetadata` in the server-side `AdminRallyConfig`; publish only the result of
-`toPublicConfig`.
+See the [feature guide](https://github.com/nitta-a/stamprally-core-app/blob/main/docs/GUIDE.md) for rendering examples, availability, and reward goals.
 
-Standard cards render localized descriptions and hints, spot imagery and external
-reference badges, plus reward descriptions, stock, expiry, and status. Spot cards
-with incomplete prerequisites show a lock and disable verification controls.
-The status badge values are `UNCLAIMED`, `CLAIMED`, `LOCKED`, and `VERIFYING`.
+## License
 
-`RallyViewer` renders `NextActionPanel` and `CompletionPanel` by default. Configure
-`nextAction` for order or nearest-location suggestions, provide `onNavigate` for host-owned
-directions, and use `onCompleted` to react when the configured completion condition becomes true.
-
-## Synchronization status
-
-`RallyViewer` displays `SyncStatusBanner` by default. Set `showSyncStatus={false}`
-to hide it, or use `renderSyncStatus` for a custom renderer:
-
-```tsx
-<RallyViewer
-  config={publicConfig}
-  client={client}
-  showSyncStatus
-  renderSyncStatus={(status) => (
-    <aside data-sync-state={status.syncState}>
-      {status.pendingCount} pending; {status.rejectedHistory.length} rejected
-    </aside>
-  )}
-/>
-```
-
-`SyncStatusBanner` accepts the same `SyncStateContext` directly, so applications
-can place it outside the viewer. The context exposes pending work, rejected
-history, persistence capability, and whether synchronization is active.
+MIT

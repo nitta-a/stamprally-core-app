@@ -1,87 +1,47 @@
-# @stamprally/core v0.25.6
+# @stamprally/core
 
-Dependency-free domain models, immutable state transitions, storage adapters, browser detectors, and safe configuration parsers.
+Dependency-free domain models, immutable state transitions, storage adapters, browser detectors, and configuration parsers.
 
-The client exposes provider-neutral `linkAccount`, `exportCloudSnapshot`, and
-`importCloudSnapshot` methods through a host-provided `CloudSyncAdapter`. Use
-`migrateAnonymousProgress` to merge an anonymous session into a verified account without
-mutating either input state.
+## Setup
+
+```sh
+pnpm add @stamprally/core
+```
 
 ```ts
 import { InMemoryStorage, StampRallyClient, type PublicRallyConfig } from "@stamprally/core";
 
 const config: PublicRallyConfig = {
   id: "city-tour",
-  version: "0.25.6",
+  version: "1",
   title: "City Tour",
   spots: [{ id: "station", orderIndex: 0, name: "Central Station", conditions: [{ type: "passcode" }] }],
   rewards: [],
 };
-const client = new StampRallyClient(config, new InMemoryStorage());
+const client = new StampRallyClient(config, { storage: new InMemoryStorage() });
 await client.init();
-const result = await client.checkIn("station", "ARRIVED");
 ```
 
-Use `toPublicConfig(adminConfig)` to remove QR tokens, passcodes, NFC identifiers, custom secret parameters, staff credentials, and gated digital content before sending configuration to a browser. Use `safeParseAdminConfig` and `safeParsePublicConfig` at JSON boundaries; failures include paths such as `spots[0].conditions[1].latitude`.
+Use `client.checkIn(spotId, proof)` and `client.claimReward(rewardId)` for participant actions. Connect a `syncAdapter` for server verification; the local client does not verify secret passcodes or enforce authoritative inventory.
 
-The browser detectors `getCurrentGeoContext`, `readNfcContext`, and `readQrContext` return typed results and do not throw for unsupported environments, denied permissions, timeouts, or device errors. Keep manual fallbacks for browsers without Web NFC or `BarcodeDetector`.
+## Configuration and progress
 
-`InMemoryStorage`, `LocalStorageAdapter`, and `IndexedDBAdapter` implement `StampStorage`. `updateLocalizedField` updates one locale without dropping existing translations.
+- Keep `AdminRallyConfig` private and publish `toPublicConfig(adminConfig)`, which removes verification secrets and server-only data.
+- Validate external JSON with `safeParseAdminConfig` / `safeParsePublicConfig`; errors include field paths.
+- Configure prerequisites, completion conditions, availability, and reward requirements. Use `getNextSpotSuggestions` for navigation suggestions and `analyzeRallyExperience` for preflight checks.
+- Use `InMemoryStorage`, `LocalStorageAdapter`, or `IndexedDBAdapter` for progress storage.
 
-Spots may include validated `location` coordinates and localized addresses. Configure
-`completion.condition` with `all_spots`, `stamp_count`, or selected `stamps`; use
-`getNextSpotSuggestions` to derive order-based or nearest-location suggestions without coupling
-the domain engine to a map or navigation provider.
+## Offline and cloud sync
 
-## v0.22.0 offline synchronization
+Pass an `OfflineQueue` scoped by `rallyId` and `userId` to retain pending operations. Sync replays them against the server state: accepted and permanent results leave the queue, while retryable failures remain pending. `queueCapabilities` reports persistence and multi-tab support; without Web Locks, trigger synchronization explicitly from the foreground tab.
 
-Configure `OfflineQueue` with `rallyId` and `userId` to persist pending work under
-`stamprally:queue:<rallyId>:<userId-or-anonymous>`. `switchUser` loads the other
-user's queue. The default `authoritative_replay` policy uses the server state as
-the conflict baseline; it is the only supported conflict policy. Sync adapters may return `ACCEPTED`, `REJECTED_PERMANENT`,
-or `RETRYABLE_ERROR`; only the first two remove an operation.
+Account linking and snapshot backup use a host-provided `CloudSyncAdapter`. See the [Google auth and cloud sync guide](https://github.com/nitta-a/stamprally-core-app/blob/main/docs/GOOGLE_AUTH_SYNC.md) for an integration example.
 
-When no authenticated user is supplied, the client creates a persistent UUID v4
-`anonymousSessionId` and includes it in sync requests. Queue replay uses Web Locks
-when available and supports bounded exponential backoff through `retryOptions`.
+## Browser detectors
 
-### v0.22.0 batch sync, queue capability, and storage capability
+`getCurrentGeoContext`, `readNfcContext`, and `readQrContext` return typed results for unsupported environments, permission failures, timeouts, and device errors. Keep manual input fallbacks.
 
-An adapter can return `SyncProgressResponse` from `sync` when it sends queued
-operations to a server-side `syncProgress` endpoint. The adapter passes queued
-operations to its transport and maps the server request shape as needed:
-
-```ts
-const batchAdapter: SyncAdapter = {
-  sync: async ({ rallyId, userId, state, operations }) =>
-    postBatch({ rallyId, userId, state, operations }),
-};
-await client.sync(batchAdapter);
-```
-
-Each `SyncOperationResult`
-is `ACCEPTED`, `REJECTED_PERMANENT`, or `FAILED_RETRYABLE`. Accepted and permanent
-results are removed from the queue; permanent reasons are added to
-`rejectedHistory`, while retryable operations are kept for the next send. A
-permanent prerequisite failure does not prevent later independent operations from
-being evaluated.
-
-`client.queueCapabilities.multiTabSync` is `"supported_web_locks"` when the Web
-Locks API is available. Otherwise it is `"disabled_unsafe_environment"`:
-cross-tab automatic synchronization is disabled, the foreground tab must trigger
-sync explicitly, and a `storageCapabilityWarning` event is emitted. localStorage
-may still be used for durable queue data, but it is never used as a lock.
-
-`client.queueCapability` remains the legacy storage string (`"indexeddb"`,
-`"localstorage"`, `"memory"`, `"custom"`, or `"disabled"`) so string comparisons
-such as `client.queueCapability === "indexeddb"` remain valid. New code can use
-`client.queueCapabilities`, which provides `storageType`, `isPersistent`, and
-`multiTabSync`. An omitted or `false` `offlineQueue` is reported as
-`disabled` with `storageType: "none"`.
-
-`evaluateSpotStatus` derives `UNCLAIMED`, `CLAIMED`, `LOCKED`, or `VERIFYING`
-without mutating state. A spot with incomplete `prerequisites` is `LOCKED` and
-must not be verified by a client or viewer.
+See the [feature guide](https://github.com/nitta-a/stamprally-core-app/blob/main/docs/GUIDE.md) for configuration and customization details.
 
 ## License
 

@@ -1,47 +1,42 @@
-# @stamprally/react v0.25.6
+# @stamprally/react
 
-React integration for `@stamprally/core`. `useStampRally` subscribes to immutable client state and exposes check-in, reward-claim, synchronization, and user-switching operations.
+React 18 / 19 integration for `@stamprally/core`. `useStampRally` initializes the client and subscribes to its state.
+
+## Setup
+
+```sh
+pnpm add @stamprally/core @stamprally/react
+```
+
+Keep the client instance stable and pass it to the hook:
 
 ```tsx
-import { useMemo } from "react";
-import { StampRallyClient, type PublicRallyConfig } from "@stamprally/core";
+import type { StampRallyClient } from "@stamprally/core";
 import { useStampRally } from "@stamprally/react";
 
-const config: PublicRallyConfig = {
-  id: "city-tour",
-  version: "0.25.6",
-  title: "City Tour",
-  spots: [{ id: "station", orderIndex: 0, name: "Station", conditions: [{ type: "passcode" }] }],
-  rewards: [],
-};
-
-export function Rally() {
-  const client = useMemo(() => new StampRallyClient(config), []);
-  const { state, isLoading, onCheckIn } = useStampRally(client);
+export function Rally({ client }: { client: StampRallyClient }) {
+  const { state, isLoading, error, onCheckIn } = useStampRally(client);
   if (isLoading) return <p>Loading…</p>;
-  return <button onClick={() => void onCheckIn("station", "ARRIVED")}>{state?.records.length ?? 0} checked in</button>;
+  if (error) return <p role="alert">{error.message}</p>;
+  return (
+    <button onClick={() => void onCheckIn("station", "ARRIVED")}>
+      {state?.records.length ?? 0} checked in
+    </button>
+  );
 }
 ```
 
-The hook return value includes `state`, `isLoading`, `error`, `onCheckIn`, `onClaimReward`, `onSync`,
-`syncProgress`, `linkAccount`, `exportCloudSnapshot`, `importCloudSnapshot`, `switchUser`, and
-`clearUserState`. The cloud methods call a host-provided `CloudSyncAdapter`; no Google SDK is
-required by this package.
+Create the client with a public configuration and a `syncAdapter` for server verification. The example assumes a `station` spot accepting a passcode.
 
-Offline queue responses are reflected immediately in `state`. Permanent server
-rejections are delivered through `error`, while retryable transport failures
-remain pending for `retrySync`.
+## Operations and sync
 
-For a batch endpoint, configure the client's `sync` adapter to return the
-`SyncProgressResponse` from `@stamprally/core`. The hook keeps accepted results in
-state, removes permanently rejected operations, and retains `FAILED_RETRYABLE`
-operations for retry. `syncState.storageCapability` and
-`syncState.rejectedHistory` can be passed to a status component.
+- `onCheckIn`, `onClaimReward`: participant actions.
+- `onSync`, `syncProgress`, `retrySync`: synchronization and retry.
+- `syncState`, `queueCapabilities`: pending operations, rejected history, and storage capabilities.
+- `linkAccount`, `exportCloudSnapshot`, `importCloudSnapshot`: account backup through a host-provided `CloudSyncAdapter`.
+- `switchUser`, `clearUserState`: user-scoped progress management.
 
-The hook exposes the legacy string `queueCapability` (`indexeddb`,
-`localstorage`, `memory`, `custom`, or `disabled`) for direct compatibility
-checks. Detailed information is available through `queueCapabilities`, with
-`storageType`, `isPersistent`, and `multiTabSync` fields.
+See the [cloud sync guide](https://github.com/nitta-a/stamprally-core-app/blob/main/docs/GOOGLE_AUTH_SYNC.md) for authentication integration.
 
 ## License
 
