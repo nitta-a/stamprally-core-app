@@ -42,11 +42,58 @@ Keep `AdminRallyConfig` private: it contains verification secrets. Validate exte
 
 ## Demo / デモ
 
-参加者のチェックイン・進捗・特典と、主催者の設定編集を試せます。日本語・英語の表示切替に対応しています。
+`apps/web` は、架空の「こもれび街歩きラリー」を体験できるデモアプリです。案内所・遊歩道・喫茶店・本屋の4スポットを巡り、スタンプを3個集めると記念カードを開けます。画面上部で参加者／主催者と日本語／英語を切り替えられます。
 
-Try participant check-ins, progress, rewards, and organizer settings. The demo supports Japanese and English.
+The `apps/web` demo takes you through the fictional Komorebi Town Walk: visit four places—a welcome center, riverside, café, and bookshop—and collect three stamps to unlock a keepsake. Switch between participant and organizer views, and Japanese and English, using the header controls.
 
 ![参加者向けデモ画面 / Demo participant view](docs/images/demo-participant.png)
+
+### スタンプ取得と巡回案内 / Check-ins and walking guidance
+
+案内所で最初のスタンプを取得すると、残りのスポットが解放されます。スタンプ帳で獲得数と達成までの進捗を確認し、次の立ち寄り先や街歩きガイドからスポットへ移動できます。
+
+Collect your first stamp at the welcome center to unlock the other places. The stamp book tracks collected stamps and progress toward completion; the next-stop panel and walking guide link to each place.
+
+![案内所のスタンプを取得した後のスタンプ帳、進捗、街歩きガイド / Stamp book, progress, and walking guide after the first check-in](docs/images/demo-progress.jpg)
+
+<details>
+<summary>合言葉によるチェックイン画面 / Passcode check-in</summary>
+
+各スポットの「デモ用の合言葉を見る」でコードを確認し、入力して「スタンプを押す」を選びます。キャプチャは案内所が獲得済みで、遊歩道の合言葉を入力した状態です。実際の移動や位置情報の許可は不要です。
+
+Expand “Show demo passcode,” enter the code, and select “Collect stamp.” The capture shows the welcome center already collected and the riverside passcode entered. No travel or location permission is needed.
+
+![案内所の取得済みカードと遊歩道の合言葉チェックイン / Collected welcome-center card and riverside passcode check-in](docs/images/demo-checkin.jpg)
+
+</details>
+
+### 達成特典 / Completion reward
+
+3個のスタンプで目標達成となり、「記念カードを見る」からデジタル特典を表示できます。残りのスポットも続けて巡れます。
+
+Three stamps complete the walking goal and unlock a digital reward through “View keepsake.” You can keep exploring the remaining place afterward.
+
+<details>
+<summary>記念カードのキャプチャ / Keepsake capture</summary>
+
+![3個のスタンプを集めて開いた街歩きの記念カード / Town-walk keepsake unlocked after collecting three stamps](docs/images/demo-reward.jpg)
+
+</details>
+
+### 主催者の設定 / Organizer settings
+
+ラリー名・参加者への案内・開催期間・達成条件を編集できます。「スポット」「特典」「詳細設定」では、取得方法、特典条件、デザイン、設定JSONの入出力を管理できます。右側の概要と「実施前チェック」で、スポット・特典の数や設定の確認事項を把握できます。
+
+Edit the rally title, participant guidance, dates, and completion rules. The Places, Rewards, and Advanced tabs cover check-in methods, reward requirements, design, and configuration JSON import/export. The sidebar summarizes places and rewards and highlights issues in the preflight checks.
+
+<details>
+<summary>主催者の設定画面 / Organizer workspace capture</summary>
+
+![ラリーの基本情報、開催期間、達成条件と実施前チェックを編集・確認する主催者画面 / Organizer workspace with basic settings, rally dates, completion rules, and preflight checks](docs/images/demo-organizer.jpg)
+
+</details>
+
+### 試し方 / Try it locally
 
 ```sh
 pnpm install
@@ -54,6 +101,16 @@ pnpm dev
 ```
 
 ブラウザーで [日本語](http://localhost:5173/) / [English](http://localhost:5173/?lang=en) を開きます。
+
+Open the demo in [Japanese](http://localhost:5173/) or [English](http://localhost:5173/?lang=en).
+
+1. 案内所で `OPEN` を入力して最初のスタンプを取得します。 / Enter `OPEN` at the welcome center to collect your first stamp.
+2. 遊歩道で `RIVER`、喫茶店で `COFFEE` を入力し、3個集めて記念カードを開きます。本屋は `BOOK` で試せます。 / Use `RIVER` at the riverside and `COFFEE` at the café to unlock the keepsake with three stamps. Try `BOOK` at the bookshop too.
+3. 「主催者の設定」でラリーの条件を編集し、「参加者として体験」で変更を確認します。 / Edit the rally in Organizer settings, then switch to Participant view to see the changes.
+
+進捗と設定はこのページを開いている間のプレビューです。再読み込みで初期状態に戻り、設定変更でも進捗がリセットされます。実際の施設・特典や公開・配信機能は含みません。
+
+Progress and settings are an in-page preview. Reloading restores the defaults; changing settings also resets progress. The demo has no real facilities, rewards, or publishing/distribution flow.
 
 ## Development / 開発
 
