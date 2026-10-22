@@ -1,6 +1,6 @@
 {
   "name": "@stamprally/core",
-  "version": "0.25.6",
+  "version": "0.25.7",
   "description": "A dependency-free stamp rally domain engine and storage-agnostic client.",
   "license": "MIT",
   "repository": {
@@ -43,6 +43,6 @@
     "fake-indexeddb": "^6.2.5",
     "tsup": "^8.5.1",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.11"
+    "vitest": "^4.1.12"
   }
 }
