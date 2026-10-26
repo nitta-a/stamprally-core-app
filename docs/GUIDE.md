@@ -1,4 +1,4 @@
-# Stamp Rally v0.25.7 Guide
+# Stamp Rally v0.25.8 Guide
 
 ## Viewer
 
