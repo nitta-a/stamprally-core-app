@@ -6,18 +6,17 @@ import {
   RewardItemForm,
   SpotItemForm,
   ThemeEditor,
+  useAdminRallyEditor,
 } from "@stamprally/admin-ui";
 import {
   type AdminRallyConfig,
   analyzeRallyExperience,
   DEFAULT_SHEET_THEME,
   type ExperienceIssue,
-  type Reward,
   resolveLocalizedText,
-  type SpotItem,
   updateLocalizedField,
 } from "@stamprally/core";
-import { type KeyboardEvent, type ReactElement, useId, useRef, useState } from "react";
+import { type KeyboardEvent, type ReactElement, useEffect, useId, useRef, useState } from "react";
 import type { DemoLocale } from "./locale.js";
 import { text } from "./locale.js";
 
@@ -87,7 +86,8 @@ const editorDictionary = {
     latitude: "Latitude",
     longitude: "Longitude",
     address: "Address or landmark",
-    prerequisites: "Prerequisite place IDs (comma-separated)",
+    prerequisites: "Prerequisite places",
+    noPrerequisiteSpots: "Add other places to set prerequisites.",
     externalReferences: "External references",
     metadata: "Metadata",
     condition: "Check-in method",
@@ -187,7 +187,8 @@ const editorDictionary = {
     latitude: "緯度",
     longitude: "経度",
     address: "住所・目印",
-    prerequisites: "先に訪れるスポットのID（カンマ区切り）",
+    prerequisites: "先に訪れるスポット",
+    noPrerequisiteSpots: "ほかのスポットを追加すると、先に訪れる場所を選べます。",
     externalReferences: "外部サービスとの連携",
     metadata: "補足データ",
     condition: "スタンプの取得方法",
@@ -348,10 +349,36 @@ function issueLabel(issue: ExperienceIssue, locale: DemoLocale): string {
   return issueMessages[issue.code]?.[locale] ?? issue.message;
 }
 
+function resolveIssueTarget(
+  issue: ExperienceIssue,
+  config: AdminRallyConfig,
+): { readonly section: SectionId; readonly entityId?: string } {
+  const path = issue.path ?? "";
+  if (path.startsWith("spots")) {
+    const spotId =
+      path.split(".")[1] ??
+      issue.relatedIds?.find((id) => config.spots.some((spot) => spot.id === id));
+    return spotId === undefined ? { section: "spots" } : { section: "spots", entityId: spotId };
+  }
+  if (path.startsWith("rewards")) {
+    const rewardId =
+      path.split(".")[1] ??
+      issue.relatedIds?.find((id) => config.rewards.some((reward) => reward.id === id));
+    return rewardId === undefined
+      ? { section: "rewards" }
+      : { section: "rewards", entityId: rewardId };
+  }
+  return { section: "general" };
+}
+
 export function AdminExperience(props: AdminExperienceProps): ReactElement {
-  const { config, onChange, locale = "ja" } = props;
+  const { config: externalConfig, onChange, locale = "ja" } = props;
+  const editor = useAdminRallyEditor(externalConfig, { onChange });
+  const { config, update } = editor;
   const [activeSection, setActiveSection] = useState<SectionId>("general");
+  const [focusedEntityId, setFocusedEntityId] = useState<string | null>(null);
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const entityRefs = useRef<Record<string, HTMLDetailsElement | null>>({});
   const id = useId();
   const selectedSection = sections.find(({ id: sectionId }) => sectionId === activeSection);
   const issues = analyzeRallyExperience(config, { targetLocales: ["ja", "en"] });
@@ -360,9 +387,16 @@ export function AdminExperience(props: AdminExperienceProps): ReactElement {
   const timezone = config.availability?.timezone ?? "Asia/Tokyo";
   const title = resolveLocalizedText(config.title, locale);
 
-  function update(patch: Partial<AdminRallyConfig>): void {
-    onChange({ ...config, ...patch });
-  }
+  useEffect(() => {
+    if (focusedEntityId === null) return;
+    const target = entityRefs.current[focusedEntityId];
+    if (target !== undefined && target !== null) {
+      target.open = true;
+      target.scrollIntoView?.({ behavior: "smooth", block: "nearest" });
+      target.querySelector<HTMLElement>("summary")?.focus();
+    }
+    setFocusedEntityId(null);
+  }, [focusedEntityId]);
 
   function changeTab(event: KeyboardEvent<HTMLButtonElement>, index: number): void {
     let nextIndex = index;
@@ -378,38 +412,37 @@ export function AdminExperience(props: AdminExperienceProps): ReactElement {
     tabRefs.current[nextIndex]?.focus();
   }
 
-  function updateSpot(next: SpotItem): void {
-    update({ spots: config.spots.map((spot) => (spot.id === next.id ? next : spot)) });
-  }
-
-  function removeSpot(spotId: string): void {
-    const spots = config.spots.filter(({ id: currentId }) => currentId !== spotId);
-    update({ spots: spots.map((spot, orderIndex) => ({ ...spot, orderIndex })) });
-  }
-
   function addSpot(): void {
-    const spot: SpotItem = {
-      id: nextId("spot", config.spots),
-      orderIndex: config.spots.length,
+    const newId = nextId("spot", config.spots);
+    editor.addSpot({
+      id: newId,
       name: { ja: "新しいスポット", en: "New place" },
       conditions: [{ type: "passcode", code: "" }],
-    };
-    update({ spots: [...config.spots, spot] });
-  }
-
-  function updateReward(next: Reward): void {
-    update({ rewards: config.rewards.map((reward) => (reward.id === next.id ? next : reward)) });
+    });
+    setFocusedEntityId(newId);
   }
 
   function addReward(): void {
-    const reward: Reward = {
-      id: nextId("reward", config.rewards),
+    const newId = nextId("reward", config.rewards);
+    editor.addReward({
+      id: newId,
       title: { ja: "新しい特典", en: "New reward" },
       type: "digital",
       redemptionMethod: "view_only",
       requiredStampCount: config.spots.length,
-    };
-    update({ rewards: [...config.rewards, reward] });
+    });
+    setFocusedEntityId(newId);
+  }
+
+  function jumpToIssue(issue: ExperienceIssue): void {
+    const target = resolveIssueTarget(issue, config);
+    setActiveSection(target.section);
+    if (target.entityId !== undefined) {
+      setFocusedEntityId(target.entityId);
+      return;
+    }
+    const sectionIndex = sections.findIndex(({ id: sectionId }) => sectionId === target.section);
+    if (sectionIndex >= 0) tabRefs.current[sectionIndex]?.focus();
   }
 
   function downloadConfig(): void {
@@ -436,9 +469,19 @@ export function AdminExperience(props: AdminExperienceProps): ReactElement {
             )}
           </p>
         </div>
-        <span className="organizer-preview-badge">
-          {text(locale, "プレビュー編集中", "Editing preview")}
-        </span>
+        <div className="organizer-heading-actions">
+          <div className="organizer-history-controls">
+            <button type="button" disabled={!editor.canUndo} onClick={editor.undo}>
+              {text(locale, "元に戻す", "Undo")}
+            </button>
+            <button type="button" disabled={!editor.canRedo} onClick={editor.redo}>
+              {text(locale, "やり直す", "Redo")}
+            </button>
+          </div>
+          <span className="organizer-preview-badge">
+            {text(locale, "プレビュー編集中", "Editing preview")}
+          </span>
+        </div>
       </header>
 
       <div className="organizer-layout">
@@ -506,7 +549,7 @@ export function AdminExperience(props: AdminExperienceProps): ReactElement {
               <div className="organizer-form">
                 <GeneralSettingsForm
                   config={config}
-                  onChange={onChange}
+                  onChange={editor.setConfig}
                   locale={locale}
                   dictionary={editorDictionary}
                 />
@@ -662,7 +705,13 @@ export function AdminExperience(props: AdminExperienceProps): ReactElement {
                   </p>
                 )}
                 {config.spots.map((spot, index) => (
-                  <details className="organizer-entity" key={spot.id}>
+                  <details
+                    className="organizer-entity"
+                    key={spot.id}
+                    ref={(element) => {
+                      entityRefs.current[spot.id] = element;
+                    }}
+                  >
                     <summary>
                       <span className="organizer-entity-number">
                         {String(index + 1).padStart(2, "0")}
@@ -685,12 +734,32 @@ export function AdminExperience(props: AdminExperienceProps): ReactElement {
                       </span>
                     </summary>
                     <div className="organizer-form organizer-entity-form">
+                      <div className="organizer-entity-actions">
+                        <button
+                          type="button"
+                          disabled={index === 0}
+                          onClick={() => editor.reorderSpots(index, index - 1)}
+                        >
+                          {text(locale, "↑ 上へ移動", "Move up")}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={index === config.spots.length - 1}
+                          onClick={() => editor.reorderSpots(index, index + 1)}
+                        >
+                          {text(locale, "↓ 下へ移動", "Move down")}
+                        </button>
+                        <button type="button" onClick={() => editor.duplicateSpot(spot.id)}>
+                          {text(locale, "スポットを複製", "Duplicate place")}
+                        </button>
+                      </div>
                       <SpotItemForm
                         spot={spot}
+                        availableSpots={config.spots}
                         locale={locale}
                         dictionary={editorDictionary}
-                        onChange={updateSpot}
-                        onRemove={() => removeSpot(spot.id)}
+                        onChange={(next) => editor.updateSpot(spot.id, next)}
+                        onRemove={() => editor.removeSpot(spot.id)}
                       />
                     </div>
                   </details>
@@ -709,8 +778,14 @@ export function AdminExperience(props: AdminExperienceProps): ReactElement {
                     )}
                   </p>
                 )}
-                {config.rewards.map((reward) => (
-                  <details className="organizer-entity" key={reward.id}>
+                {config.rewards.map((reward, index) => (
+                  <details
+                    className="organizer-entity"
+                    key={reward.id}
+                    ref={(element) => {
+                      entityRefs.current[reward.id] = element;
+                    }}
+                  >
                     <summary>
                       <span className="organizer-reward-icon" aria-hidden="true">
                         ✳
@@ -733,18 +808,31 @@ export function AdminExperience(props: AdminExperienceProps): ReactElement {
                       </span>
                     </summary>
                     <div className="organizer-form organizer-entity-form">
+                      <div className="organizer-entity-actions">
+                        <button
+                          type="button"
+                          disabled={index === 0}
+                          onClick={() => editor.reorderRewards(index, index - 1)}
+                        >
+                          {text(locale, "↑ 上へ移動", "Move up")}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={index === config.rewards.length - 1}
+                          onClick={() => editor.reorderRewards(index, index + 1)}
+                        >
+                          {text(locale, "↓ 下へ移動", "Move down")}
+                        </button>
+                        <button type="button" onClick={() => editor.duplicateReward(reward.id)}>
+                          {text(locale, "特典を複製", "Duplicate reward")}
+                        </button>
+                      </div>
                       <RewardItemForm
                         reward={reward}
                         locale={locale}
                         dictionary={editorDictionary}
-                        onChange={updateReward}
-                        onRemove={() =>
-                          update({
-                            rewards: config.rewards.filter(
-                              ({ id: rewardId }) => rewardId !== reward.id,
-                            ),
-                          })
-                        }
+                        onChange={(next) => editor.updateReward(reward.id, next)}
+                        onRemove={() => editor.removeReward(reward.id)}
                       />
                     </div>
                   </details>
@@ -783,7 +871,7 @@ export function AdminExperience(props: AdminExperienceProps): ReactElement {
                       config={config}
                       locale={locale}
                       dictionary={editorDictionary}
-                      onImport={onChange}
+                      onImport={editor.setConfig}
                     />
                   </details>
                 </section>
@@ -864,7 +952,14 @@ export function AdminExperience(props: AdminExperienceProps): ReactElement {
                 <ul>
                   {actionableIssues.map((issue, index) => (
                     <li key={`${issue.code}-${issue.path ?? index}`} data-severity={issue.severity}>
-                      {issueLabel(issue, locale)}
+                      <button
+                        type="button"
+                        className="organizer-issue-jump"
+                        onClick={() => jumpToIssue(issue)}
+                      >
+                        <span>{issueLabel(issue, locale)}</span>
+                        <small>{text(locale, "設定を開く →", "Open setting →")}</small>
+                      </button>
                     </li>
                   ))}
                 </ul>

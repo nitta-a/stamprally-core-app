@@ -1,6 +1,7 @@
 import { verifyPasscode } from "../detectors/index.js";
 import type {
   AdminRallyConfig,
+  CheckInCondition,
   Result,
   Reward,
   RewardState,
@@ -103,9 +104,18 @@ export function consumeReward(params: ConsumeRewardParams): ConsumeResult {
     return { ok: false, error: { code: "USER_LIMIT_REACHED", rewardId: reward.id } };
   if (reward.redemptionMethod === "staff_passcode") {
     if (
-      reward.staffPasscode === undefined ||
+      reward.staffPasscode !== undefined &&
       !verifyPasscode(params.inputPasscode ?? "", { code: reward.staffPasscode }).success
     )
+      return {
+        ok: false,
+        error: {
+          code: "INVALID_PASSCODE",
+          rewardId: reward.id,
+          message: "The passcode is invalid.",
+        },
+      };
+    if (reward.staffPasscode === undefined && (params.inputPasscode ?? "").trim() === "")
       return {
         ok: false,
         error: {
@@ -133,6 +143,24 @@ export interface ProcessStampValue {
   readonly nextState: StampRallyState;
   readonly events: ReadonlyArray<{ readonly type: "stampAcquired"; readonly record: StampRecord }>;
 }
+function satisfiesConditions(
+  conditions: ReadonlyArray<CheckInCondition>,
+  context: VerificationContext,
+): Result<null, "INVALID_PROOF" | "CUSTOM_VALIDATION_FAILED"> {
+  if (conditions.length === 0) return { ok: true, value: null };
+  let sawCustom = false;
+  for (const condition of conditions) {
+    if (condition.type === "custom") {
+      sawCustom = true;
+      continue;
+    }
+    if (evaluateConditionDetailed(condition, context).ok) return { ok: true, value: null };
+  }
+  return {
+    ok: false,
+    error: sawCustom ? "CUSTOM_VALIDATION_FAILED" : "INVALID_PROOF",
+  };
+}
 export function processStamp(
   state: StampRallyState,
   config: AdminRallyConfig,
@@ -147,20 +175,19 @@ export function processStamp(
   const acquired = new Set(state.records.map((record) => record.stampId));
   if (spot.prerequisites?.some((id) => !acquired.has(id)))
     return { ok: false, error: { code: "PREREQUISITES_NOT_MET", spotId } };
-  for (const condition of spot.conditions) {
-    if (condition.type === "custom" || !evaluateConditionDetailed(condition, context).ok)
-      return {
-        ok: false,
-        error:
-          condition.type === "custom"
-            ? {
-                code: "CUSTOM_VALIDATION_FAILED",
-                spotId,
-                message: "Custom validation requires an async validator.",
-              }
-            : { code: "INVALID_PROOF", spotId },
-      };
-  }
+  const check = satisfiesConditions(spot.conditions, context);
+  if (!check.ok)
+    return {
+      ok: false,
+      error:
+        check.error === "CUSTOM_VALIDATION_FAILED"
+          ? {
+              code: "CUSTOM_VALIDATION_FAILED",
+              spotId,
+              message: "Custom validation requires an async validator.",
+            }
+          : { code: "INVALID_PROOF", spotId },
+    };
   const record: StampRecord = { stampId: spotId, acquiredAt: now };
   const records = [...state.records, record];
   const rewards = reconcileRewardStates(

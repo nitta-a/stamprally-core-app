@@ -25,8 +25,35 @@ describe("availability", () => {
       ],
       exceptions: [{ date: "2026-09-28", closed: true }],
     };
-    expect(evaluateSpotAvailability(availability, "2026-09-26T14:00:00Z").status).toBe("OPEN");
-    expect(evaluateSpotAvailability(availability, "2026-09-26T16:59:00Z").status).toBe("OPEN");
-    expect(evaluateSpotAvailability(availability, "2026-09-28T02:00:00Z").status).toBe("CLOSED");
+    expect(evaluateSpotAvailability(availability, "2026-09-26T14:00:00Z")).toMatchObject({
+      status: "OPEN",
+      currentPeriod: { opensAt: "22:00", closesAt: "02:00" },
+    });
+    expect(evaluateSpotAvailability(availability, "2026-09-26T16:59:00Z")).toMatchObject({
+      status: "OPEN",
+      currentPeriod: { opensAt: "22:00", closesAt: "02:00" },
+    });
+    expect(evaluateSpotAvailability(availability, "2026-09-26T03:00:00Z")).toMatchObject({
+      status: "CLOSED",
+      reason: "outside_schedule",
+      nextOpening: {
+        date: "2026-09-26",
+        dayOfWeek: 6,
+        opensAt: "22:00",
+        closesAt: "02:00",
+        isToday: true,
+      },
+    });
+    expect(evaluateSpotAvailability(availability, "2026-09-28T02:00:00Z")).toMatchObject({
+      status: "CLOSED",
+      reason: "temporary_closure",
+      nextOpening: {
+        date: "2026-10-03",
+        dayOfWeek: 6,
+        opensAt: "22:00",
+        closesAt: "02:00",
+        isToday: false,
+      },
+    });
   });
 });

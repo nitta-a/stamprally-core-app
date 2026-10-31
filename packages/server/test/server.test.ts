@@ -45,6 +45,34 @@ describe("StampRallyServer", () => {
     expect(await persistence.getUserState("rally", "attacker")).toBeNull();
   });
 
+  it("accepts any matching check-in condition on a multi-condition spot", async () => {
+    const multiConfig: AdminRallyConfig = {
+      ...config,
+      spots: [
+        {
+          id: "s1",
+          orderIndex: 0,
+          name: "Spot",
+          conditions: [
+            { type: "qr", secretToken: "QR-TOKEN" },
+            { type: "passcode", code: "FALLBACK" },
+          ],
+        },
+      ],
+    };
+    const server = new StampRallyServer(multiConfig, new InMemoryServerPersistenceAdapter());
+    const result = await server.checkIn(
+      {
+        rallyId: "rally",
+        spotId: "s1",
+        context: { type: "passcode", code: "FALLBACK" },
+        idempotencyKey: "fallback-passcode",
+      },
+      "user-1",
+    );
+    expect(result.ok).toBe(true);
+  });
+
   it("uses the trusted auth context for syncProgress", async () => {
     const persistence = new InMemoryServerPersistenceAdapter();
     const server = new StampRallyServer(config, persistence);

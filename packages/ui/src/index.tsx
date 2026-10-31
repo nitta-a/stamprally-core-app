@@ -1,6 +1,7 @@
 "use client";
 
 import type {
+  AvailabilityResult,
   AvailabilityStatus,
   AvailabilitySuggestionMode,
   CheckInOptions,
@@ -120,6 +121,7 @@ export interface SpotCardProps<TLocale extends string = string> {
   readonly state: UserRallyState;
   readonly status: SpotStatus;
   readonly availabilityStatus?: AvailabilityStatus;
+  readonly availability?: AvailabilityResult;
   readonly locale: TLocale;
   readonly dictionary?: LocaleDictionary<TLocale>;
   readonly children: ReactNode;
@@ -871,16 +873,19 @@ export function RallyViewer<TLocale extends string = string>({
               </div>
             );
           });
+          const spotAvailability = availabilityConfigured(config)
+            ? evaluateSpotAvailability(spot.availability, availabilityNow)
+            : undefined;
           const props: SpotCardProps<TLocale> = {
             spot,
             state: currentState,
             status,
-            ...(availabilityConfigured(config)
-              ? {
-                  availabilityStatus: evaluateSpotAvailability(spot.availability, availabilityNow)
-                    .status,
-                }
-              : {}),
+            ...(spotAvailability === undefined
+              ? {}
+              : {
+                  availabilityStatus: spotAvailability.status,
+                  availability: spotAvailability,
+                }),
             locale,
             ...(dictionary === undefined ? {} : { dictionary }),
             children,

@@ -512,17 +512,24 @@ export class StampRallyServer {
           rejected("PREREQUISITES_NOT_MET", "Prerequisite spots are not complete."),
           responseHolder,
         );
-      for (const condition of spot.conditions)
-        if (
-          !(await evaluate(
-            condition,
-            request.context,
-            condition.type === "custom"
-              ? this.#options.customValidators?.[condition.validatorName]
-              : undefined,
-            { rallyId: request.rallyId, spotId: request.spotId, state: current },
-          ))
-        )
+      if (spot.conditions.length > 0) {
+        let matched = false;
+        for (const condition of spot.conditions) {
+          if (
+            await evaluate(
+              condition,
+              request.context,
+              condition.type === "custom"
+                ? this.#options.customValidators?.[condition.validatorName]
+                : undefined,
+              { rallyId: request.rallyId, spotId: request.spotId, state: current },
+            )
+          ) {
+            matched = true;
+            break;
+          }
+        }
+        if (!matched)
           return await this.#rememberCheckInTransaction(
             directRequest,
             timestamp,
@@ -531,6 +538,7 @@ export class StampRallyServer {
             rejected("INVALID_PROOF", "Verification failed."),
             responseHolder,
           );
+      }
       const next: UserRallyState = {
         ...current,
         records: [...current.records, { stampId: request.spotId, acquiredAt: timestamp }],
@@ -696,6 +704,23 @@ export class StampRallyServer {
             reward.staffPasscode === undefined && this.#config.staffPasscode !== undefined
               ? { ...reward, staffPasscode: this.#config.staffPasscode }
               : reward;
+          if (
+            effectiveReward.redemptionMethod === "staff_passcode" &&
+            effectiveReward.staffPasscode === undefined
+          ) {
+            responseHolder.value = {
+              ok: false,
+              code: "INVALID_PASSCODE",
+              message: "Reward cannot be claimed.",
+            };
+            return {
+              nextStock: stock,
+              nextUserState: userState,
+              auditLog: makeAudit("REJECTED", "INVALID_PASSCODE"),
+              result: responseHolder.value,
+              error: "INVALID_PASSCODE",
+            };
+          }
           const local = consumeReward({
             reward: effectiveReward,
             currentState: currentReward,

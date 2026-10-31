@@ -133,6 +133,9 @@ export function useAdminRallyEditor<
 ): UseAdminRallyEditorReturn<TLocale, TMeta> {
   const initialRef = useRef(initialConfig);
   const previousInitialRef = useRef(initialConfig);
+  const onChangeRef = useRef(options.onChange);
+  onChangeRef.current = options.onChange;
+  const lastNotifiedRef = useRef(initialConfig);
   const [history, setHistory] = useState<EditorHistory<AdminRallyConfig<TLocale, TMeta>>>({
     past: [],
     present: initialConfig,
@@ -142,23 +145,26 @@ export function useAdminRallyEditor<
   useEffect(() => {
     if (previousInitialRef.current === initialConfig) return;
     previousInitialRef.current = initialConfig;
+    if (initialConfig === history.present) return;
     const isDirty = JSON.stringify(history.present) !== JSON.stringify(initialRef.current);
     if (!isDirty) {
       initialRef.current = initialConfig;
+      lastNotifiedRef.current = initialConfig;
       setHistory({ past: [], present: initialConfig, future: [] });
     }
   }, [history.present, initialConfig]);
-  const commit = useCallback(
-    (value: SetStateAction<AdminRallyConfig<TLocale, TMeta>>): void => {
-      setHistory((current) => {
-        const next = typeof value === "function" ? value(current.present) : value;
-        if (next === current.present) return current;
-        options.onChange?.(next);
-        return { past: [...current.past, current.present], present: next, future: [] };
-      });
-    },
-    [options.onChange],
-  );
+  useEffect(() => {
+    if (history.present === lastNotifiedRef.current) return;
+    lastNotifiedRef.current = history.present;
+    onChangeRef.current?.(history.present);
+  }, [history.present]);
+  const commit = useCallback((value: SetStateAction<AdminRallyConfig<TLocale, TMeta>>): void => {
+    setHistory((current) => {
+      const next = typeof value === "function" ? value(current.present) : value;
+      if (next === current.present) return current;
+      return { past: [...current.past, current.present], present: next, future: [] };
+    });
+  }, []);
   const setConfig: Dispatch<SetStateAction<AdminRallyConfig<TLocale, TMeta>>> = commit;
   const update = (patch: Partial<AdminRallyConfig<TLocale, TMeta>>): void =>
     commit((current) => ({ ...current, ...patch }));
@@ -296,7 +302,6 @@ export function useAdminRallyEditor<
     setHistory((current) => {
       const previous = current.past.at(-1);
       if (previous === undefined) return current;
-      options.onChange?.(previous);
       return {
         past: current.past.slice(0, -1),
         present: previous,
@@ -307,7 +312,6 @@ export function useAdminRallyEditor<
     setHistory((current) => {
       const next = current.future[0];
       if (next === undefined) return current;
-      options.onChange?.(next);
       return {
         past: [...current.past, current.present],
         present: next,
@@ -317,8 +321,9 @@ export function useAdminRallyEditor<
   const resetConfig = (newConfig: AdminRallyConfig<TLocale, TMeta>): void => {
     initialRef.current = newConfig;
     previousInitialRef.current = newConfig;
+    lastNotifiedRef.current = newConfig;
     setHistory({ past: [], present: newConfig, future: [] });
-    options.onChange?.(newConfig);
+    onChangeRef.current?.(newConfig);
   };
   return {
     config,
@@ -645,6 +650,7 @@ export interface SpotItemFormProps<
   TMeta extends Record<string, unknown> = Record<string, unknown>,
 > extends DictionaryProps<TLocale> {
   readonly spot: SpotItem<TLocale, TMeta>;
+  readonly availableSpots?: ReadonlyArray<Pick<SpotItem<TLocale, TMeta>, "id" | "name">>;
   readonly onChange: (spot: SpotItem<TLocale, TMeta>) => void;
   readonly onRemove?: () => void;
 }
@@ -654,6 +660,7 @@ export function SpotItemForm<
   TMeta extends Record<string, unknown> = Record<string, unknown>,
 >({
   spot,
+  availableSpots,
   onChange,
   onRemove,
   locale,
@@ -664,6 +671,7 @@ export function SpotItemForm<
     text(dictionary, activeLocale, key, fallback);
   const update = (patch: Partial<SpotItem<TLocale, TMeta>>): void =>
     onChange({ ...spot, ...patch });
+  const otherSpots = availableSpots?.filter((candidate) => candidate.id !== spot.id);
   return (
     <fieldset>
       <legend>{resolveLocalizedText(spot.name, activeLocale)}</legend>
@@ -749,20 +757,51 @@ export function SpotItemForm<
           />
         </label>
       </fieldset>
-      <label>
-        {field("prerequisites", "Prerequisite spots")}
-        <input
-          value={spot.prerequisites?.join(", ") ?? ""}
-          onChange={(event) =>
-            update({
-              prerequisites: event.target.value
-                .split(",")
-                .map((item) => item.trim())
-                .filter(Boolean),
+      {otherSpots !== undefined ? (
+        <fieldset>
+          <legend>{field("prerequisites", "Prerequisite spots")}</legend>
+          {otherSpots.length === 0 ? (
+            <p>{field("noPrerequisiteSpots", "Add other places to set prerequisites.")}</p>
+          ) : (
+            otherSpots.map((candidate) => {
+              const checked = spot.prerequisites?.includes(candidate.id) ?? false;
+              const candidateName =
+                resolveLocalizedText(candidate.name, activeLocale) || candidate.id;
+              return (
+                <label key={candidate.id}>
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={(event) => {
+                      const nextPrerequisites = (spot.prerequisites ?? []).filter(
+                        (item) => item !== candidate.id,
+                      );
+                      if (event.target.checked) nextPrerequisites.push(candidate.id);
+                      update({ prerequisites: nextPrerequisites });
+                    }}
+                  />
+                  {candidateName}
+                </label>
+              );
             })
-          }
-        />
-      </label>
+          )}
+        </fieldset>
+      ) : (
+        <label>
+          {field("prerequisites", "Prerequisite spots")}
+          <input
+            value={spot.prerequisites?.join(", ") ?? ""}
+            onChange={(event) =>
+              update({
+                prerequisites: event.target.value
+                  .split(",")
+                  .map((item) => item.trim())
+                  .filter(Boolean),
+              })
+            }
+          />
+        </label>
+      )}
       <AvailabilityEditor
         locale={activeLocale}
         {...(dictionary === undefined ? {} : { dictionary })}
@@ -1671,6 +1710,7 @@ export function AdminRallyEditor<
           <div key={spot.id}>
             <SpotItemForm<TLocale, TMeta>
               spot={spot}
+              availableSpots={config.spots}
               locale={activeLocale}
               {...(dictionary === undefined ? {} : { dictionary })}
               onChange={(next) =>

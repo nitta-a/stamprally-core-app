@@ -174,6 +174,7 @@ function matches(condition: PublicCheckInCondition, value: unknown): boolean {
   if (condition.type === "gps") {
     if (typeof value !== "object" || value === null) return false;
     const item = value as Record<string, unknown>;
+    if ("type" in item && item.type !== "gps") return false;
     const latitude = item.latitude;
     const longitude = item.longitude;
     if (typeof latitude !== "number" || typeof longitude !== "number") return false;
@@ -184,6 +185,10 @@ function matches(condition: PublicCheckInCondition, value: unknown): boolean {
       Math.sin(dLat / 2) ** 2 +
       Math.cos(radians(condition.latitude)) * Math.cos(radians(latitude)) * Math.sin(dLon / 2) ** 2;
     return 6_371_000 * 2 * Math.asin(Math.sqrt(Math.min(1, h))) <= condition.radiusMeters;
+  }
+  if (typeof value === "object" && value !== null && "type" in value) {
+    const typed = value as { readonly type?: unknown };
+    if (typeof typed.type === "string" && typed.type !== condition.type) return false;
   }
   return proof(value).trim() !== "";
 }
@@ -499,39 +504,57 @@ export class StampRallyClient {
           spotId,
           message: "Prerequisite spots are not complete.",
         });
-      for (const condition of spot.conditions) {
-        if (condition.type === "custom") {
-          const validator =
-            this.#options.customValidators?.[condition.validatorName] ??
-            this.#options.customValidator;
-          if (validator === undefined)
-            return this.#fail({
-              code: "CUSTOM_VALIDATION_FAILED",
+      if (spot.conditions.length > 0) {
+        let matched = false;
+        let customFailure: ClientError | null = null;
+        for (const condition of spot.conditions) {
+          if (condition.type === "custom") {
+            const validator =
+              this.#options.customValidators?.[condition.validatorName] ??
+              this.#options.customValidator;
+            if (validator === undefined) {
+              customFailure ??= {
+                code: "CUSTOM_VALIDATION_FAILED",
+                spotId,
+                message: "No custom validator is registered.",
+              };
+              continue;
+            }
+            const context: CustomValidationContext = {
+              rallyId: this.#config.id,
               spotId,
-              message: "No custom validator is registered.",
-            });
-          const context: CustomValidationContext = {
-            rallyId: this.#config.id,
-            spotId,
-            proofData,
-            condition: { type: "custom", validatorName: condition.validatorName },
-            userState: current,
-          };
-          const result =
-            typeof validator === "function"
-              ? await validator(context)
-              : await validator.validate(context);
-          if (result === false || (typeof result === "object" && !result.valid))
-            return this.#fail({
+              proofData,
+              condition: { type: "custom", validatorName: condition.validatorName },
+              userState: current,
+            };
+            const result =
+              typeof validator === "function"
+                ? await validator(context)
+                : await validator.validate(context);
+            if (result === true || (typeof result === "object" && result.valid)) {
+              matched = true;
+              break;
+            }
+            customFailure = {
               code: "CUSTOM_VALIDATION_FAILED",
               spotId,
               message:
                 typeof result === "object" && result.message !== undefined
                   ? result.message
                   : "Custom validation failed.",
-            });
-        } else if (!matches(condition, proofData))
-          return this.#fail({ code: "INVALID_PROOF", spotId, message: "Verification failed." });
+            };
+          } else if (matches(condition, proofData)) {
+            matched = true;
+            break;
+          }
+        }
+        if (!matched) {
+          if (customFailure !== null && spot.conditions.every(({ type }) => type === "custom"))
+            return this.#fail(customFailure);
+          return this.#fail(
+            customFailure ?? { code: "INVALID_PROOF", spotId, message: "Verification failed." },
+          );
+        }
       }
       const now = options.now ?? this.#now();
       const request: CheckInRequest = {

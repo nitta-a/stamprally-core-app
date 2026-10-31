@@ -130,6 +130,50 @@ describe("stamp and reward transitions", () => {
     });
   });
 
+  it("allows check-in when any configured condition matches", () => {
+    const multiConditionConfig: AdminRallyConfig = {
+      ...config,
+      spots: [
+        {
+          id: "multi",
+          orderIndex: 0,
+          name: "Multi",
+          conditions: [
+            { type: "qr", secretToken: "QR-SECRET" },
+            { type: "passcode", code: "FALLBACK" },
+          ],
+        },
+      ],
+    };
+    const byPasscode = processStamp(
+      baseState,
+      multiConditionConfig,
+      "multi",
+      { type: "passcode", code: "FALLBACK" },
+      "2026-01-01T00:00:01.000Z",
+    );
+    expect(byPasscode.ok).toBe(true);
+    const byQr = processStamp(
+      baseState,
+      multiConditionConfig,
+      "multi",
+      { type: "qr", token: "QR-SECRET" },
+      "2026-01-01T00:00:01.000Z",
+    );
+    expect(byQr.ok).toBe(true);
+    const rejected = processStamp(
+      baseState,
+      multiConditionConfig,
+      "multi",
+      { type: "passcode", code: "WRONG" },
+      "2026-01-01T00:00:01.000Z",
+    );
+    expect(rejected).toMatchObject({
+      ok: false,
+      error: { code: "INVALID_PROOF", spotId: "multi" },
+    });
+  });
+
   it("reconciles expiry and stock without overwriting terminal states", () => {
     const reward: Reward = {
       id: "reward",

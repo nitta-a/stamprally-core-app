@@ -132,13 +132,19 @@ export function ParticipantExperience(props: ParticipantExperienceProps): ReactE
               feedback: "walk-feedback",
               completion: "walk-completion",
             }}
-            headerSlot={({ config: publicConfig, state }) => (
-              <StampBook config={publicConfig} state={state} locale={locale} />
+            headerSlot={({ config: publicConfig, state: currentState }) => (
+              <StampBook
+                config={publicConfig}
+                state={currentState}
+                locale={locale}
+                onResetProgress={() => {
+                  void client.reset();
+                }}
+              />
             )}
             customConditionRenderers={{ passcode: DemoPasscode }}
             renderSpotCard={(spotProps) => <DemoSpotCard {...spotProps} />}
             renderRewardCard={(rewardProps) => {
-              if (rewardProps.reward.redemptionMethod !== "view_only") return undefined;
               const anchorId =
                 rewardProps.reward.id === config.rewards[0]?.id
                   ? "rewards"
@@ -176,7 +182,7 @@ export function ParticipantExperience(props: ParticipantExperienceProps): ReactE
           <span aria-hidden="true">⌖</span>
           {text(locale, "スポット", "Places")}
         </a>
-        {config.rewards[0]?.redemptionMethod === "view_only" && (
+        {config.rewards.length > 0 && (
           <a href="#rewards">
             <span aria-hidden="true">♧</span>
             {text(locale, "特典", "Rewards")}
@@ -240,11 +246,25 @@ interface StampBookProps {
   config: PublicRallyConfig;
   state: UserRallyState;
   locale: DemoLocale;
+  onResetProgress?: () => void;
+}
+
+function formatAcquiredTime(timestamp: string | undefined, locale: DemoLocale): string | null {
+  if (timestamp === undefined || timestamp === "") return null;
+  const parsed = new Date(timestamp);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toLocaleTimeString(locale === "ja" ? "ja-JP" : "en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
 }
 
 function StampBook(props: StampBookProps): ReactElement {
-  const { config, state, locale } = props;
+  const { config, state, locale, onResetProgress } = props;
   const progress = calculateProgress(state, config);
+  const hasProgress =
+    state.records.length > 0 || state.rewards.some((item) => item.status === "CONSUMED");
   return (
     <div className="stamp-book" id="stamp-book">
       <div className="stamp-book__heading">
@@ -252,10 +272,17 @@ function StampBook(props: StampBookProps): ReactElement {
           <span className="eyebrow">MY STAMP BOOK</span>
           <h2>{text(locale, "あなたのスタンプ帳", "Your stamp book")}</h2>
         </div>
-        <p>
-          <strong>{progress.acquired}</strong> / {progress.total}
-          <span>{text(locale, "スポット", "places")}</span>
-        </p>
+        <div className="stamp-book__status">
+          <p>
+            <strong>{progress.acquired}</strong> / {progress.total}
+            <span>{text(locale, "スポット", "places")}</span>
+          </p>
+          {hasProgress && onResetProgress !== undefined && (
+            <button type="button" className="stamp-book__reset" onClick={onResetProgress}>
+              {text(locale, "進捗をリセット", "Reset progress")}
+            </button>
+          )}
+        </div>
       </div>
       <p className="stamp-book__description">
         {progress.isCompleted
@@ -273,6 +300,8 @@ function StampBook(props: StampBookProps): ReactElement {
       <ol className="stamp-book__slots">
         {config.spots.map((spot) => {
           const acquired = evaluateSpotStatus(spot, state) === "CLAIMED";
+          const record = state.records.find((item) => item.stampId === spot.id);
+          const acquiredTime = formatAcquiredTime(record?.acquiredAt, locale);
           return (
             <li
               key={spot.id}
@@ -287,7 +316,9 @@ function StampBook(props: StampBookProps): ReactElement {
                 <span>{resolveLocalizedText(spot.name, locale)}</span>
                 <small>
                   {acquired
-                    ? text(locale, "獲得済み", "Collected")
+                    ? acquiredTime === null
+                      ? text(locale, "獲得済み", "Collected")
+                      : text(locale, `獲得済み (${acquiredTime})`, `Collected (${acquiredTime})`)
                     : text(locale, "未獲得", "Not collected")}
                 </small>
               </a>

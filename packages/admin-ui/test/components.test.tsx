@@ -142,4 +142,22 @@ describe("AdminRallyEditor", () => {
     rerender({ config: next });
     expect(result.current.config.title).toBe("External");
   });
+
+  it("renders prerequisite checkboxes when availableSpots is provided", () => {
+    const onChange = vi.fn();
+    render(
+      <SpotItemForm
+        spot={{ id: "s2", orderIndex: 1, name: "Riverside", conditions: [] }}
+        availableSpots={[
+          { id: "s1", name: "Welcome Center" },
+          { id: "s2", name: "Riverside" },
+        ]}
+        onChange={onChange}
+      />,
+    );
+    const checkbox = screen.getByRole("checkbox", { name: "Welcome Center" });
+    expect(screen.queryByRole("checkbox", { name: "Riverside" })).toBeNull();
+    fireEvent.click(checkbox);
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ prerequisites: ["s1"] }));
+  });
 });

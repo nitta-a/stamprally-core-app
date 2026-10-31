@@ -115,4 +115,34 @@ describe("StampRallyClient", () => {
     await client.reset();
     expect(client.getState()?.records).toEqual([]);
   });
+
+  it("accepts a fallback condition when a spot has multiple check-in methods", async () => {
+    const multiConfig = toPublicConfig({
+      id: "rally",
+      version: "1",
+      title: "Rally",
+      spots: [
+        {
+          id: "multi",
+          orderIndex: 0,
+          name: "Multi",
+          conditions: [
+            { type: "gps", latitude: 35, longitude: 139, radiusMeters: 10 },
+            { type: "passcode", code: "OPEN" },
+          ],
+        },
+      ],
+      rewards: [],
+    } satisfies AdminRallyConfig);
+    const client = new StampRallyClient(multiConfig, {
+      storage: new InMemoryStorage(),
+      userId: "user",
+      clock: () => "2026-01-01T00:00:00.000Z",
+    });
+    const result = await client.checkIn("multi", "OPEN");
+    expect(result.ok).toBe(true);
+    expect(client.getState()?.records).toEqual([
+      { stampId: "multi", acquiredAt: "2026-01-01T00:00:00.000Z" },
+    ]);
+  });
 });

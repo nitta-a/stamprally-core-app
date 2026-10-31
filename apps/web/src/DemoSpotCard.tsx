@@ -1,14 +1,65 @@
+import type { AvailabilityResult } from "@stamprally/core";
 import { resolveLocalizedText } from "@stamprally/core";
 import type { ConditionRendererProps, SpotCardProps } from "@stamprally/ui";
 import type { ReactElement } from "react";
 import { useState } from "react";
 import { DEMO_STOPS } from "./demoConfig.js";
+import type { DemoLocale } from "./locale.js";
 import { text } from "./locale.js";
 
 interface DemoSpotCardProps extends SpotCardProps {}
 
+const WEEKDAYS_JA = ["日", "月", "火", "水", "木", "金", "土"] as const;
+const WEEKDAYS_EN = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
+
+function formatAcquiredTime(timestamp: string | undefined, locale: DemoLocale): string | null {
+  if (timestamp === undefined || timestamp === "") return null;
+  const parsed = new Date(timestamp);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toLocaleTimeString(locale === "ja" ? "ja-JP" : "en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+}
+
+function formatAvailabilityDetail(
+  availability: AvailabilityResult | undefined,
+  locale: DemoLocale,
+): string | null {
+  if (availability === undefined) return null;
+  if (availability.status === "OPEN") {
+    if (availability.currentPeriod === undefined) return null;
+    const { opensAt, closesAt } = availability.currentPeriod;
+    return text(locale, `受付中 (${opensAt}〜${closesAt})`, `Open (${opensAt}–${closesAt})`);
+  }
+  if (availability.status === "CLOSED") {
+    const reasonPrefix =
+      availability.reason === "temporary_closure"
+        ? text(locale, "本日は休業日", "Closed today")
+        : text(locale, "受付時間外", "Outside opening hours");
+    if (availability.nextOpening === undefined) return reasonPrefix;
+    const { opensAt, isToday, dayOfWeek } = availability.nextOpening;
+    if (isToday) {
+      return text(
+        locale,
+        `${reasonPrefix} · 本日 ${opensAt} から受付`,
+        `${reasonPrefix} · Opens today at ${opensAt}`,
+      );
+    }
+    const dayLabel =
+      locale === "ja" ? `${WEEKDAYS_JA[dayOfWeek] ?? ""}曜` : (WEEKDAYS_EN[dayOfWeek] ?? "");
+    return text(
+      locale,
+      `${reasonPrefix} · 次回 ${dayLabel} ${opensAt} から`,
+      `${reasonPrefix} · Next open ${dayLabel} ${opensAt}`,
+    );
+  }
+  return null;
+}
+
 export function DemoSpotCard(props: DemoSpotCardProps): ReactElement {
-  const { spot, status, locale, children } = props;
+  const { spot, state, status, availability, locale, children } = props;
   const stop = DEMO_STOPS[spot.id];
   const language = locale === "ja" ? "ja" : "en";
   const name = resolveLocalizedText(spot.name, locale);
@@ -18,6 +69,10 @@ export function DemoSpotCard(props: DemoSpotCardProps): ReactElement {
   if (claimed) statusText = text(language, "獲得済み", "Collected");
   else if (locked) statusText = text(language, "案内所からスタート", "Start at the welcome center");
   else if (status === "VERIFYING") statusText = text(language, "確認中…", "Checking…");
+  const record = state.records.find((item) => item.stampId === spot.id);
+  const acquiredTime = formatAcquiredTime(record?.acquiredAt, language);
+  const availabilityDetail =
+    spot.availability === undefined ? null : formatAvailabilityDetail(availability, language);
 
   return (
     <article className="walk-spot" id={`spot-${spot.id}`} aria-label={name} tabIndex={-1}>
@@ -39,10 +94,20 @@ export function DemoSpotCard(props: DemoSpotCardProps): ReactElement {
         </div>
         <h3>{name}</h3>
         <p className="spot-description">{resolveLocalizedText(spot.description ?? "", locale)}</p>
-        <span className={`spot-state spot-state--${status.toLowerCase()}`}>
-          {claimed ? "✓ " : ""}
-          {statusText}
-        </span>
+        <div className="spot-badges">
+          <span className={`spot-state spot-state--${status.toLowerCase()}`}>
+            {claimed ? "✓ " : ""}
+            {statusText}
+          </span>
+          {availabilityDetail !== null && (
+            <span
+              className={`spot-availability spot-availability--${availability?.status.toLowerCase() ?? "open"}`}
+              role="status"
+            >
+              {availabilityDetail}
+            </span>
+          )}
+        </div>
         {locked && (
           <p className="spot-lock-note">
             {text(
@@ -54,11 +119,17 @@ export function DemoSpotCard(props: DemoSpotCardProps): ReactElement {
         )}
         {claimed ? (
           <p className="spot-collected">
-            {text(
-              language,
-              "この場所での思い出を、スタンプ帳に。",
-              "This memory is now in your stamp book.",
-            )}
+            {acquiredTime === null
+              ? text(
+                  language,
+                  "この場所での思い出を、スタンプ帳に。",
+                  "This memory is now in your stamp book.",
+                )
+              : text(
+                  language,
+                  `${acquiredTime} に訪問 · この場所での思い出を、スタンプ帳に。`,
+                  `Visited at ${acquiredTime} · This memory is now in your stamp book.`,
+                )}
           </p>
         ) : (
           children

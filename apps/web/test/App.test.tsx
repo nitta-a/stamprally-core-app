@@ -1,6 +1,9 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "../src/App.js";
+import { createDemoClient } from "../src/createDemoClient.js";
+import { DEFAULT_ADMIN_CONFIG } from "../src/demoConfig.js";
+import { ParticipantExperience } from "../src/ParticipantExperience.js";
 
 const WELCOME = "こもれび案内所";
 const PARK = "川沿いの遊歩道";
@@ -148,5 +151,107 @@ describe("demo app", () => {
     expect(screen.getByRole("textbox", { name: `${PARK}の合言葉` }).hasAttribute("disabled")).toBe(
       true,
     );
+  });
+
+  it("supports secondary check-in conditions and non-view_only reward claims in participant preview", async () => {
+    const client = createDemoClient({
+      ...DEFAULT_ADMIN_CONFIG,
+      staffPasscode: "STAFF-777",
+      spots: [
+        {
+          id: "welcome",
+          orderIndex: 0,
+          name: { ja: WELCOME, en: "Welcome" },
+          conditions: [
+            { type: "qr", secretToken: "QR-ONLY" },
+            { type: "passcode", code: "FALLBACK-OPEN" },
+          ],
+        },
+      ],
+      completion: { condition: { type: "stamp_count", count: 1 } },
+      rewards: [
+        {
+          id: "onsite-gift",
+          title: { ja: "案内所のオリジナル栞", en: "Bookmark" },
+          type: "in_person",
+          redemptionMethod: "staff_passcode",
+          requiredStampCount: 1,
+        },
+      ],
+    });
+    render(<ParticipantExperience client={client} locale="ja" />);
+
+    await collectStamp(WELCOME, "FALLBACK-OPEN");
+
+    const rewardHeading = await screen.findByRole("heading", { name: "案内所のオリジナル栞" });
+    const rewardCard = rewardHeading.closest("article");
+    if (rewardCard === null) throw new Error("Expected reward article.");
+    const staffInput = within(rewardCard).getByRole("textbox", {
+      name: "案内所のオリジナル栞のスタッフ確認用コード",
+    });
+    fireEvent.change(staffInput, { target: { value: "WRONG-STAFF" } });
+    fireEvent.click(within(rewardCard).getByRole("button", { name: "特典を受け取る" }));
+    expect(await within(rewardCard).findByRole("alert")).toHaveProperty(
+      "textContent",
+      "スタッフ確認用コードを確認して、もう一度お試しください。",
+    );
+
+    fireEvent.change(staffInput, { target: { value: "STAFF-777" } });
+    fireEvent.click(within(rewardCard).getByRole("button", { name: "特典を受け取る" }));
+    await waitFor(() => {
+      expect(within(rewardCard).getByRole("button", { name: "受け取り済み" })).toBeTruthy();
+    });
+    expect(within(rewardCard).getByRole("status").textContent).toContain("引換番号: CLAIM-");
+  });
+
+  it("shows acquired timestamps, missing reward spots, spot availability details, and resets progress", async () => {
+    const client = createDemoClient({
+      ...DEFAULT_ADMIN_CONFIG,
+      spots: [
+        {
+          id: "welcome",
+          orderIndex: 0,
+          name: { ja: WELCOME, en: "Welcome" },
+          conditions: [{ type: "passcode", code: "OPEN" }],
+        },
+        {
+          id: "park",
+          orderIndex: 1,
+          name: { ja: PARK, en: "Park" },
+          conditions: [{ type: "passcode", code: "RIVER" }],
+          availability: {
+            timezone: "UTC",
+            weekly: [],
+          },
+        },
+      ],
+      rewards: [
+        {
+          id: "specific-gift",
+          title: { ja: "遊歩道達成バッジ", en: "Park Badge" },
+          type: "digital",
+          redemptionMethod: "view_only",
+          requiredStampCount: 1,
+          conditions: [{ type: "stamps", stampIds: ["park"] }],
+        },
+      ],
+    });
+    render(<ParticipantExperience client={client} locale="ja" />);
+
+    expect(screen.getByText(`必要なスポット: ${PARK}`)).toBeTruthy();
+    expect(screen.getByText("受付時間外")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "進捗をリセット" })).toBeNull();
+
+    await collectStamp(WELCOME, "OPEN");
+
+    expect(
+      screen.getByRole("link", { name: /こもれび案内所\s*獲得済み \(\d{2}:\d{2}\)/ }),
+    ).toBeTruthy();
+    const resetButton = screen.getByRole("button", { name: "進捗をリセット" });
+    fireEvent.click(resetButton);
+
+    await waitFor(() => expect(completionPercentage()).toBe(0));
+    expect(screen.getByRole("textbox", { name: `${WELCOME}の合言葉` })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "進捗をリセット" })).toBeNull();
   });
 });

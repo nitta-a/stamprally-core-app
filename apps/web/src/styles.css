@@ -371,7 +371,12 @@ textarea {
   font-size: 19px;
   letter-spacing: 0.02em;
 }
-.stamp-book__heading > p {
+.stamp-book__status {
+  display: grid;
+  justify-items: end;
+  gap: 8px;
+}
+.stamp-book__status > p {
   margin: 0;
   font-size: 16px;
 }
@@ -380,12 +385,25 @@ textarea {
   font-size: 34px;
   font-weight: 600;
 }
-.stamp-book__heading > p > span {
+.stamp-book__status > p > span {
   display: block;
   margin-top: 3px;
   color: var(--muted);
   font-size: 9px;
   text-align: right;
+}
+.stamp-book__reset {
+  min-height: 30px;
+  padding: 5px 10px;
+  border: 1px solid #cbd6c4;
+  border-radius: 6px;
+  color: var(--forest);
+  background: #fff;
+  font-size: 10px;
+  font-weight: 600;
+}
+.stamp-book__reset:hover {
+  background: #e5ece0;
 }
 .stamp-book__description {
   margin: 15px 0 20px;
@@ -632,7 +650,13 @@ textarea {
   font-size: 11px;
   line-height: 1.9;
 }
-.spot-state {
+.spot-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.spot-state,
+.spot-availability {
   display: inline-flex;
   padding: 4px 8px;
   border-radius: 4px;
@@ -640,11 +664,13 @@ textarea {
   background: #f0f3e9;
   font-size: 9px;
 }
-.spot-state--claimed {
+.spot-state--claimed,
+.spot-availability--open {
   color: #1d4e3b;
   background: #e5f0e6;
 }
-.spot-state--locked {
+.spot-state--locked,
+.spot-availability--closed {
   color: #756c5c;
   background: #f1eee7;
 }
@@ -787,6 +813,20 @@ textarea {
 .reward-requirement {
   color: var(--forest);
   font-size: 11px;
+}
+.reward-missing-spots,
+.reward-ticket {
+  font-size: 10px;
+}
+.reward-ticket {
+  display: inline-block;
+  justify-self: start;
+  padding: 5px 10px;
+  border: 1px solid #cdd8c9;
+  border-radius: 6px;
+  color: var(--forest);
+  background: #f0f4eb;
+  font-weight: 700;
 }
 .walk-reward .primary-button {
   justify-self: start;

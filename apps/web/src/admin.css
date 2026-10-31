@@ -34,6 +34,18 @@
   font-size: 14px;
 }
 
+.organizer-heading-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.organizer-history-controls {
+  display: flex;
+  gap: 6px;
+}
+
 .organizer-preview-badge {
   flex-shrink: 0;
   padding: 8px 13px;
@@ -325,6 +337,13 @@
   padding: 0 16px 20px;
 }
 
+.organizer-entity-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 4px 0;
+}
+
 .organizer-entity-form > fieldset {
   border: 0;
   padding: 12px 4px 0;
@@ -451,14 +470,38 @@
   display: grid;
   gap: 10px;
   margin: 14px 0 18px;
-  padding-left: 16px;
+  padding-left: 0;
+  list-style: none;
   color: #7b7763;
   font-size: 11px;
   line-height: 1.8;
 }
 
-.organizer-check-issues li[data-severity="error"] {
+.organizer-workspace button.organizer-issue-jump {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #e6e3d3;
+  border-radius: 8px;
+  background: #fbfaf4;
+  color: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.65;
+  text-align: left;
+}
+
+.organizer-workspace li[data-severity="error"] button.organizer-issue-jump {
+  border-color: #ebd1cb;
+  background: #fdf6f4;
   color: #a84737;
+}
+
+.organizer-issue-jump small {
+  color: #1d4e3b;
+  font-size: 10px;
+  font-weight: 700;
 }
 
 .organizer-tip {
