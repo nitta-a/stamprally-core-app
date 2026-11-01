@@ -1,0 +1,26 @@
+{
+  "name": "@stamprally/integration-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:integration": "vitest run",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@stamprally/core": "workspace:*",
+    "@stamprally/react": "workspace:*",
+    "@stamprally/server": "workspace:*",
+    "@stamprally/ui": "workspace:*",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/react": "^16.3.2",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "jsdom": "^30.0.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.12"
+  }
+}

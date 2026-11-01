@@ -571,9 +571,9 @@ export class StampRallyClient {
       };
       const remote = this.#options.syncAdapter?.checkIn;
       if (options.sync !== false && remote !== undefined) {
+        let result: CheckInResult;
         try {
-          const result = await remote(request);
-          return result.ok ? this.#commitCheckIn(result) : this.#fail(result.error);
+          result = await remote(request);
         } catch (error) {
           if (this.#offlineQueue === undefined) throw error;
           const record = { stampId: spotId, acquiredAt: now };
@@ -586,6 +586,9 @@ export class StampRallyClient {
           await this.#storage.save(next);
           return this.#commitCheckIn({ ok: true, value: { state: next, record } });
         }
+        if (!result.ok) return this.#fail(result.error);
+        await this.#storage.save(result.value.state);
+        return this.#commitCheckIn(result);
       }
       const record = { stampId: spotId, acquiredAt: now };
       const next = this.#reconcile({
@@ -630,9 +633,9 @@ export class StampRallyClient {
       };
       const remote = this.#options.syncAdapter?.claimReward;
       if (options.sync !== false && remote !== undefined) {
+        let result: ClaimResult;
         try {
-          const result = await remote(request);
-          return result.ok ? this.#commitClaim(result) : this.#fail(result.error);
+          result = await remote(request);
         } catch (error) {
           if (this.#offlineQueue === undefined) throw error;
           const next = applyOptimisticRewardClaim(current, rewardId, local.value, now);
@@ -640,6 +643,9 @@ export class StampRallyClient {
           await this.#storage.save(next);
           return this.#commitClaim({ ok: true, value: { state: next, reward: local.value } });
         }
+        if (!result.ok) return this.#fail(result.error);
+        await this.#storage.save(result.value.state);
+        return this.#commitClaim(result);
       }
       const next = applyOptimisticRewardClaim(current, rewardId, local.value, now);
       await this.#storage.save(next);

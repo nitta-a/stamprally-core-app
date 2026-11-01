@@ -49,6 +49,9 @@ jobs:
       - name: Build
         run: pnpm build
 
+      - name: Integration test
+        run: pnpm test:integration
+
       - name: Check package entry points
         run: pnpm package:check
 

@@ -1,6 +1,6 @@
 {
   "name": "stamprally-core-app",
-  "version": "0.25.8",
+  "version": "0.25.9",
   "private": true,
   "license": "MIT",
   "packageManager": "pnpm@11.19.0",
@@ -12,6 +12,7 @@
     "build": "turbo run build",
     "dev": "turbo run dev",
     "test": "turbo run test",
+    "test:integration": "turbo run test:integration",
     "typecheck": "turbo run typecheck",
     "release:check": "node scripts/check-release-version.mjs",
     "release:verify-install": "node scripts/verify-published-packages.mjs",

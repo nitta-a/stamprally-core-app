@@ -539,14 +539,17 @@ export class StampRallyServer {
             responseHolder,
           );
       }
+      const records = [...current.records, { stampId: request.spotId, acquiredAt: timestamp }];
+      const acquiredStampIds = new Set(records.map(({ stampId }) => stampId));
       const next: UserRallyState = {
         ...current,
-        records: [...current.records, { stampId: request.spotId, acquiredAt: timestamp }],
+        records,
         rewards: reconcileRewardStates(
           this.#config.rewards,
           current.rewards,
-          current.records.length + 1,
+          records.length,
           timestamp,
+          acquiredStampIds,
         ),
         updatedAt: timestamp,
       };

@@ -340,6 +340,49 @@ importers:
         specifier: ^4.1.12
         version: 4.1.12(@types/node@26.2.0)(jsdom@30.0.1)(vite@8.3.5(@types/node@26.2.0)(esbuild@0.28.2))
 
+  tests/integration:
+    dependencies:
+      '@stamprally/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@stamprally/react':
+        specifier: workspace:*
+        version: link:../../packages/react
+      '@stamprally/server':
+        specifier: workspace:*
+        version: link:../../packages/server
+      '@stamprally/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
+      react:
+        specifier: ^19.2.8
+        version: 19.2.8
+      react-dom:
+        specifier: ^19.2.8
+        version: 19.2.8(react@19.2.8)
+    devDependencies:
+      '@testing-library/dom':
+        specifier: ^10.4.1
+        version: 10.4.1
+      '@testing-library/react':
+        specifier: ^16.3.2
+        version: 16.3.2(@testing-library/dom@10.4.1)(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      '@types/react':
+        specifier: ^19.2.18
+        version: 19.2.18
+      '@types/react-dom':
+        specifier: ^19.2.4
+        version: 19.2.4(@types/react@19.2.18)
+      jsdom:
+        specifier: ^30.0.1
+        version: 30.0.1
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: ^4.1.12
+        version: 4.1.12(@types/node@26.2.0)(jsdom@30.0.1)(vite@8.3.5(@types/node@26.2.0)(esbuild@0.28.2))
+
 packages:
 
   '@asamuzakjp/css-color@6.0.7':

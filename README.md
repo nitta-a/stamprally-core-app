@@ -121,7 +121,14 @@ pnpm test
 pnpm typecheck
 pnpm lint
 pnpm build
+pnpm test:integration
 ```
+
+`pnpm test:integration` は `tests/integration` で、ビルド済みのクライアント・サーバー・React/UI を組み合わせ、オフライン同期を含む利用フローを検証します。 / `pnpm test:integration` runs `tests/integration`, which exercises the built client, server, and React/UI packages together, including offline sync.
+
+依存パッケージは自動的にビルドされます。`pnpm test` とは別実行で、CI と公開前検証にも組み込まれています。 / Dependencies are built automatically. This suite runs separately from `pnpm test` and is included in CI and pre-publish validation.
+
+通信は同一プロセス内の `StampRallyServer.handle(Request)`、永続化はメモリアダプター、React/UI は jsdom を使います。再送・拒否時のロールバック・応答喪失時の冪等性・再読み込み後の復元も検証しますが、実ブラウザーや外部 DB の E2E テストではありません。 / Tests use an in-process `StampRallyServer.handle(Request)`, in-memory persistence, and jsdom for React/UI. They cover retries, rejection rollbacks, idempotency after response loss, and reload recovery, but are not real-browser or external-database E2E tests.
 
 ## Documentation / 詳細資料
 

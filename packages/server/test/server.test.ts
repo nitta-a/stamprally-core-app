@@ -73,6 +73,57 @@ describe("StampRallyServer", () => {
     expect(result.ok).toBe(true);
   });
 
+  it("unlocks rewards whose stamp conditions are met by the check-in", async () => {
+    const stampConfig: AdminRallyConfig = {
+      ...config,
+      spots: [
+        ...config.spots,
+        {
+          id: "s2",
+          orderIndex: 1,
+          name: "Spot 2",
+          conditions: [{ type: "passcode", code: "TWO" }],
+        },
+      ],
+      rewards: [
+        {
+          id: "s2-badge",
+          title: "Spot 2 badge",
+          type: "digital",
+          redemptionMethod: "server_claim",
+          requiredStampCount: 1,
+          conditions: [{ type: "stamps", stampIds: ["s2"] }],
+        },
+      ],
+    };
+    const server = new StampRallyServer(stampConfig, new InMemoryServerPersistenceAdapter());
+    const first = await server.checkIn(
+      {
+        rallyId: "rally",
+        spotId: "s1",
+        context: { type: "passcode", code: "OPEN" },
+        idempotencyKey: "stamp-condition-s1",
+      },
+      "user-1",
+    );
+    expect(first.ok && first.state.rewards[0]?.status).toBe("LOCKED");
+    const second = await server.checkIn(
+      {
+        rallyId: "rally",
+        spotId: "s2",
+        context: { type: "passcode", code: "TWO" },
+        idempotencyKey: "stamp-condition-s2",
+      },
+      "user-1",
+    );
+    expect(second.ok && second.state.rewards[0]?.status).toBe("AVAILABLE");
+    const claim = await server.claimReward(
+      { rallyId: "rally", rewardId: "s2-badge", idempotencyKey: "stamp-condition-claim" },
+      "user-1",
+    );
+    expect(claim.ok).toBe(true);
+  });
+
   it("uses the trusted auth context for syncProgress", async () => {
     const persistence = new InMemoryServerPersistenceAdapter();
     const server = new StampRallyServer(config, persistence);

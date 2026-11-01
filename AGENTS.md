@@ -14,6 +14,8 @@
 - `packages/ui`: スタンプラリー参加者向けの React UI コンポーネント
 - `packages/admin-ui`: スタンプラリー設定を編集する React UI コンポーネント
 - `apps/web`: Vite 製のデモ／フィールドテスト UI
+- `tests/integration`: ビルド済みパッケージを組み合わせ、クライアント・サーバー間の通信、
+  オフライン同期、React/UI を実サーバーに対して検証する非公開の統合テスト
 
 Node.js 22 以上と pnpm 11 を使用してください。依存関係の操作には npm や
 yarn ではなく pnpm を使い、`pnpm-lock.yaml` を正として扱います。
@@ -28,7 +30,8 @@ yarn ではなく pnpm を使い、`pnpm-lock.yaml` を正として扱います�
 - 公開 API、型、エラーコード、永続化形式を変更する場合は、後方互換性への影響を
   明示的に検討してください。
 - 新しい機能や不具合修正には、該当パッケージの `test/` に Vitest のテストを追加・
-  更新してください。
+  更新してください。パッケージをまたぐ通信・同期・UI 連携の挙動を変える場合は、
+  `tests/integration/test/` の統合テストも追加・更新してください。
 
 ## アーキテクチャ上の制約
 
@@ -96,7 +99,11 @@ pnpm test
 pnpm typecheck
 pnpm lint
 pnpm build
+pnpm test:integration
 ```
+
+`pnpm test:integration` は依存パッケージをビルドしてから `tests/integration` を実行します。
+`pnpm test` には含まれません。
 
 反復中は対象を絞って構いません。
 
@@ -106,7 +113,10 @@ pnpm --filter @stamprally/react test
 pnpm --filter @stamprally/ui test
 pnpm --filter @stamprally/admin-ui test
 pnpm --filter @stamprally/web test
+pnpm --filter @stamprally/integration-tests test:integration
 ```
+
+`--filter` で統合テストを直接実行する場合は、先に `pnpm build` で `dist/` を更新してください。
 
 完了時には、実行したコマンドと結果、実行できなかった検証があればその理由を報告して
 ください。
