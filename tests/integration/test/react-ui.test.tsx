@@ -121,8 +121,16 @@ describe("RallyViewer with a real client and server", () => {
     if (goodie === undefined) throw new Error("Expected goodie reward.");
     const config = { ...base, rewards: [{ ...goodie, requiredStampCount: 1 }] };
     const { publicConfig, persistence, network } = createTestBackend({ config });
-    const first = createTestDevice({ publicConfig, network });
-    const second = createTestDevice({ publicConfig, network });
+    const first = createTestDevice({
+      publicConfig,
+      network,
+      anonymousSessionId: "11111111-1111-4111-8111-111111111111",
+    });
+    const second = createTestDevice({
+      publicConfig,
+      network,
+      anonymousSessionId: "22222222-2222-4222-8222-222222222222",
+    });
     expect((await first.client.checkIn("gate", SECRETS.gatePasscode)).ok).toBe(true);
     expect((await second.client.checkIn("gate", SECRETS.gatePasscode)).ok).toBe(true);
     await second.client.sync();
