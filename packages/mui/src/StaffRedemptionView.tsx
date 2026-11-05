@@ -1,7 +1,7 @@
 import { Alert, Button, Paper, Stack, TextField, Typography } from "@mui/material";
 import type { ClaimOptions, ClaimResult, LocaleDictionary } from "@stamprally/core";
 import type { ReactNode } from "react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { type BuiltInMuiLocale, DEFAULT_MUI_DICTIONARY } from "./locales.js";
 
 export interface MuiStaffRedemptionViewProps<TLocale extends string = BuiltInMuiLocale> {
@@ -52,9 +52,20 @@ export function MuiStaffRedemptionView<TLocale extends string = BuiltInMuiLocale
   const [staffPasscode, setStaffPasscode] = useState(initialStaffPasscode);
   const [state, setState] = useState<"idle" | "busy" | "success" | "already" | "error">("idle");
   const [message, setMessage] = useState<string | null>(null);
+  const redeeming = useRef(false);
   const label = (key: string, fallback: string): string => text(dictionary, locale, key, fallback);
   const redeem = async (): Promise<void> => {
-    if (ticketNumber.trim() === "" || staffPasscode === "") return;
+    if (redeeming.current || ticketNumber.trim() === "" || staffPasscode === "") return;
+    if (
+      !window.confirm(
+        label(
+          "redemption.confirmFinal",
+          "Redeem this ticket? It cannot be used again after redemption.",
+        ),
+      )
+    )
+      return;
+    redeeming.current = true;
     setState("busy");
     try {
       const result =
@@ -94,6 +105,8 @@ export function MuiStaffRedemptionView<TLocale extends string = BuiltInMuiLocale
           ? error.message
           : label("redemption.invalid", "Could not redeem this ticket."),
       );
+    } finally {
+      redeeming.current = false;
     }
   };
   const scan = (): void => {
@@ -133,7 +146,12 @@ export function MuiStaffRedemptionView<TLocale extends string = BuiltInMuiLocale
         <Button
           variant="contained"
           size="large"
-          disabled={state === "busy" || ticketNumber.trim() === "" || staffPasscode === ""}
+          disabled={
+            state === "busy" ||
+            ticketNumber.trim() === "" ||
+            staffPasscode === "" ||
+            (onRedeem === undefined && (onClaimReward === undefined || rewardId === undefined))
+          }
           onClick={() => void redeem()}
         >
           {state === "busy"

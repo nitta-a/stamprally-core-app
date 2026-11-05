@@ -25,6 +25,28 @@ function ticketNumber(state: UserRallyState | null | undefined, rewardId: string
 }
 
 describe("offline queue → reconnect → server replay", () => {
+  it("rolls back an offline check-in if the rally has ended by server replay", async () => {
+    const config = {
+      ...createAdminConfig(),
+      availability: { startsAt: "2026-01-01T00:00:00Z", endsAt: "2026-01-02T00:00:00Z" },
+    };
+    const { publicConfig, persistence, network } = createTestBackend({
+      config,
+      serverOptions: { now: () => "2026-01-03T00:00:00Z" },
+    });
+    const { client, anonymousSessionId } = createTestDevice({ publicConfig, network });
+    network.setOffline(true);
+    expect(
+      (await client.checkIn("gate", SECRETS.gatePasscode, { now: "2026-01-01T12:00:00Z" })).ok,
+    ).toBe(true);
+    expect(client.pendingCount).toBe(1);
+    network.setOffline(false);
+    await client.sync();
+    expect(client.pendingCount).toBe(0);
+    expect(stampIds(client.getState())).toEqual([]);
+    expect(client.rejectedHistory.map(({ errorCode }) => errorCode)).toContain("RALLY_UNAVAILABLE");
+    expect(stampIds(await persistence.getUserState(RALLY_ID, anonymousSessionId))).toEqual([]);
+  });
   it("queues check-ins while offline and replays them in order after reconnecting", async () => {
     const { publicConfig, persistence, network } = createTestBackend();
     const device = createTestDevice({ publicConfig, network });

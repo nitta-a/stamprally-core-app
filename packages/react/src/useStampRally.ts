@@ -69,7 +69,12 @@ function serverSnapshot(): null {
   return null;
 }
 function errorFrom(value: unknown): Error {
-  return value instanceof Error ? value : new Error(String(value));
+  if (value instanceof Error) return value;
+  if (typeof value === "object" && value !== null) {
+    if ("message" in value && typeof value.message === "string") return new Error(value.message);
+    if ("code" in value && typeof value.code === "string") return new Error(value.code);
+  }
+  return new Error(String(value));
 }
 export function useStampRally(
   client: StampRallyClient,
@@ -88,11 +93,16 @@ export function useStampRally(
     () => 0,
   );
   const [error, setError] = useState<Error | null>(null);
+  const [initializationFailed, setInitializationFailed] = useState(false);
   useEffect(() => {
+    setInitializationFailed(false);
     if (options.initialize === false || client.getState() !== null) return;
     let active = true;
     void client.init().catch((reason: unknown) => {
-      if (active) setError(errorFrom(reason));
+      if (active) {
+        setError(errorFrom(reason));
+        setInitializationFailed(true);
+      }
     });
     return () => {
       active = false;
@@ -173,7 +183,7 @@ export function useStampRally(
   return {
     state,
     config: client.getConfig(),
-    isLoading: state === null,
+    isLoading: state === null && !initializationFailed,
     error,
     onCheckIn,
     onClaimReward,

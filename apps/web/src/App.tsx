@@ -2,7 +2,7 @@ import type { MouseEvent, ReactElement } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AdminExperience } from "./AdminExperience.js";
 import { createDemoClient } from "./createDemoClient.js";
-import { DEFAULT_ADMIN_CONFIG } from "./demoConfig.js";
+import { DEFAULT_ADMIN_CONFIG, DEMO_STOPS } from "./demoConfig.js";
 import type { DemoLocale } from "./locale.js";
 import { text } from "./locale.js";
 import { ParticipantExperience } from "./ParticipantExperience.js";
@@ -30,6 +30,23 @@ export function App(): ReactElement {
   const [locale, setLocale] = useState(currentLocale);
   const [admin, setAdmin] = useState(DEFAULT_ADMIN_CONFIG);
   const client = useMemo(() => createDemoClient(admin), [admin]);
+  const demoCodes = useMemo(
+    () =>
+      Object.fromEntries(
+        admin.spots.flatMap((spot) => {
+          const code = DEMO_STOPS[spot.id]?.code;
+          if (
+            code === undefined ||
+            !spot.conditions.some(
+              (condition) => condition.type === "passcode" && condition.code === code,
+            )
+          )
+            return [];
+          return [[spot.id, code]];
+        }),
+      ),
+    [admin],
+  );
   const mainContent = useRef<HTMLElement>(null);
 
   useEffect(() => {
@@ -123,9 +140,16 @@ export function App(): ReactElement {
       </header>
       <main ref={mainContent} id="main-content" className="main-content" tabIndex={-1}>
         {view === "admin" ? (
-          <AdminExperience config={admin} onChange={setAdmin} locale={locale} />
+          <AdminExperience
+            config={admin}
+            onChange={setAdmin}
+            locale={locale}
+            onLocaleChange={(next) => {
+              if (next !== locale) changeLocale();
+            }}
+          />
         ) : (
-          <ParticipantExperience client={client} locale={locale} />
+          <ParticipantExperience client={client} locale={locale} demoCodes={demoCodes} />
         )}
       </main>
       <footer className="site-footer">
@@ -140,8 +164,8 @@ export function App(): ReactElement {
         <small>
           {text(
             locale,
-            "進行状況は画面を開いている間だけ保持されます。再読み込みや設定の変更でリセットされます。",
-            "Progress lasts only while this page remains open. Reloading or changing settings resets it.",
+            "参加者の進捗は再読み込みや設定変更でリセットされます。主催者の設定も再読み込みで初期化されるため、残すには管理画面からJSONをダウンロードしてください。本番環境では別途保存の仕組みが必要です。",
+            "Participant progress resets on reload or configuration changes. Organizer settings also reset on reload; download the JSON in organizer settings to keep them. Production use requires separate storage.",
           )}
         </small>
       </footer>

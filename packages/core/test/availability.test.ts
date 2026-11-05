@@ -6,6 +6,38 @@ import {
 } from "../src/index.js";
 
 describe("availability", () => {
+  it("finds the next opening beyond a week of special closures", () => {
+    const availability: SpotAvailability = {
+      timezone: "UTC",
+      weekly: [{ dayOfWeek: 1, hours: [{ opensAt: "09:00", closesAt: "17:00" }] }],
+      exceptions: [
+        { date: "2026-09-28", closed: true },
+        { date: "2026-10-05", closed: true },
+      ],
+    };
+    expect(
+      evaluateSpotAvailability(availability, "2026-09-27T12:00:00Z").nextOpening,
+    ).toMatchObject({ date: "2026-10-12", opensAt: "09:00" });
+    expect(
+      evaluateSpotAvailability(
+        {
+          timezone: "UTC",
+          exceptions: [{ date: "2026-11-01", hours: [{ opensAt: "10:00", closesAt: "12:00" }] }],
+        },
+        "2026-09-27T12:00:00Z",
+      ).nextOpening,
+    ).toMatchObject({ date: "2026-11-01", opensAt: "10:00" });
+  });
+  it("uses the previous day's actual schedule for overnight hours", () => {
+    const availability: SpotAvailability = {
+      timezone: "UTC",
+      weekly: [{ dayOfWeek: 0, hours: [{ opensAt: "22:00", closesAt: "02:00" }] }],
+      exceptions: [{ date: "2026-09-26", hours: [{ opensAt: "23:00", closesAt: "03:00" }] }],
+    };
+    expect(evaluateSpotAvailability(availability, "2026-09-27T01:00:00Z").status).toBe("OPEN");
+    expect(evaluateSpotAvailability(availability, "2026-09-27T04:00:00Z").status).toBe("CLOSED");
+    expect(evaluateSpotAvailability(availability, "2026-09-28T01:00:00Z").status).toBe("OPEN");
+  });
   it("evaluates rally start and end without reading the clock", () => {
     const availability = {
       startsAt: "2026-09-26T10:00:00+09:00",

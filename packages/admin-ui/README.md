@@ -1,5 +1,7 @@
 # @stamprally/admin-ui
 
+Use `RallyAvailabilityForm` and `CompletionConditionForm` to embed the rally period and completion settings independently of `AdminRallyEditor`. Both are controlled components that accept the current configuration and an `onChange` callback.
+
 Accessible authoring forms and headless editing hooks for React 18 / 19.
 
 ## Setup

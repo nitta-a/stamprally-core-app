@@ -36,7 +36,7 @@ function localParts(now: string, timezone: string): { date: string; time: string
 
 function containsTime(hours: ReadonlyArray<AvailabilityHours>, time: string): boolean {
   return hours.some(({ opensAt, closesAt }) =>
-    closesAt > opensAt ? time >= opensAt && time < closesAt : time >= opensAt || time < closesAt,
+    closesAt > opensAt ? time >= opensAt && time < closesAt : time >= opensAt,
   );
 }
 
@@ -45,7 +45,7 @@ function findMatchingPeriod(
   time: string,
 ): AvailabilityHours | undefined {
   return hours.find(({ opensAt, closesAt }) =>
-    closesAt > opensAt ? time >= opensAt && time < closesAt : time >= opensAt || time < closesAt,
+    closesAt > opensAt ? time >= opensAt && time < closesAt : time >= opensAt,
   );
 }
 
@@ -76,20 +76,41 @@ function findNextOpening(
   availability: SpotAvailability,
   current: { date: string; time: string; day: number },
 ): AvailabilityResult["nextOpening"] {
+  const dates = new Set<string>();
+  const exceptions = new Map(
+    (availability.exceptions ?? []).map((exception) => [exception.date, exception]),
+  );
   for (let offset = 0; offset <= 7; offset += 1) {
-    const date = offset === 0 ? current.date : addDays(current.date, offset);
-    const dayOfWeek = (current.day + offset) % 7;
-    const hours = [...hoursForDate(availability, date, dayOfWeek)].sort((left, right) =>
+    dates.add(addDays(current.date, offset));
+  }
+  for (const exception of availability.exceptions ?? []) {
+    if (
+      exception.date < current.date ||
+      !Number.isFinite(Date.parse(`${exception.date}T00:00:00Z`))
+    )
+      continue;
+    for (let offset = 0; offset <= 7; offset += 1) dates.add(addDays(exception.date, offset));
+  }
+  for (const date of [...dates].sort()) {
+    const dayOfWeek = new Date(`${date}T00:00:00Z`).getUTCDay();
+    const exception = exceptions.get(date);
+    const configuredHours =
+      exception?.closed === true
+        ? []
+        : (exception?.hours ??
+          availability.weekly?.find((item) => item.dayOfWeek === dayOfWeek)?.hours ??
+          []);
+    const hours = [...configuredHours].sort((left, right) =>
       left.opensAt.localeCompare(right.opensAt),
     );
     for (const period of hours) {
-      if (offset === 0 && period.opensAt <= current.time) continue;
+      if (date === current.date && period.opensAt <= current.time) continue;
       return {
         date,
         dayOfWeek,
         opensAt: period.opensAt,
         closesAt: period.closesAt,
-        isToday: offset === 0,
+        isToday: date === current.date,
       };
     }
   }
@@ -141,7 +162,7 @@ export function evaluateSpotAvailability(
     };
   }
   const yesterday = (current.day + 6) % 7;
-  const overnight = availability.weekly?.find(({ dayOfWeek }) => dayOfWeek === yesterday)?.hours;
+  const overnight = hoursForDate(availability, addDays(current.date, -1), yesterday);
   const overnightPeriod =
     exception?.hours === undefined
       ? overnight?.find(({ opensAt, closesAt }) => closesAt <= opensAt && current.time < closesAt)

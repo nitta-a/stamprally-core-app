@@ -11,6 +11,8 @@ export interface MuiNextActionPanelProps<TLocale extends string = string> {
   readonly dictionary?: LocaleDictionary<TLocale>;
   readonly currentLocation?: GeoCoordinates;
   readonly onNavigate?: (suggestion: NextSpotSuggestion) => void;
+  readonly onViewSpot?: (suggestion: NextSpotSuggestion) => void;
+  readonly progress?: { readonly acquired: number; readonly required: number };
   readonly maxSuggestions?: number;
   readonly sx?: MuiSx;
 }
@@ -20,6 +22,8 @@ export function MuiNextActionPanel<TLocale extends string = string>({
   locale,
   dictionary,
   onNavigate,
+  onViewSpot,
+  progress,
   maxSuggestions = 3,
   sx,
 }: MuiNextActionPanelProps<TLocale>): ReactNode {
@@ -52,9 +56,35 @@ export function MuiNextActionPanel<TLocale extends string = string>({
                 spacing={0.5}
                 sx={{ p: 1, border: 2, borderColor: "currentColor", borderRadius: 1 }}
               >
+                {progress?.acquired === 0 && (
+                  <Typography>
+                    {resolveMuiLabel(dictionary, locale, "nextAction.start", "Start here")}
+                  </Typography>
+                )}
                 <Typography fontWeight="bold">
                   {resolveLocalizedText(primary.spot.name, locale)}
                 </Typography>
+                {progress !== undefined && (
+                  <Typography>
+                    {resolveMuiLabel(
+                      dictionary,
+                      locale,
+                      "nextAction.progress",
+                      "Progress: {acquired}/{required}",
+                    )
+                      .replace("{acquired}", String(progress.acquired))
+                      .replace("{required}", String(progress.required))}
+                  </Typography>
+                )}
+                {primary.spot.conditions.length > 0 && (
+                  <Typography>
+                    {primary.spot.conditions
+                      .map(({ type }) =>
+                        resolveMuiLabel(dictionary, locale, `nextAction.method.${type}`, type),
+                      )
+                      .join(" / ")}
+                  </Typography>
+                )}
                 {primary.availabilityStatus !== undefined && (
                   <Typography role="status">
                     {resolveMuiLabel(
@@ -78,6 +108,11 @@ export function MuiNextActionPanel<TLocale extends string = string>({
                 {onNavigate !== undefined && primary.spot.location !== undefined && (
                   <Button size="small" onClick={() => onNavigate(primary)}>
                     {resolveMuiLabel(dictionary, locale, "nextAction.navigate", "View directions")}
+                  </Button>
+                )}
+                {onViewSpot !== undefined && (
+                  <Button onClick={() => onViewSpot(primary)}>
+                    {resolveMuiLabel(dictionary, locale, "nextAction.viewSpot", "View spot")}
                   </Button>
                 )}
               </Stack>

@@ -1,6 +1,6 @@
 import type { ClaimOptions, ClaimResult, LocaleDictionary } from "@stamprally/core";
 import type { CSSProperties, ReactElement } from "react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { type BuiltInUiLocale, DEFAULT_UI_DICTIONARY } from "../locales/index.js";
 
 export interface StaffRedemptionViewProps<TLocale extends string = BuiltInUiLocale> {
@@ -59,9 +59,20 @@ export function StaffRedemptionView<TLocale extends string = BuiltInUiLocale>({
   const [staffPasscode, setStaffPasscode] = useState(initialStaffPasscode);
   const [status, setStatus] = useState<RedemptionStatus>("idle");
   const [detail, setDetail] = useState<string | null>(null);
+  const redeeming = useRef(false);
   const label = (key: string, fallback: string): string => text(dictionary, locale, key, fallback);
   const redeem = async (): Promise<void> => {
-    if (ticketNumber.trim() === "" || staffPasscode === "") return;
+    if (redeeming.current || ticketNumber.trim() === "" || staffPasscode === "") return;
+    if (
+      !window.confirm(
+        label(
+          "redemption.confirmFinal",
+          "Redeem this ticket? It cannot be used again after redemption.",
+        ),
+      )
+    )
+      return;
+    redeeming.current = true;
     setStatus("redeeming");
     setDetail(null);
     try {
@@ -104,6 +115,8 @@ export function StaffRedemptionView<TLocale extends string = BuiltInUiLocale>({
           ? error.message
           : label("redemption.invalid", "Could not redeem this ticket."),
       );
+    } finally {
+      redeeming.current = false;
     }
   };
   const scan = (): void => {
@@ -143,7 +156,12 @@ export function StaffRedemptionView<TLocale extends string = BuiltInUiLocale>({
       </label>
       <button
         type="button"
-        disabled={status === "redeeming" || ticketNumber.trim() === "" || staffPasscode === ""}
+        disabled={
+          status === "redeeming" ||
+          ticketNumber.trim() === "" ||
+          staffPasscode === "" ||
+          (onRedeem === undefined && (onClaimReward === undefined || rewardId === undefined))
+        }
         onClick={() => void redeem()}
       >
         {status === "redeeming"

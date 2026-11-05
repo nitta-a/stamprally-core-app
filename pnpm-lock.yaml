@@ -345,6 +345,9 @@ importers:
       '@stamprally/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@stamprally/mui':
+        specifier: workspace:*
+        version: link:../../packages/mui
       '@stamprally/react':
         specifier: workspace:*
         version: link:../../packages/react

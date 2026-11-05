@@ -8,6 +8,7 @@
   },
   "dependencies": {
     "@stamprally/core": "workspace:*",
+    "@stamprally/mui": "workspace:*",
     "@stamprally/react": "workspace:*",
     "@stamprally/server": "workspace:*",
     "@stamprally/ui": "workspace:*",

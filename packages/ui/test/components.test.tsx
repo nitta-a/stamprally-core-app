@@ -1,11 +1,12 @@
 import type { PublicReward } from "@stamprally/core";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   AccountBackupBanner,
   CloudSyncButton,
   CompletionPanel,
+  formatAvailabilityDetail,
   GpsProximityMeter,
   NextActionPanel,
   RallyViewer,
@@ -13,7 +14,11 @@ import {
   SyncStatusBanner,
 } from "../src/index.js";
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 
 describe("SyncStatusBanner", () => {
   it("renders pending offline operations", () => {
@@ -54,6 +59,56 @@ describe("cloud account components", () => {
 });
 
 describe("RallyViewer", () => {
+  it("provides localized prerequisite names to custom spot cards", () => {
+    const renderSpotCard = vi.fn(({ spot }: { spot: { id: string } }) => <div>{spot.id}</div>);
+    render(
+      <RallyViewer<"ja" | "en">
+        locale="ja"
+        config={{
+          id: "r",
+          version: "1",
+          title: "Rally",
+          spots: [
+            { id: "a", name: { ja: "博物館", en: "Museum" }, orderIndex: 0, conditions: [] },
+            { id: "b", name: "Next", orderIndex: 1, conditions: [], prerequisites: ["a"] },
+          ],
+          rewards: [],
+        }}
+        renderSpotCard={renderSpotCard}
+      />,
+    );
+    expect(renderSpotCard.mock.calls.find(([props]) => props.spot.id === "b")?.[0]).toMatchObject({
+      prerequisiteNames: ["博物館"],
+    });
+  });
+
+  it("formats availability details with localized and custom labels", () => {
+    expect(
+      formatAvailabilityDetail(
+        { status: "OPEN", currentPeriod: { opensAt: "09:00", closesAt: "17:00" } },
+        "ja",
+        "Asia/Tokyo",
+      ),
+    ).toBe("受付中 (09:00〜17:00 Asia/Tokyo)");
+    expect(
+      formatAvailabilityDetail(
+        {
+          status: "CLOSED",
+          reason: "temporary_closure",
+          nextOpening: {
+            date: "2026-10-02",
+            dayOfWeek: 5,
+            opensAt: "10:00",
+            closesAt: "17:00",
+            isToday: false,
+          },
+        },
+        "en",
+        "UTC",
+        { en: { "availability.closedToday": "Closed for maintenance" } },
+      ),
+    ).toBe("Closed for maintenance · Next spot opening 2026-10-02 10:00 UTC");
+  });
   it("keeps reward viewing separate from claiming and hides navigation without a location", () => {
     const onViewReward = vi.fn();
     const onClaimReward = vi.fn();
@@ -156,7 +211,10 @@ describe("RallyViewer", () => {
                 orderIndex: 0,
                 name: "Closed spot",
                 conditions: [],
-                availability: { timezone: "UTC", weekly: [] },
+                availability: {
+                  timezone: "UTC",
+                  weekly: [{ dayOfWeek: 6, hours: [{ opensAt: "13:00", closesAt: "17:00" }] }],
+                },
               },
               {
                 id: "target",
@@ -192,6 +250,11 @@ describe("RallyViewer", () => {
       />,
     );
     expect(screen.getAllByText("営業中").length).toBeGreaterThan(0);
+    expect(
+      screen.getByText(
+        "スポットの次回営業時間: 2026-09-26 13:00（UTC）。開催期間もご確認ください。",
+      ),
+    ).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Target spot" })).toBeTruthy();
     expect(screen.getByText("0 / 1")).toBeTruthy();
     expect(screen.getByText("Target spot", { selector: "li" })).toBeTruthy();
@@ -366,8 +429,80 @@ describe("RallyViewer", () => {
         }}
       />,
     );
-    expect(screen.getByRole("button", { name: "Scan QR" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Scan QR" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByText(/QR scanning is not supported here/)).toBeTruthy();
     expect(screen.getAllByRole("button", { name: "Check in" })).toHaveLength(1);
+  });
+
+  it("prevents repeated location requests while waiting for the device", async () => {
+    let fail: PositionErrorCallback | undefined;
+    const getCurrentPosition = vi.fn(
+      (_success: PositionCallback, onError: PositionErrorCallback) => {
+        fail = onError;
+      },
+    );
+    vi.stubGlobal("navigator", { geolocation: { getCurrentPosition } });
+    render(
+      <RallyViewer
+        locale="en"
+        adapter={{
+          config: {
+            id: "r",
+            version: "1",
+            title: "Rally",
+            spots: [
+              {
+                id: "s",
+                orderIndex: 0,
+                name: "Spot",
+                conditions: [{ type: "gps", latitude: 35, longitude: 139, radiusMeters: 100 }],
+              },
+            ],
+            rewards: [],
+          },
+          onCheckIn: vi.fn(),
+        }}
+      />,
+    );
+    const button = screen.getByRole("button", { name: "Check location" });
+    fireEvent.click(button);
+    expect(button.hasAttribute("disabled")).toBe(true);
+    fireEvent.click(button);
+    expect(getCurrentPosition).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("Verifying…")).toBeTruthy();
+    act(() =>
+      fail?.({
+        code: 1,
+        message: "Denied",
+        PERMISSION_DENIED: 1,
+        POSITION_UNAVAILABLE: 2,
+        TIMEOUT: 3,
+      }),
+    );
+    await waitFor(() => expect(button.hasAttribute("disabled")).toBe(false));
+    expect(screen.getByRole("alert").textContent).toContain("Denied");
+  });
+
+  it("explains when NFC is unavailable", () => {
+    render(
+      <RallyViewer
+        locale="ja"
+        adapter={{
+          config: {
+            id: "r",
+            version: "1",
+            title: "Rally",
+            spots: [{ id: "s", orderIndex: 0, name: "Spot", conditions: [{ type: "nfc" }] }],
+            rewards: [],
+          },
+          onCheckIn: vi.fn(),
+        }}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "NFCを読み取る" }).hasAttribute("disabled")).toBe(
+      true,
+    );
+    expect(screen.getByText(/この環境ではNFCを利用できません/)).toBeTruthy();
   });
 
   it("renders spot and feedback slots with the deepest style hooks", () => {
@@ -504,14 +639,222 @@ describe("RallyViewer", () => {
     expect(screen.getByText("Only a few left")).toBeTruthy();
     expect(screen.getAllByText(/LOCKED/).length).toBeGreaterThan(0);
     expect(screen.getByText("Complete First to unlock this spot.")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Check in" })).toHaveProperty("disabled", true);
-    fireEvent.click(screen.getByRole("button", { name: "Check in" }));
+    const lockedCard = screen.getByRole("heading", { name: "Locked" }).closest("article");
+    if (lockedCard === null) throw new Error("Expected locked spot card.");
+    const checkIn = within(lockedCard).getByRole("button", { name: "Check in" });
+    expect(checkIn).toHaveProperty("disabled", true);
+    fireEvent.click(checkIn);
     expect(onCheckIn).not.toHaveBeenCalled();
   });
 });
 
 describe("participant utility components", () => {
+  it("does not offer a sold-out reward on the completion panel", () => {
+    const progress = {
+      acquired: 1,
+      total: 1,
+      percentage: 100,
+      isCompleted: true,
+      completionRequired: 1,
+      completionAcquired: 1,
+      completionPercentage: 100,
+      nextAvailableSpots: [],
+    };
+    const reward: PublicReward = {
+      id: "r",
+      title: "Prize",
+      type: "in_person",
+      redemptionMethod: "manual_slide",
+      requiredStampCount: 1,
+    };
+    render(
+      <CompletionPanel
+        progress={progress}
+        rewards={[reward]}
+        rewardStates={[{ rewardId: "r", status: "AVAILABLE" }]}
+        inventory={{ rewardRemaining: { r: 0 } }}
+        locale="en"
+        onClaimReward={vi.fn()}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "Redeem reward" })).toBeNull();
+  });
+  it("shows the rally status on a spot when the rally has ended", () => {
+    render(
+      <RallyViewer
+        locale="en"
+        nextAction={{ now: "2026-09-27T12:00:00Z" }}
+        adapter={{
+          config: {
+            id: "r",
+            version: "1",
+            title: "Rally",
+            availability: { endsAt: "2026-09-27T00:00:00Z" },
+            spots: [{ id: "s", name: "Spot", orderIndex: 0, conditions: [] }],
+            rewards: [],
+          },
+          onCheckIn: vi.fn(),
+        }}
+      />,
+    );
+    const card = screen.getByRole("heading", { name: "Spot" }).closest("article");
+    if (card === null) throw new Error("Expected spot card.");
+    expect(within(card).getByText("Ended")).toBeTruthy();
+    expect(within(card).getByRole("button", { name: "Check in" })).toHaveProperty("disabled", true);
+  });
+  it("guides participants to an open spot and focuses its card", () => {
+    render(
+      <RallyViewer
+        locale="en"
+        adapter={{
+          config: {
+            id: "r",
+            version: "1",
+            title: "Rally",
+            spots: [
+              { id: "spot", name: "Library", orderIndex: 0, conditions: [{ type: "passcode" }] },
+            ],
+            rewards: [],
+          },
+          onCheckIn: vi.fn(),
+        }}
+      />,
+    );
+    const guide = screen.getByRole("region", { name: "Next spots" });
+    expect(within(guide).getByText("Progress: 0/1")).toBeTruthy();
+    expect(within(guide).getByText("Enter a passcode")).toBeTruthy();
+    fireEvent.click(within(guide).getByRole("button", { name: "View spot" }));
+    expect(document.activeElement?.getAttribute("data-status")).toBe("UNCLAIMED");
+  });
+  it("updates availability while the viewer remains open", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-26T08:59:50Z"));
+    try {
+      render(
+        <RallyViewer
+          locale="en"
+          adapter={{
+            config: {
+              id: "r",
+              version: "1",
+              title: "Rally",
+              spots: [
+                {
+                  id: "s",
+                  name: "Spot",
+                  orderIndex: 0,
+                  conditions: [{ type: "passcode" }],
+                  availability: {
+                    timezone: "UTC",
+                    weekly: [{ dayOfWeek: 6, hours: [{ opensAt: "09:00", closesAt: "17:00" }] }],
+                  },
+                },
+              ],
+              rewards: [],
+            },
+            onCheckIn: vi.fn(),
+          }}
+        />,
+      );
+      fireEvent.change(screen.getByRole("textbox"), { target: { value: "OPEN" } });
+      expect(screen.getByRole("button", { name: "Check in" })).toHaveProperty("disabled", true);
+      act(() => vi.advanceTimersByTime(15_000));
+      expect(screen.getByRole("button", { name: "Check in" })).toHaveProperty("disabled", false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it("confirms reward redemption and prevents a second submission while pending", async () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValue(true);
+    let finish: (() => void) | undefined;
+    const onClaimReward = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const reward: PublicReward = {
+      id: "r",
+      title: "Prize",
+      type: "in_person",
+      redemptionMethod: "manual_slide",
+      requiredStampCount: 1,
+    };
+    const progress = {
+      acquired: 1,
+      total: 1,
+      percentage: 100,
+      isCompleted: true,
+      completionRequired: 1,
+      completionAcquired: 1,
+      completionPercentage: 100,
+      nextAvailableSpots: [],
+    };
+    render(
+      <CompletionPanel
+        progress={progress}
+        rewards={[reward]}
+        rewardStates={[{ rewardId: "r", status: "AVAILABLE" }]}
+        locale="en"
+        onClaimReward={onClaimReward}
+      />,
+    );
+    const button = screen.getByRole("button", { name: "Redeem reward" });
+    fireEvent.click(button);
+    expect(onClaimReward).not.toHaveBeenCalled();
+    fireEvent.click(button);
+    await waitFor(() => expect(onClaimReward).toHaveBeenCalledTimes(1));
+    expect(confirm).toHaveBeenLastCalledWith(expect.stringContaining("Prize"));
+    expect(button).toHaveProperty("disabled", true);
+    fireEvent.click(button);
+    expect(onClaimReward).toHaveBeenCalledTimes(1);
+    await act(async () => finish?.());
+  });
+  it("requires a staff passcode when redeeming from completion", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const onClaimReward = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: false })
+      .mockResolvedValueOnce({ ok: true });
+    render(
+      <CompletionPanel
+        progress={{
+          acquired: 1,
+          total: 1,
+          percentage: 100,
+          isCompleted: true,
+          completionRequired: 1,
+          completionAcquired: 1,
+          completionPercentage: 100,
+          nextAvailableSpots: [],
+        }}
+        rewards={[
+          {
+            id: "r",
+            title: "Prize",
+            type: "in_person",
+            redemptionMethod: "staff_passcode",
+            requiredStampCount: 1,
+          },
+        ]}
+        rewardStates={[{ rewardId: "r", status: "AVAILABLE" }]}
+        locale="en"
+        onClaimReward={onClaimReward}
+      />,
+    );
+    const input = screen.getByLabelText("Staff passcode");
+    const button = screen.getByRole("button", { name: "Redeem reward" });
+    expect(button).toHaveProperty("disabled", true);
+    fireEvent.change(input, { target: { value: "  CODE  " } });
+    fireEvent.click(button);
+    await waitFor(() => expect(onClaimReward).toHaveBeenCalledWith("r", { staffPasscode: "CODE" }));
+    expect(await screen.findByRole("alert")).toBeTruthy();
+    fireEvent.click(button);
+    await waitFor(() => expect(input).toHaveProperty("value", ""));
+  });
   it("shows GPS proximity and completes a staff redemption", async () => {
+    vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValue(true);
+    const onRedeem = vi.fn(async () => ({ ok: true }));
     render(
       <>
         <GpsProximityMeter
@@ -520,7 +863,7 @@ describe("participant utility components", () => {
           radiusMeters={100}
           locale="en"
         />
-        <StaffRedemptionView onRedeem={vi.fn(async () => ({ ok: true }))} locale="en" />
+        <StaffRedemptionView onRedeem={onRedeem} locale="en" />
       </>,
     );
     expect(screen.getByText("You are inside the check-in area")).toBeTruthy();
@@ -528,6 +871,8 @@ describe("participant utility components", () => {
       target: { value: "T-1" },
     });
     fireEvent.change(screen.getByLabelText("Staff passcode"), { target: { value: "secret" } });
+    fireEvent.click(screen.getByRole("button", { name: "Redeem ticket" }));
+    expect(onRedeem).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Redeem ticket" }));
     expect(await screen.findByText("Exchange completed")).toBeTruthy();
   });

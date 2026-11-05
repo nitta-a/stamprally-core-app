@@ -1,7 +1,7 @@
-import { resolveLocalizedText } from "@stamprally/core";
+import { getRewardAvailability, resolveLocalizedText } from "@stamprally/core";
 import type { RewardCardProps } from "@stamprally/ui";
 import type { ReactElement } from "react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { text } from "./locale.js";
 
 interface DemoRewardCardProps extends RewardCardProps {
@@ -9,13 +9,23 @@ interface DemoRewardCardProps extends RewardCardProps {
 }
 
 export function DemoRewardCard(props: DemoRewardCardProps): ReactElement {
-  const { reward, state, progress, missingSpotNames, locale, onViewReward, onClaim, anchorId } =
-    props;
+  const {
+    reward,
+    state,
+    progress,
+    missingSpotNames,
+    inventory,
+    locale,
+    onViewReward,
+    onClaim,
+    anchorId,
+  } = props;
   const language = locale === "ja" ? "ja" : "en";
   const [staffCode, setStaffCode] = useState("");
   const [claimError, setClaimError] = useState<string | null>(null);
   const [isClaiming, setIsClaiming] = useState(false);
-  const available = state?.status === "AVAILABLE";
+  const claimingRef = useRef(false);
+  const { available } = getRewardAvailability(reward, state, inventory);
   const consumed = state?.status === "CONSUMED";
   const expired = state?.status === "EXPIRED";
   const isViewOnly = reward.redemptionMethod === "view_only";
@@ -27,10 +37,12 @@ export function DemoRewardCard(props: DemoRewardCardProps): ReactElement {
       ? text(language, `あと${remainingCount}個で達成`, `${remainingCount} more to go`)
       : text(language, "条件を達成すると受け取れます", "Complete requirements to unlock");
   if (available) {
-    if (isViewOnly) actionText = text(language, "記念カードを見る", "View keepsake");
+    if (isViewOnly) actionText = text(language, "特典を見る", "View reward");
     else if (reward.redemptionMethod === "manual_slide")
       actionText = text(language, "確認して特典を受け取る", "Confirm and receive reward");
     else actionText = text(language, "特典を受け取る", "Receive reward");
+  } else if (state?.status === "AVAILABLE") {
+    actionText = text(language, "在庫切れ", "Out of stock");
   } else if (consumed) {
     actionText = text(language, "受け取り済み", "Redeemed");
   } else if (expired) {
@@ -38,7 +50,19 @@ export function DemoRewardCard(props: DemoRewardCardProps): ReactElement {
   }
 
   const handleClaim = async (): Promise<void> => {
-    if (onClaim === undefined) return;
+    if (onClaim === undefined || claimingRef.current) return;
+    const rewardName = resolveLocalizedText(reward.title, locale);
+    if (
+      !window.confirm(
+        text(
+          language,
+          `「${rewardName}」を引き換えますか？引換後は再び利用できない場合があります。`,
+          `Redeem ${rewardName}? It may not be available again after redemption.`,
+        ),
+      )
+    )
+      return;
+    claimingRef.current = true;
     setClaimError(null);
     setIsClaiming(true);
     try {
@@ -64,6 +88,7 @@ export function DemoRewardCard(props: DemoRewardCardProps): ReactElement {
         text(language, "特典を受け取れませんでした。", "Could not redeem this reward."),
       );
     } finally {
+      claimingRef.current = false;
       setIsClaiming(false);
     }
   };

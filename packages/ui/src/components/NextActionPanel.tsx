@@ -9,6 +9,8 @@ export interface NextActionPanelProps<TLocale extends string = string> {
   readonly dictionary?: LocaleDictionary<TLocale>;
   readonly currentLocation?: GeoCoordinates;
   readonly onNavigate?: (suggestion: NextSpotSuggestion) => void;
+  readonly onViewSpot?: (suggestion: NextSpotSuggestion) => void;
+  readonly progress?: { readonly acquired: number; readonly required: number };
   readonly maxSuggestions?: number;
   readonly className?: string;
 }
@@ -18,6 +20,8 @@ export function NextActionPanel<TLocale extends string = string>({
   locale,
   dictionary,
   onNavigate,
+  onViewSpot,
+  progress,
   maxSuggestions = 3,
   className,
 }: NextActionPanelProps<TLocale>): ReactElement {
@@ -38,7 +42,31 @@ export function NextActionPanel<TLocale extends string = string>({
         <>
           {primary === undefined ? null : (
             <article className="sry-next-action__primary">
+              {progress?.acquired === 0 && (
+                <span>{resolveUiLabel(dictionary, locale, "nextAction.start", "Start here")}</span>
+              )}
               <strong>{resolveLocalizedText(primary.spot.name, locale)}</strong>
+              {progress !== undefined && (
+                <p>
+                  {resolveUiLabel(
+                    dictionary,
+                    locale,
+                    "nextAction.progress",
+                    "Progress: {acquired}/{required}",
+                  )
+                    .replace("{acquired}", String(progress.acquired))
+                    .replace("{required}", String(progress.required))}
+                </p>
+              )}
+              {primary.spot.conditions.length > 0 && (
+                <p>
+                  {primary.spot.conditions
+                    .map(({ type }) =>
+                      resolveUiLabel(dictionary, locale, `nextAction.method.${type}`, type),
+                    )
+                    .join(" / ")}
+                </p>
+              )}
               {primary.availabilityStatus !== undefined && (
                 <span role="status">
                   {resolveUiLabel(
@@ -62,6 +90,11 @@ export function NextActionPanel<TLocale extends string = string>({
               {onNavigate !== undefined && primary.spot.location !== undefined && (
                 <button type="button" onClick={() => onNavigate(primary)}>
                   {resolveUiLabel(dictionary, locale, "nextAction.navigate", "View directions")}
+                </button>
+              )}
+              {onViewSpot !== undefined && (
+                <button type="button" onClick={() => onViewSpot(primary)}>
+                  {resolveUiLabel(dictionary, locale, "nextAction.viewSpot", "View spot")}
                 </button>
               )}
             </article>

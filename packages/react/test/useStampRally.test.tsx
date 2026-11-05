@@ -4,8 +4,8 @@ import {
   StampRallyClient,
   toPublicConfig,
 } from "@stamprally/core";
-import { renderHook, waitFor } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { act, renderHook, waitFor } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import { useStampRally } from "../src/index.js";
 
 const config = toPublicConfig<"en", Record<string, unknown>>({
@@ -24,5 +24,23 @@ describe("useStampRally", () => {
     await waitFor(() => expect(result.current.isLoading).toBe(false));
     await result.current.switchUser("member");
     expect(result.current.state?.userId).toBe("member");
+  });
+
+  it("exposes the message from a failed check-in", async () => {
+    const client = new StampRallyClient(config, { storage: new InMemoryStorage() });
+    const { result } = renderHook(() => useStampRally(client));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    await act(async () => {
+      await result.current.onCheckIn("missing", "proof");
+    });
+    expect(result.current.error?.message).toBe("Spot was not found.");
+  });
+
+  it("stops loading when initialization fails", async () => {
+    const client = new StampRallyClient(config, { storage: new InMemoryStorage() });
+    vi.spyOn(client, "init").mockRejectedValue(new Error("Storage unavailable"));
+    const { result } = renderHook(() => useStampRally(client));
+    await waitFor(() => expect(result.current.error?.message).toBe("Storage unavailable"));
+    expect(result.current.isLoading).toBe(false);
   });
 });

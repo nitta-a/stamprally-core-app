@@ -21,11 +21,14 @@ Pass a stable `StampRallyClient` or a server-backed `adapter` to enable particip
 
 - `locale` and `dictionary`: localized content and UI labels.
 - `renderSpotCard`, `renderRewardCard`, `renderStatusBadge`, and header/footer slots: custom presentation.
+- Custom spot cards receive `prerequisiteNames`; `formatAvailabilityDetail` formats opening details using the UI dictionary.
 - `customConditionRenderers`: custom verification controls that submit proof through `onSubmit`.
 - `nextAction`, `onNavigate`, `onCompleted`: spot suggestions, host-owned navigation, and completion callbacks.
 - `showSyncStatus`, `renderSyncStatus`: the built-in sync banner or a custom status view.
 
 The viewer includes next-action, completion, and sync panels. `StampSheet` provides a read-only progress view; `AccountBackupBanner` and `CloudSyncButton` accept host callbacks for account backup.
+
+For `staff_passcode` rewards, the default reward card and completion panel collect the staff passcode and pass it in the claim options. Custom reward cards can use `getRewardAvailability` from `@stamprally/core` to apply the same inventory checks.
 
 See the [feature guide](https://github.com/nitta-a/stamprally-core-app/blob/main/docs/GUIDE.md) for rendering examples, availability, and reward goals.
 

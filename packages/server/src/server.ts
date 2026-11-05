@@ -3,6 +3,8 @@ import {
   type CheckInCondition,
   consumeReward,
   evaluateConditionDetailed,
+  evaluateRallyAvailability,
+  evaluateSpotAvailability,
   reconcileRewardStates,
   sortOperationsDeterministically,
   type UserRallyState,
@@ -493,6 +495,27 @@ export class StampRallyServer {
           error: code,
         };
       };
+      if (
+        this.#config.availability !== undefined &&
+        evaluateRallyAvailability(this.#config.availability, timestamp).status !== "OPEN"
+      )
+        return await this.#rememberCheckInTransaction(
+          directRequest,
+          timestamp,
+          key,
+          current,
+          rejected("RALLY_UNAVAILABLE", "The rally is not open."),
+          responseHolder,
+        );
+      if (evaluateSpotAvailability(spot.availability, timestamp).status !== "OPEN")
+        return await this.#rememberCheckInTransaction(
+          directRequest,
+          timestamp,
+          key,
+          current,
+          rejected("SPOT_UNAVAILABLE", "The spot is not open."),
+          responseHolder,
+        );
       if (current.records.some((record) => record.stampId === request.spotId))
         return await this.#rememberCheckInTransaction(
           directRequest,

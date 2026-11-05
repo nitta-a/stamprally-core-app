@@ -29,8 +29,9 @@ import type {
   SyncEventListener,
   UserRallyState,
 } from "@stamprally/core";
-import { getNextSpotSuggestions } from "@stamprally/core";
+import { getNextSpotSuggestions, getRewardAvailability } from "@stamprally/core";
 import { CompletionPanel, type CompletionPanelProps } from "./components/CompletionPanel.js";
+import { confirmReward } from "./components/confirmReward.js";
 import { NextActionPanel, type NextActionPanelProps } from "./components/NextActionPanel.js";
 import { type SyncStateContext, SyncStatusBanner } from "./components/SyncStatusBanner.js";
 import { resolveUiLabel } from "./locales/index.js";
@@ -49,6 +50,7 @@ export type { StaffRedemptionViewProps } from "./components/StaffRedemptionView.
 export { StaffRedemptionView } from "./components/StaffRedemptionView.js";
 export type { SyncStateContext, SyncStatusBannerProps } from "./components/SyncStatusBanner.js";
 export { SyncStatusBanner } from "./components/SyncStatusBanner.js";
+export { formatAvailabilityDetail } from "./locales/availabilityDetail.js";
 export type { BuiltInUiLocale } from "./locales/index.js";
 export { DEFAULT_UI_DICTIONARY, UI_DICTIONARIES } from "./locales/index.js";
 
@@ -122,6 +124,7 @@ export interface SpotCardProps<TLocale extends string = string> {
   readonly status: SpotStatus;
   readonly availabilityStatus?: AvailabilityStatus;
   readonly availability?: AvailabilityResult;
+  readonly prerequisiteNames?: ReadonlyArray<string>;
   readonly locale: TLocale;
   readonly dictionary?: LocaleDictionary<TLocale>;
   readonly children: ReactNode;
@@ -251,6 +254,7 @@ function DefaultCondition<TLocale extends string>({
   const [error, setError] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const text = (key: string, fallback: string): string => label(dictionary, locale, key, fallback);
+  const unavailable = disabled || status === "loading";
   const verify = async (proof: unknown): Promise<void> => {
     setStatus("loading");
     setError(null);
@@ -264,7 +268,21 @@ function DefaultCondition<TLocale extends string>({
         result.ok === false
       ) {
         setStatus("error");
-        setError(text("verificationFailed", "Verification failed."));
+        const errorCode =
+          "error" in result &&
+          typeof result.error === "object" &&
+          result.error !== null &&
+          "code" in result.error
+            ? result.error.code
+            : undefined;
+        if (errorCode === "RALLY_UNAVAILABLE" || errorCode === "SPOT_UNAVAILABLE")
+          setError(
+            text(
+              "availability.checkInClosed",
+              "Check-in is closed. Check the opening hours and try again.",
+            ),
+          );
+        else setError(text("verificationFailed", "Verification failed."));
       } else setStatus("success");
     } catch {
       setStatus("error");
@@ -317,11 +335,19 @@ function DefaultCondition<TLocale extends string>({
             type="button"
             className={join("sry-action", classNames?.action, classNames?.button)}
             style={styles?.button ?? styles?.action}
-            disabled={disabled || !isQrSupported()}
+            disabled={unavailable || !isQrSupported()}
             onClick={scanQr}
           >
             {text("scanQr", "Scan QR")}
           </button>
+          {!isQrSupported() && (
+            <p role="status">
+              {text(
+                "qrUnsupported",
+                "QR scanning is not supported here. Enter a code provided by the organizer, or contact them for help.",
+              )}
+            </p>
+          )}
           <details>
             <summary>{text("qrManualFallback", "Enter the code manually")}</summary>
             <form
@@ -343,7 +369,7 @@ function DefaultCondition<TLocale extends string>({
                 type="submit"
                 className={join("sry-action", classNames?.action, classNames?.button)}
                 style={styles?.button ?? styles?.action}
-                disabled={disabled || value.trim() === ""}
+                disabled={unavailable || value.trim() === ""}
               >
                 {text("checkIn", "Check in")}
               </button>
@@ -356,22 +382,32 @@ function DefaultCondition<TLocale extends string>({
           type="button"
           className={join("sry-action", classNames?.action, classNames?.button)}
           style={styles?.button ?? styles?.action}
-          disabled={disabled}
+          disabled={unavailable}
           onClick={readLocation}
         >
           {text("checkLocation", "Check location")}
         </button>
       )}
       {condition.type === "nfc" && (
-        <button
-          type="button"
-          className={join("sry-action", classNames?.action, classNames?.button)}
-          style={styles?.button ?? styles?.action}
-          disabled={disabled || !isNfcSupported()}
-          onClick={readNfc}
-        >
-          {text("readNfc", "Read NFC")}
-        </button>
+        <>
+          <button
+            type="button"
+            className={join("sry-action", classNames?.action, classNames?.button)}
+            style={styles?.button ?? styles?.action}
+            disabled={unavailable || !isNfcSupported()}
+            onClick={readNfc}
+          >
+            {text("readNfc", "Read NFC")}
+          </button>
+          {!isNfcSupported() && (
+            <p role="status">
+              {text(
+                "nfcUnsupported",
+                "NFC is not supported here. Contact the organizer for another way to check in.",
+              )}
+            </p>
+          )}
+        </>
       )}
       {(condition.type === "passcode" || condition.type === "custom") && (
         <form
@@ -398,7 +434,7 @@ function DefaultCondition<TLocale extends string>({
             type="submit"
             className={join("sry-action", classNames?.action, classNames?.button)}
             style={styles?.button ?? styles?.action}
-            disabled={disabled || value.trim() === ""}
+            disabled={unavailable || value.trim() === ""}
           >
             {text("checkIn", "Check in")}
           </button>
@@ -434,20 +470,20 @@ function DefaultRewardCard<TLocale extends string>({
   readonly classNames?: ViewerClassNames;
   readonly styles?: ViewerStyles;
 }): ReactElement {
+  const [claiming, setClaiming] = useState(false);
+  const [claimFailed, setClaimFailed] = useState(false);
+  const [staffPasscode, setStaffPasscode] = useState("");
+  const claimingRef = useRef(false);
   const status = state?.status ?? "LOCKED";
-  const configuredRemaining =
-    inventory?.rewardRemaining?.[reward.id] ??
-    (reward.stockLimit === undefined
-      ? undefined
-      : Math.max(0, reward.stockLimit - (state?.redeemedCount ?? 0)));
+  const { available, remaining: configuredRemaining } = getRewardAvailability(
+    reward,
+    state,
+    inventory,
+  );
   const sharedRemaining = inventory?.sharedRemaining;
   const canView = reward.redemptionMethod === "view_only" && onViewReward !== undefined;
   const canRedeem = reward.redemptionMethod !== "view_only" && onClaim !== undefined;
-  const unavailable =
-    status !== "AVAILABLE" ||
-    (!canView && !canRedeem) ||
-    sharedRemaining === 0 ||
-    configuredRemaining === 0;
+  const unavailable = claiming || !available || (!canView && !canRedeem);
   const expiry = reward.validUntil === undefined ? undefined : new Date(reward.validUntil);
   return (
     <article className={join("sry-reward-card", classNames?.reward)} style={styles?.reward}>
@@ -497,14 +533,53 @@ function DefaultRewardCard<TLocale extends string>({
           {expiry.toLocaleString(locale)}
         </time>
       )}
+      {reward.redemptionMethod === "staff_passcode" && status === "AVAILABLE" && (
+        <label>
+          {label(dictionary, locale, "redemption.staffPasscode", "Staff passcode")}
+          <input
+            type="password"
+            autoComplete="off"
+            value={staffPasscode}
+            onChange={(event) => setStaffPasscode(event.target.value)}
+            disabled={unavailable}
+          />
+        </label>
+      )}
       <button
         type="button"
         className={join(classNames?.reward, classNames?.button)}
         style={styles?.button}
-        disabled={unavailable}
+        disabled={
+          unavailable || (reward.redemptionMethod === "staff_passcode" && !staffPasscode.trim())
+        }
         onClick={() => {
           if (canView) onViewReward?.(reward.id);
-          else if (canRedeem) void onClaim?.(reward.id);
+          else if (
+            canRedeem &&
+            onClaim !== undefined &&
+            !claimingRef.current &&
+            confirmReward(resolveLocalizedText(reward.title, locale), locale, dictionary)
+          ) {
+            claimingRef.current = true;
+            setClaiming(true);
+            setClaimFailed(false);
+            const options =
+              reward.redemptionMethod === "staff_passcode"
+                ? { staffPasscode: staffPasscode.trim() }
+                : undefined;
+            const request =
+              options === undefined ? onClaim(reward.id) : onClaim(reward.id, options);
+            void request
+              .then((result) => {
+                if (!result.ok) setClaimFailed(true);
+                else setStaffPasscode("");
+              })
+              .catch(() => setClaimFailed(true))
+              .finally(() => {
+                claimingRef.current = false;
+                setClaiming(false);
+              });
+          }
         }}
       >
         {status === "AVAILABLE"
@@ -513,6 +588,16 @@ function DefaultRewardCard<TLocale extends string>({
             : label(dictionary, locale, "reward.redeem", "Redeem reward")
           : label(dictionary, locale, `status.${status.toLowerCase()}`, status)}
       </button>
+      {claimFailed && (
+        <p role="alert">
+          {label(
+            dictionary,
+            locale,
+            "reward.claimFailed",
+            "Could not redeem this reward. Please try again.",
+          )}
+        </p>
+      )}
     </article>
   );
 }
@@ -552,6 +637,8 @@ export function RallyViewer<TLocale extends string = string>({
     () => client?.getState() ?? adapter?.state ?? null,
   );
   const [busy, setBusy] = useState<string | null>(null);
+  const pendingClaims = useRef(new Map<string, Promise<ClaimResult>>());
+  const spotElements = useRef(new Map<string, HTMLElement>());
   const [feedback, setFeedback] = useState<CheckInResult | null>(null);
   const [syncStatus, setSyncStatus] = useState<SyncStateContext>(() => ({
     syncState: client?.syncState ?? "idle",
@@ -601,14 +688,27 @@ export function RallyViewer<TLocale extends string = string>({
     [config, currentState],
   );
   const completedRef = useRef<boolean | null>(state === null ? null : progress.isCompleted);
-  const availabilityNow = nextAction?.now ?? new Date().toISOString();
+  const [clock, setClock] = useState(() => new Date().toISOString());
+  useEffect(() => {
+    if (nextAction?.now !== undefined || !availabilityConfigured(config)) return;
+    const update = (): void => setClock(new Date().toISOString());
+    update();
+    const timer = window.setInterval(update, 1_000);
+    document.addEventListener("visibilitychange", update);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", update);
+    };
+  }, [config, nextAction?.now]);
+  const availabilityNow = nextAction?.now ?? clock;
+  const rallyAvailability = evaluateRallyAvailability(config.availability, availabilityNow);
   const suggestions = useMemo(
     () =>
       getNextSpotSuggestions(currentState, config, {
         ...(nextAction?.strategy === undefined ? {} : { strategy: nextAction.strategy }),
         ...(nextAction?.rewardId === undefined ? {} : { rewardId: nextAction.rewardId }),
         ...(nextAction?.availability === undefined
-          ? { availability: "open_first" as const }
+          ? { availability: "exclude_closed" as const }
           : { availability: nextAction.availability }),
         now: availabilityNow,
         ...(nextAction?.currentLocation === undefined
@@ -635,11 +735,27 @@ export function RallyViewer<TLocale extends string = string>({
       ? undefined
       : (spotId: string, proof: unknown, options?: CheckInOptions) =>
           client.checkIn(spotId, proof, options));
-  const claim =
+  const claimReward =
     adapter?.onClaimReward ??
     (client === undefined
       ? undefined
       : (rewardId: string, options?: ClaimOptions) => client.claimReward(rewardId, options));
+  const claim =
+    claimReward === undefined
+      ? undefined
+      : (rewardId: string, options?: ClaimOptions): Promise<ClaimResult> => {
+          const pending = pendingClaims.current.get(rewardId);
+          if (pending !== undefined) return pending;
+          const request = Promise.resolve()
+            .then(() => claimReward(rewardId, options))
+            .then((result) => {
+              if (result.ok) setState(result.value.state);
+              return result;
+            })
+            .finally(() => pendingClaims.current.delete(rewardId));
+          pendingClaims.current.set(rewardId, request);
+          return request;
+        };
   const submit = useCallback(
     async (spotId: string, proof: unknown): Promise<CheckInResult | undefined> => {
       if (checkIn === undefined) return undefined;
@@ -691,11 +807,13 @@ export function RallyViewer<TLocale extends string = string>({
           {progress.completionAcquired}/{progress.completionRequired}
         </span>
         {availabilityConfigured(config) && (
-          <p role="status">
-            {availabilityText(
-              dictionary,
-              locale,
-              evaluateRallyAvailability(config.availability, availabilityNow).status,
+          <p role="status">{availabilityText(dictionary, locale, rallyAvailability.status)}</p>
+        )}
+        {rallyAvailability.status === "UPCOMING" && config.availability?.startsAt !== undefined && (
+          <p>
+            {label(dictionary, locale, "availability.rallyStarts", "Rally starts: {date}").replace(
+              "{date}",
+              config.availability.startsAt,
             )}
           </p>
         )}
@@ -752,7 +870,17 @@ export function RallyViewer<TLocale extends string = string>({
           "message" in feedback.error ? feedback.error.message : feedback.error.code,
         ) ?? (
           <div className={classNames.feedback} style={styles.feedback} role="alert">
-            {"message" in feedback.error ? feedback.error.message : feedback.error.code}
+            {feedback.error.code === "RALLY_UNAVAILABLE" ||
+            feedback.error.code === "SPOT_UNAVAILABLE"
+              ? label(
+                  dictionary,
+                  locale,
+                  "availability.checkInClosed",
+                  "Check-in is closed. Check the opening hours and try again.",
+                )
+              : "message" in feedback.error
+                ? feedback.error.message
+                : feedback.error.code}
           </div>
         ))}
       {showSyncStatus &&
@@ -770,6 +898,15 @@ export function RallyViewer<TLocale extends string = string>({
         (renderNextAction?.({
           suggestions,
           locale,
+          progress: {
+            acquired: progress.completionAcquired,
+            required: progress.completionRequired,
+          },
+          onViewSpot: (suggestion) => {
+            const target = spotElements.current.get(suggestion.spot.id);
+            target?.scrollIntoView?.({ block: "start" });
+            target?.focus({ preventScroll: true });
+          },
           ...(dictionary === undefined ? {} : { dictionary }),
           ...(nextAction?.currentLocation === undefined
             ? {}
@@ -785,6 +922,15 @@ export function RallyViewer<TLocale extends string = string>({
           <NextActionPanel
             suggestions={suggestions}
             locale={locale}
+            progress={{
+              acquired: progress.completionAcquired,
+              required: progress.completionRequired,
+            }}
+            onViewSpot={(suggestion) => {
+              const target = spotElements.current.get(suggestion.spot.id);
+              target?.scrollIntoView?.({ block: "start" });
+              target?.focus({ preventScroll: true });
+            }}
             {...(dictionary === undefined ? {} : { dictionary })}
             {...(nextAction?.currentLocation === undefined
               ? {}
@@ -803,20 +949,22 @@ export function RallyViewer<TLocale extends string = string>({
           progress,
           rewards: config.rewards,
           rewardStates: currentState.rewards,
+          ...(currentState.inventory === undefined ? {} : { inventory: currentState.inventory }),
           locale,
           ...(dictionary === undefined ? {} : { dictionary }),
           ...(onViewReward === undefined ? {} : { onViewReward }),
-          ...(claim === undefined ? {} : { onClaimReward: (rewardId) => void claim(rewardId) }),
+          ...(claim === undefined ? {} : { onClaimReward: claim }),
           className: classNames.completion ?? "sry-completion",
         }) ?? (
           <CompletionPanel
             progress={progress}
             rewards={config.rewards}
             rewardStates={currentState.rewards}
+            {...(currentState.inventory === undefined ? {} : { inventory: currentState.inventory })}
             locale={locale}
             {...(dictionary === undefined ? {} : { dictionary })}
             {...(onViewReward === undefined ? {} : { onViewReward })}
-            {...(claim === undefined ? {} : { onClaimReward: (rewardId) => void claim(rewardId) })}
+            {...(claim === undefined ? {} : { onClaimReward: claim })}
             className={classNames.completion ?? "sry-completion"}
           />
         ))}
@@ -832,6 +980,12 @@ export function RallyViewer<TLocale extends string = string>({
             busy === spot.id ? "VERIFYING" : evaluateSpotStatus(spot, currentState);
           const claimed = status === "CLAIMED";
           const locked = status === "LOCKED";
+          const spotAvailability = availabilityConfigured(config)
+            ? rallyAvailability.status === "OPEN"
+              ? evaluateSpotAvailability(spot.availability, availabilityNow)
+              : rallyAvailability
+            : undefined;
+          const unavailable = spotAvailability !== undefined && spotAvailability.status !== "OPEN";
           const prerequisiteNames = (spot.prerequisites ?? [])
             .map((prerequisiteId) =>
               config.spots.find((candidate) => candidate.id === prerequisiteId),
@@ -852,34 +1006,49 @@ export function RallyViewer<TLocale extends string = string>({
                   "lockedPrerequisites",
                   "Complete {spots} to unlock this spot.",
                 ).replace("{spots}", prerequisiteNames.join(", "));
-          const children = spot.conditions.map((condition) => {
-            const Renderer = customConditionRenderers[condition.type] ?? DefaultCondition;
-            return (
-              <div
-                className={classNames.condition}
-                style={styles.condition}
-                key={`${spot.id}-${condition.type}-${JSON.stringify(condition)}`}
+          const children =
+            spot.conditions.length === 0 ? (
+              <button
+                type="button"
+                className={join("sry-action", classNames.action, classNames.button)}
+                style={styles.button ?? styles.action}
+                disabled={
+                  checkIn === undefined || busy !== null || claimed || locked || unavailable
+                }
+                onClick={() => void submit(spot.id, undefined)}
               >
-                <Renderer
-                  spot={spot}
-                  condition={condition}
-                  locale={locale}
-                  {...(dictionary === undefined ? {} : { dictionary })}
-                  disabled={busy !== null || claimed || locked}
-                  {...(Object.keys(classNames).length === 0 ? {} : { classNames })}
-                  {...(Object.keys(styles).length === 0 ? {} : { styles })}
-                  onSubmit={(proof) => submit(spot.id, proof)}
-                />
-              </div>
+                {label(dictionary, locale, "checkIn", "Check in")}
+              </button>
+            ) : (
+              spot.conditions.map((condition) => {
+                const Renderer = customConditionRenderers[condition.type] ?? DefaultCondition;
+                return (
+                  <div
+                    className={classNames.condition}
+                    style={styles.condition}
+                    key={`${spot.id}-${condition.type}-${JSON.stringify(condition)}`}
+                  >
+                    <Renderer
+                      spot={spot}
+                      condition={condition}
+                      locale={locale}
+                      {...(dictionary === undefined ? {} : { dictionary })}
+                      disabled={
+                        checkIn === undefined || busy !== null || claimed || locked || unavailable
+                      }
+                      {...(Object.keys(classNames).length === 0 ? {} : { classNames })}
+                      {...(Object.keys(styles).length === 0 ? {} : { styles })}
+                      onSubmit={(proof) => submit(spot.id, proof)}
+                    />
+                  </div>
+                );
+              })
             );
-          });
-          const spotAvailability = availabilityConfigured(config)
-            ? evaluateSpotAvailability(spot.availability, availabilityNow)
-            : undefined;
           const props: SpotCardProps<TLocale> = {
             spot,
             state: currentState,
             status,
+            prerequisiteNames,
             ...(spotAvailability === undefined
               ? {}
               : {
@@ -891,12 +1060,18 @@ export function RallyViewer<TLocale extends string = string>({
             children,
           };
           return (
-            <div
+            <section
               key={spot.id}
+              ref={(element) => {
+                if (element === null) spotElements.current.delete(spot.id);
+                else spotElements.current.set(spot.id, element);
+              }}
+              tabIndex={-1}
+              aria-label={resolveLocalizedText(spot.name, locale)}
               className={join("sry-spot-card", classNames.card)}
               style={styles.card}
               data-status={status}
-              aria-disabled={locked}
+              aria-disabled={locked || unavailable}
             >
               {renderSpotCard?.(props) ?? (
                 <article>
@@ -909,6 +1084,20 @@ export function RallyViewer<TLocale extends string = string>({
                       {availabilityText(dictionary, locale, props.availabilityStatus)}
                     </p>
                   )}
+                  {spotAvailability?.status === "CLOSED" &&
+                    spotAvailability.nextOpening !== undefined && (
+                      <p>
+                        {label(
+                          dictionary,
+                          locale,
+                          "availability.nextOpening",
+                          "Next opening: {date} {time} ({timezone})",
+                        )
+                          .replace("{date}", spotAvailability.nextOpening.date)
+                          .replace("{time}", spotAvailability.nextOpening.opensAt)
+                          .replace("{timezone}", spot.availability?.timezone ?? "UTC")}
+                      </p>
+                    )}
                   {spot.imageUrl !== undefined && <img src={spot.imageUrl} alt="" loading="lazy" />}
                   {spot.description !== undefined && (
                     <p>{resolveLocalizedText(spot.description, locale)}</p>
@@ -929,7 +1118,7 @@ export function RallyViewer<TLocale extends string = string>({
                   {children}
                 </article>
               )}
-            </div>
+            </section>
           );
         };
         return (

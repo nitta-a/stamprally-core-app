@@ -58,9 +58,12 @@ import {
 
 import type {
   AdminRallyConfig,
+  AvailabilityResult,
   AvailabilityStatus,
   AvailabilitySuggestionMode,
   CheckInCondition,
+  ClaimOptions,
+  ClaimResult,
   GeoCoordinates,
   LocaleDictionary,
   LocalizedText,
@@ -88,6 +91,7 @@ import {
   evaluateSpotAvailability,
   evaluateSpotStatus,
   getNextSpotSuggestions,
+  getRewardAvailability,
   resolveLocalizedText,
   updateLocalizedField,
   validateLocalizationCompleteness,
@@ -95,6 +99,7 @@ import {
 import type { UseStampRallyReturn, UseStampRallySyncState } from "@stamprally/react";
 import type { ChangeEvent, ElementType, ReactNode, SyntheticEvent } from "react";
 import { useEffect, useRef, useState } from "react";
+import { CheckInCondition as MuiCheckInCondition } from "./CheckInCondition.js";
 import type { MuiCompletionPanelProps } from "./CompletionPanel.js";
 import { MuiCompletionPanel } from "./CompletionPanel.js";
 import { resolveMuiLabel } from "./locales.js";
@@ -145,6 +150,7 @@ export interface MuiSpotCardProps<TLocale extends string = SupportedLocale> {
   readonly state: StampRallyState;
   readonly status: SpotStatus;
   readonly availabilityStatus?: AvailabilityStatus;
+  readonly availability?: AvailabilityResult;
   readonly prerequisiteNames?: ReadonlyArray<string>;
   readonly locale: TLocale;
   readonly dictionary?: LocaleDictionary<TLocale>;
@@ -166,6 +172,7 @@ export interface MuiSpotGridProps<TLocale extends string = SupportedLocale> {
   readonly state: StampRallyState;
   readonly verifyingSpotId?: string;
   readonly availabilityNow?: string;
+  readonly rallyAvailabilityStatus?: AvailabilityStatus;
   readonly locale?: TLocale;
   readonly dictionary?: LocaleDictionary<TLocale>;
   readonly onCheckIn?: (spotId: string, proof: unknown) => unknown;
@@ -184,7 +191,7 @@ export interface MuiRewardCardProps<TLocale extends string = SupportedLocale> {
   readonly locale: TLocale;
   readonly dictionary?: LocaleDictionary<TLocale>;
   readonly onView?: (rewardId: string) => unknown;
-  readonly onClaim?: (rewardId: string) => unknown;
+  readonly onClaim?: (rewardId: string, options?: ClaimOptions) => unknown;
   readonly sx?: MuiSx;
   readonly slots?: {
     readonly root?: MuiSlot;
@@ -203,7 +210,7 @@ export interface MuiRewardListProps<TLocale extends string = SupportedLocale> {
   readonly locale?: TLocale;
   readonly dictionary?: LocaleDictionary<TLocale>;
   readonly onView?: (rewardId: string) => unknown;
-  readonly onClaim?: (rewardId: string) => unknown;
+  readonly onClaim?: (rewardId: string, options?: ClaimOptions) => unknown;
   readonly sx?: MuiSx;
   readonly slots?: { readonly root?: MuiSlot; readonly item?: MuiSlot };
   readonly slotProps?: MuiSlotProps;
@@ -360,6 +367,7 @@ export function MuiSpotCard<TLocale extends string = SupportedLocale>({
   state,
   status,
   availabilityStatus,
+  availability,
   prerequisiteNames,
   locale,
   dictionary,
@@ -390,7 +398,11 @@ export function MuiSpotCard<TLocale extends string = SupportedLocale>({
       {...rootProps}
       sx={sx}
       data-status={status}
-      aria-disabled={locked}
+      data-spot-id={spot.id}
+      tabIndex={-1}
+      role="group"
+      aria-label={localized(spot.name, locale)}
+      aria-disabled={locked || (availabilityStatus !== undefined && availabilityStatus !== "OPEN")}
       variant="outlined"
       data-stamp-count={state.records.length}
     >
@@ -417,6 +429,19 @@ export function MuiSpotCard<TLocale extends string = SupportedLocale>({
             )}
           </Typography>
         )}
+        {availability?.status === "CLOSED" && availability.nextOpening !== undefined && (
+          <Typography>
+            {muiLabel(
+              dictionary,
+              locale,
+              "availability.nextOpening",
+              "Next opening: {date} {time} ({timezone})",
+            )
+              .replace("{date}", availability.nextOpening.date)
+              .replace("{time}", availability.nextOpening.opensAt)
+              .replace("{timezone}", spot.availability?.timezone ?? "UTC")}
+          </Typography>
+        )}
         {spot.hint !== undefined && (
           <Typography variant="body2">{localized(spot.hint, locale)}</Typography>
         )}
@@ -441,21 +466,46 @@ export function MuiSpotCard<TLocale extends string = SupportedLocale>({
         )}
       </Content>
       <Actions {...actionsProps}>
-        <ButtonSlot
-          {...buttonProps}
-          variant={claimed ? "outlined" : "contained"}
-          disabled={locked || claimed || verifying || onCheckIn === undefined}
-          startIcon={verifying ? <CircularProgress size={16} /> : undefined}
-          onClick={() => void onCheckIn?.(spot.id, undefined)}
-        >
-          {verifying
-            ? muiLabel(dictionary, locale, "verifying", "Verifying…")
-            : claimed
-              ? muiLabel(dictionary, locale, "status.claimed", "Claimed")
-              : locked
-                ? muiLabel(dictionary, locale, "status.locked", "Locked")
-                : muiLabel(dictionary, locale, "checkIn", "Check in")}
-        </ButtonSlot>
+        {spot.conditions.length > 0 && !claimed && !locked ? (
+          <Stack spacing={2} sx={{ width: "100%" }}>
+            {spot.conditions.map((condition) => (
+              <MuiCheckInCondition
+                key={JSON.stringify(condition)}
+                condition={condition}
+                disabled={
+                  verifying ||
+                  (availabilityStatus !== undefined && availabilityStatus !== "OPEN") ||
+                  onCheckIn === undefined
+                }
+                locale={locale}
+                {...(dictionary === undefined ? {} : { dictionary })}
+                onSubmit={(proof) => onCheckIn?.(spot.id, proof)}
+              />
+            ))}
+          </Stack>
+        ) : (
+          <ButtonSlot
+            {...buttonProps}
+            variant={claimed ? "outlined" : "contained"}
+            disabled={
+              locked ||
+              claimed ||
+              verifying ||
+              (availabilityStatus !== undefined && availabilityStatus !== "OPEN") ||
+              onCheckIn === undefined
+            }
+            startIcon={verifying ? <CircularProgress size={16} /> : undefined}
+            onClick={() => void onCheckIn?.(spot.id, undefined)}
+          >
+            {verifying
+              ? muiLabel(dictionary, locale, "verifying", "Verifying…")
+              : claimed
+                ? muiLabel(dictionary, locale, "status.claimed", "Claimed")
+                : locked
+                  ? muiLabel(dictionary, locale, "status.locked", "Locked")
+                  : muiLabel(dictionary, locale, "checkIn", "Check in")}
+          </ButtonSlot>
+        )}
       </Actions>
     </Root>
   );
@@ -466,6 +516,7 @@ export function MuiSpotGrid<TLocale extends string = SupportedLocale>({
   state,
   verifyingSpotId,
   availabilityNow,
+  rallyAvailabilityStatus,
   locale = "en" as TLocale,
   dictionary,
   onCheckIn,
@@ -484,15 +535,24 @@ export function MuiSpotGrid<TLocale extends string = SupportedLocale>({
         const status = evaluateSpotStatus(spot, state, {
           verifying: verifyingSpotId === spot.id,
         });
+        const availability =
+          availabilityNow === undefined
+            ? undefined
+            : rallyAvailabilityStatus !== undefined && rallyAvailabilityStatus !== "OPEN"
+              ? { status: rallyAvailabilityStatus }
+              : evaluateSpotAvailability(spot.availability, availabilityNow);
         const props: MuiSpotCardProps<TLocale> = {
           spot,
           state,
           status,
+          ...(availability === undefined ? {} : { availability }),
           ...(availabilityNow === undefined
             ? {}
             : {
-                availabilityStatus: evaluateSpotAvailability(spot.availability, availabilityNow)
-                  .status,
+                availabilityStatus:
+                  rallyAvailabilityStatus !== undefined && rallyAvailabilityStatus !== "OPEN"
+                    ? rallyAvailabilityStatus
+                    : (availability?.status ?? "OPEN"),
               }),
           prerequisiteNames: (spot.prerequisites ?? [])
             .map((id) => spots.find((candidate) => candidate.id === id))
@@ -531,6 +591,10 @@ export function MuiRewardCard<TLocale extends string = SupportedLocale>({
   slotProps,
 }: MuiRewardCardProps<TLocale>): ReactNode {
   const [open, setOpen] = useState(false);
+  const [claiming, setClaiming] = useState(false);
+  const [claimFailed, setClaimFailed] = useState(false);
+  const [staffPasscode, setStaffPasscode] = useState("");
+  const claimingRef = useRef(false);
   const Root = slots?.root ?? Card;
   const Content = slots?.content ?? CardContent;
   const Actions = slots?.actions ?? CardActions;
@@ -538,12 +602,33 @@ export function MuiRewardCard<TLocale extends string = SupportedLocale>({
   const ButtonSlot = slots?.button ?? Button;
   const rootProps = slotProps?.root ?? {};
   const status = rewardStatus(state);
-  const canClaim = status === "AVAILABLE";
   const viewOnly = reward.redemptionMethod === "view_only";
-  const remaining = inventory?.rewardRemaining?.[reward.id] ?? reward.stockLimit;
-  const claim = (): void => {
-    setOpen(false);
-    void onClaim?.(reward.id);
+  const { available: canClaim, remaining } = getRewardAvailability(reward, state, inventory);
+  const claim = async (): Promise<void> => {
+    if (claimingRef.current || onClaim === undefined) return;
+    claimingRef.current = true;
+    setClaiming(true);
+    setClaimFailed(false);
+    try {
+      const options =
+        reward.redemptionMethod === "staff_passcode"
+          ? { staffPasscode: staffPasscode.trim() }
+          : undefined;
+      const result = await (options === undefined
+        ? onClaim(reward.id)
+        : onClaim(reward.id, options));
+      if (typeof result === "object" && result !== null && "ok" in result && result.ok === false) {
+        setClaimFailed(true);
+      } else {
+        setStaffPasscode("");
+        setOpen(false);
+      }
+    } catch {
+      setClaimFailed(true);
+    } finally {
+      claimingRef.current = false;
+      setClaiming(false);
+    }
   };
   return (
     <>
@@ -610,7 +695,13 @@ export function MuiRewardCard<TLocale extends string = SupportedLocale>({
       <DialogSlot
         {...(slotProps?.dialog ?? {})}
         open={open}
-        onClose={() => setOpen(false)}
+        onClose={() => {
+          if (!claiming) {
+            setStaffPasscode("");
+            setClaimFailed(false);
+            setOpen(false);
+          }
+        }}
         aria-labelledby={`reward-dialog-${reward.id}`}
       >
         <DialogTitle id={`reward-dialog-${reward.id}`}>
@@ -626,12 +717,45 @@ export function MuiRewardCard<TLocale extends string = SupportedLocale>({
             "reward.redeemWarning",
             "Once redeemed, this reward may not be available again.",
           )}
+          {reward.redemptionMethod === "staff_passcode" && (
+            <TextField
+              label={muiLabel(dictionary, locale, "redemption.staffPasscode", "Staff passcode")}
+              type="password"
+              autoComplete="off"
+              value={staffPasscode}
+              onChange={(event) => setStaffPasscode(event.target.value)}
+              disabled={claiming}
+            />
+          )}
+          {claimFailed && (
+            <Alert severity="error" role="alert">
+              {muiLabel(
+                dictionary,
+                locale,
+                "reward.claimFailed",
+                "Could not redeem this reward. Please try again.",
+              )}
+            </Alert>
+          )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setOpen(false)}>
+          <Button
+            disabled={claiming}
+            onClick={() => {
+              setStaffPasscode("");
+              setClaimFailed(false);
+              setOpen(false);
+            }}
+          >
             {muiLabel(dictionary, locale, "redemption.cancel", "Cancel")}
           </Button>
-          <Button variant="contained" onClick={claim}>
+          <Button
+            disabled={
+              claiming || (reward.redemptionMethod === "staff_passcode" && !staffPasscode.trim())
+            }
+            variant="contained"
+            onClick={() => void claim()}
+          >
             {muiLabel(dictionary, locale, "redemption.confirm", "Confirm")}
           </Button>
         </DialogActions>
@@ -761,6 +885,11 @@ export function MuiRallyViewer<TLocale extends string = SupportedLocale>({
   const [stampProgress, setStampProgress] = useState<StampRallyProgress | null>(null);
   const [subscribedState, setSubscribedState] = useState<StampRallyState | null>(null);
   const [localState, setLocalState] = useState<StampRallyState | null>(null);
+  const [checkingSpot, setCheckingSpot] = useState<string | null>(null);
+  const [checkInError, setCheckInError] = useState<string | null>(null);
+  const checking = useRef(false);
+  const pendingClaims = useRef(new Map<string, Promise<ClaimResult>>());
+  const spotSection = useRef<HTMLElement>(null);
   const completedRef = useRef<boolean | null>(null);
   useEffect(() => {
     if (adapter?.subscribe === undefined) return;
@@ -772,7 +901,25 @@ export function MuiRallyViewer<TLocale extends string = SupportedLocale>({
       ? defaultState("")
       : (subscribedState ?? localState ?? adapter?.state ?? defaultState(config.id));
   const progress = config === undefined ? undefined : calculateProgress(state, config);
-  const availabilityNow = nextAction?.now ?? new Date().toISOString();
+  const [clock, setClock] = useState(() => new Date().toISOString());
+  useEffect(() => {
+    if (
+      nextAction?.now !== undefined ||
+      config === undefined ||
+      (config.availability === undefined &&
+        config.spots.every((spot) => spot.availability === undefined))
+    )
+      return;
+    const update = (): void => setClock(new Date().toISOString());
+    update();
+    const timer = window.setInterval(update, 1_000);
+    document.addEventListener("visibilitychange", update);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", update);
+    };
+  }, [config, nextAction?.now]);
+  const availabilityNow = nextAction?.now ?? clock;
   const suggestions =
     config === undefined
       ? []
@@ -780,7 +927,7 @@ export function MuiRallyViewer<TLocale extends string = SupportedLocale>({
           ...(nextAction?.strategy === undefined ? {} : { strategy: nextAction.strategy }),
           ...(nextAction?.rewardId === undefined ? {} : { rewardId: nextAction.rewardId }),
           ...(nextAction?.availability === undefined
-            ? { availability: "open_first" as const }
+            ? { availability: "exclude_closed" as const }
             : { availability: nextAction.availability }),
           now: availabilityNow,
           ...(nextAction?.currentLocation === undefined
@@ -800,22 +947,84 @@ export function MuiRallyViewer<TLocale extends string = SupportedLocale>({
   const SpotGrid = slots?.spotGrid ?? MuiSpotGrid;
   const RewardList = slots?.rewardList ?? MuiRewardList;
   const SyncBanner = slots?.syncStatusBanner ?? MuiSyncStatusBanner;
-  const busy = adapter?.isLoading === true;
+  const busy = adapter?.isLoading === true || checkingSpot !== null;
   const handleCheckIn = async (spotId: string, proof: unknown): Promise<unknown> => {
-    if (adapter === undefined) return undefined;
-    const result = await adapter.onCheckIn(spotId, proof);
-    if (result.ok) {
-      const spot = config.spots.find((item) => item.id === spotId);
-      setLocalState(result.value.state);
-      setStampProgress(calculateProgress(result.value.state, config));
-      if (spot !== undefined) {
-        setStampedSpot(spot);
-        onStampStamped?.(spot as unknown as SpotItem<TLocale>);
+    if (adapter === undefined || checking.current) return undefined;
+    checking.current = true;
+    setCheckingSpot(spotId);
+    setCheckInError(null);
+    setStampedSpot(null);
+    try {
+      const result = await adapter.onCheckIn(spotId, proof);
+      if (result.ok) {
+        const spot = config.spots.find((item) => item.id === spotId);
+        setLocalState(result.value.state);
+        setStampProgress(calculateProgress(result.value.state, config));
+        if (spot !== undefined) {
+          setStampedSpot(spot);
+          onStampStamped?.(spot as unknown as SpotItem<TLocale>);
+        }
+      } else {
+        const unavailable =
+          result.error.code === "RALLY_UNAVAILABLE" || result.error.code === "SPOT_UNAVAILABLE";
+        setCheckInError(
+          unavailable
+            ? muiLabel(
+                dictionary,
+                locale,
+                "availability.checkInClosed",
+                "Check-in is closed. Check the opening hours and try again.",
+              )
+            : muiLabel(
+                dictionary,
+                locale,
+                "verificationFailed",
+                "Verification failed. Check your details and try again.",
+              ),
+        );
       }
+      return result;
+    } catch {
+      setCheckInError(
+        muiLabel(
+          dictionary,
+          locale,
+          "verificationFailed",
+          "Verification failed. Check your details and try again.",
+        ),
+      );
+      return { ok: false };
+    } finally {
+      checking.current = false;
+      setCheckingSpot(null);
     }
-    return result;
+  };
+  const handleClaim = (rewardId: string, options?: ClaimOptions): Promise<ClaimResult> => {
+    if (adapter === undefined) throw new Error("A rally adapter is required.");
+    const pending = pendingClaims.current.get(rewardId);
+    if (pending !== undefined) return pending;
+    const request = Promise.resolve()
+      .then(() =>
+        options === undefined
+          ? adapter.onClaimReward(rewardId)
+          : adapter.onClaimReward(rewardId, options),
+      )
+      .then((result) => {
+        if (result.ok) setLocalState(result.value.state);
+        return result;
+      })
+      .finally(() => pendingClaims.current.delete(rewardId));
+    pendingClaims.current.set(rewardId, request);
+    return request;
   };
   const rootProps = slotProps?.root ?? {};
+  const viewSpot = (suggestion: NextSpotSuggestion): void => {
+    const target = Array.from(
+      spotSection.current?.querySelectorAll<HTMLElement>("[data-spot-id]") ?? [],
+    ).find((element) => element.dataset.spotId === suggestion.spot.id);
+    target?.scrollIntoView?.({ block: "start" });
+    target?.focus({ preventScroll: true });
+  };
   return (
     <Root
       {...rootProps}
@@ -838,6 +1047,17 @@ export function MuiRallyViewer<TLocale extends string = SupportedLocale>({
             )}
           </Typography>
         )}
+        {evaluateRallyAvailability(config.availability, availabilityNow).status === "UPCOMING" &&
+          config.availability?.startsAt !== undefined && (
+            <Typography>
+              {muiLabel(
+                dictionary,
+                locale,
+                "availability.rallyStarts",
+                "Rally starts: {date}",
+              ).replace("{date}", config.availability.startsAt)}
+            </Typography>
+          )}
         <Typography variant="body2">
           {progress.completionAcquired} / {progress.completionRequired}
         </Typography>
@@ -856,11 +1076,19 @@ export function MuiRallyViewer<TLocale extends string = SupportedLocale>({
       {adapter?.error !== null && adapter?.error !== undefined && (
         <Alert severity="error">{adapter.error.message}</Alert>
       )}
+      {checkInError !== null && (
+        <Alert severity="error" role="alert">
+          {checkInError}
+        </Alert>
+      )}
       {stampedSpot !== null && (
         <Alert
           severity="success"
           role="status"
-          sx={{ animation: "stamprally-stamp-pop 600ms ease-out" }}
+          sx={{
+            animation: "stamprally-stamp-pop 600ms ease-out",
+            "@media (prefers-reduced-motion: reduce)": { animation: "none" },
+          }}
         >
           {localized(stampedSpot.name, locale)} —{" "}
           {muiLabel(
@@ -893,6 +1121,13 @@ export function MuiRallyViewer<TLocale extends string = SupportedLocale>({
         (renderNextAction?.({
           suggestions,
           locale,
+          progress: {
+            acquired: progress.completionAcquired,
+            required: progress.completionRequired,
+          },
+          ...(renderSpotCard === undefined && slots?.spotGrid === undefined
+            ? { onViewSpot: viewSpot }
+            : {}),
           ...(dictionary === undefined ? {} : { dictionary }),
           ...(nextAction?.currentLocation === undefined
             ? {}
@@ -907,6 +1142,13 @@ export function MuiRallyViewer<TLocale extends string = SupportedLocale>({
           <MuiNextActionPanel
             suggestions={suggestions}
             locale={locale}
+            progress={{
+              acquired: progress.completionAcquired,
+              required: progress.completionRequired,
+            }}
+            {...(renderSpotCard === undefined && slots?.spotGrid === undefined
+              ? { onViewSpot: viewSpot }
+              : {})}
             {...(dictionary === undefined ? {} : { dictionary })}
             {...(nextAction?.currentLocation === undefined
               ? {}
@@ -924,17 +1166,21 @@ export function MuiRallyViewer<TLocale extends string = SupportedLocale>({
           progress,
           rewards: config.rewards,
           rewardStates: state.rewards,
+          ...(state.inventory === undefined ? {} : { inventory: state.inventory }),
           locale,
           ...(dictionary === undefined ? {} : { dictionary }),
           ...(onViewReward === undefined ? {} : { onViewReward }),
+          ...(adapter === undefined ? {} : { onClaimReward: handleClaim }),
         }) ?? (
           <MuiCompletionPanel
             progress={progress}
             rewards={config.rewards}
             rewardStates={state.rewards}
+            {...(state.inventory === undefined ? {} : { inventory: state.inventory })}
             locale={locale}
             {...(dictionary === undefined ? {} : { dictionary })}
             {...(onViewReward === undefined ? {} : { onViewReward })}
+            {...(adapter === undefined ? {} : { onClaimReward: handleClaim })}
           />
         ))}
       {busy ? (
@@ -952,10 +1198,14 @@ export function MuiRallyViewer<TLocale extends string = SupportedLocale>({
             {...(slotProps?.spotGrid ?? {})}
             spots={gridSpots}
             state={state}
+            {...(checkingSpot === null ? {} : { verifyingSpotId: checkingSpot })}
             availabilityNow={availabilityNow}
+            rallyAvailabilityStatus={
+              evaluateRallyAvailability(config.availability, availabilityNow).status
+            }
             locale={locale}
             {...(dictionary === undefined ? {} : { dictionary })}
-            {...(adapter === undefined ? {} : { onCheckIn: handleCheckIn })}
+            {...(adapter === undefined || busy ? {} : { onCheckIn: handleCheckIn })}
             {...(renderSpotCard === undefined ? {} : { renderSpotCard })}
           />
         );
@@ -963,6 +1213,7 @@ export function MuiRallyViewer<TLocale extends string = SupportedLocale>({
           <>
             {(!progress.isCompleted || spots.length > 0) && (
               <section
+                ref={spotSection}
                 aria-label={muiLabel(dictionary, locale, "moreToExplore", "More to explore")}
               >
                 {progress.isCompleted && (
@@ -996,7 +1247,7 @@ export function MuiRallyViewer<TLocale extends string = SupportedLocale>({
         locale={locale}
         {...(dictionary === undefined ? {} : { dictionary })}
         {...(onViewReward === undefined ? {} : { onView: onViewReward })}
-        {...(adapter === undefined ? {} : { onClaim: adapter.onClaimReward })}
+        {...(adapter === undefined ? {} : { onClaim: handleClaim })}
         {...(renderRewardCard === undefined ? {} : { renderRewardCard })}
       />
     </Root>

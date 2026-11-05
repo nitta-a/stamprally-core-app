@@ -28,25 +28,24 @@ interface Requirement {
   readonly count: number;
 }
 
-function requirement(
-  condition: RewardUnlockCondition,
-  acquired: ReadonlySet<string>,
-  spotIds: ReadonlyArray<string>,
-): Requirement {
-  if (condition.type === "stamp_count") return { stampIds: new Set(), count: condition.count };
-  if (condition.type === "stamps") return { stampIds: new Set(condition.stampIds), count: 0 };
-  const children = condition.conditions.map((child) => requirement(child, acquired, spotIds));
-  if (condition.type === "all") {
-    const stampIds = new Set(children.flatMap((child) => [...child.stampIds]));
-    return { stampIds, count: Math.max(0, ...children.map((child) => child.count)) };
+function requirements(condition: RewardUnlockCondition): ReadonlyArray<Requirement> {
+  if (condition.type === "stamp_count") return [{ stampIds: new Set(), count: condition.count }];
+  if (condition.type === "stamps") return [{ stampIds: new Set(condition.stampIds), count: 0 }];
+  if (condition.type === "any") return condition.conditions.flatMap(requirements);
+  return combineRequirements(condition.conditions);
+}
+
+function combineRequirements(conditions: ReadonlyArray<RewardUnlockCondition>): Requirement[] {
+  let combined: Requirement[] = [{ stampIds: new Set(), count: 0 }];
+  for (const condition of conditions) {
+    combined = combined.flatMap((left) =>
+      requirements(condition).map((right) => ({
+        stampIds: new Set([...left.stampIds, ...right.stampIds]),
+        count: Math.max(left.count, right.count),
+      })),
+    );
   }
-  const best = [...children].sort((left, right) => {
-    const missing = (item: Requirement): number =>
-      Math.max(0, item.count - acquired.size) +
-      [...item.stampIds].filter((id) => !acquired.has(id)).length;
-    return missing(left) - missing(right);
-  })[0];
-  return best ?? { stampIds: new Set(), count: 0 };
+  return combined;
 }
 
 export function calculateRewardProgress(
@@ -61,21 +60,31 @@ export function calculateRewardProgress(
   const acquired = new Set(
     state.records.map(({ stampId }) => stampId).filter((id) => validIds.has(id)),
   );
-  const explicitIds = new Set<string>();
-  let count = reward.requiredStampCount;
-  for (const condition of reward.conditions ?? []) {
-    const part = requirement(condition, acquired, spotIds);
-    for (const id of part.stampIds) explicitIds.add(id);
-    count = Math.max(count, part.count);
-  }
+  const alternatives = combineRequirements(reward.conditions ?? []);
+  const missingCountFor = (item: Requirement): number => {
+    const missingExplicit = [...item.stampIds].filter((id) => !acquired.has(id)).length;
+    return Math.max(
+      missingExplicit,
+      Math.max(reward.requiredStampCount, item.count) - acquired.size,
+    );
+  };
+  const best = alternatives.reduce<Requirement | undefined>((selected, item) => {
+    if (selected === undefined || missingCountFor(item) < missingCountFor(selected)) return item;
+    return selected;
+  }, undefined);
+  const explicitIds = best?.stampIds ?? new Set<string>();
+  const count = Math.max(reward.requiredStampCount, best?.count ?? 0);
   const missingStampIds = [...explicitIds].filter((id) => !acquired.has(id));
   const required = Math.max(explicitIds.size, count);
-  const missingCount = required - explicitIds.size;
+  const acquiredExplicit = explicitIds.size - missingStampIds.length;
+  const acquiredOther = acquired.size - acquiredExplicit;
+  const extraRequired = required - explicitIds.size;
+  const missingCount = Math.max(0, extraRequired - acquiredOther);
   for (const id of spotIds
     .filter((candidate) => !acquired.has(candidate) && !explicitIds.has(candidate))
     .slice(0, missingCount))
     missingStampIds.push(id);
-  const acquiredCount = required - missingStampIds.length;
+  const acquiredCount = acquiredExplicit + Math.min(acquiredOther, extraRequired);
   const isUnlocked =
     acquired.size >= reward.requiredStampCount &&
     (reward.conditions ?? []).every((condition) => isConditionUnlocked(condition, acquired));

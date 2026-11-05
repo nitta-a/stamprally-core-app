@@ -11,6 +11,66 @@ function EditorFixture(): ReactElement {
 }
 
 describe("organizer experience", () => {
+  it("switches language and focuses the missing translation from preflight", () => {
+    function LocalizedFixture() {
+      const [locale, setLocale] = useState<"ja" | "en">("ja");
+      const config = { ...DEFAULT_ADMIN_CONFIG, title: { ja: "ラリー", en: "" } };
+      return (
+        <AdminExperience
+          config={config}
+          onChange={vi.fn()}
+          locale={locale}
+          onLocaleChange={setLocale}
+        />
+      );
+    }
+    render(<LocalizedFixture />);
+    fireEvent.click(screen.getByRole("button", { name: /日本語または英語の名前が未入力/ }));
+    expect(document.activeElement).toBe(screen.getByLabelText("Rally title"));
+  });
+  it("opens the relevant advanced hours when navigating from preflight", () => {
+    const spots = DEFAULT_ADMIN_CONFIG.spots.map((spot, index) =>
+      index === 0 ? { ...spot, availability: { timezone: "UTC", weekly: [] } } : spot,
+    );
+    render(<AdminExperience config={{ ...DEFAULT_ADMIN_CONFIG, spots }} onChange={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /受付時間がないスポットがあります/ }));
+    expect(screen.getByRole("tab", { name: "スポット" }).getAttribute("aria-selected")).toBe(
+      "true",
+    );
+    const input = screen.getByDisplayValue("UTC");
+    expect(document.activeElement).toBe(input);
+    expect(input.closest("details")?.open).toBe(true);
+  });
+  it("confirms spot removal because preview progress resets, and permits undo", () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValue(true);
+    render(<EditorFixture />);
+    fireEvent.click(screen.getByRole("tab", { name: "スポット" }));
+    const summary = screen.getByText("川沿いの遊歩道", { selector: "strong" });
+    const details = summary.closest("details");
+    if (details === null) throw new Error("Expected spot details.");
+    fireEvent.click(summary);
+    fireEvent.click(within(details).getByRole("button", { name: "このスポットを削除" }));
+    expect(screen.getByText("川沿いの遊歩道", { selector: "strong" })).toBeTruthy();
+    fireEvent.click(within(details).getByRole("button", { name: "このスポットを削除" }));
+    expect(confirm).toHaveBeenCalledTimes(2);
+    expect(screen.queryByText("川沿いの遊歩道", { selector: "strong" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "元に戻す" }));
+    expect(screen.getByText("川沿いの遊歩道", { selector: "strong" })).toBeTruthy();
+  });
+  it("marks optional rewards and keeps advanced spot settings available", () => {
+    render(<EditorFixture />);
+    expect(screen.getByText(/特典 1 件（任意）/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("tab", { name: "スポット" }));
+    const spot = screen.getByText("こもれび案内所", { selector: "strong" }).closest("details");
+    if (spot === null) throw new Error("Expected spot details.");
+    const advanced = within(spot).getByText("受付時間・その他の設定（任意）");
+    const advancedDetails = advanced.closest("details");
+    if (advancedDetails === null) throw new Error("Expected advanced settings.");
+    expect(advancedDetails.open).toBe(false);
+    fireEvent.click(advanced);
+    expect(advancedDetails.open).toBe(true);
+    expect(within(advancedDetails).getByText("スタンプを取得できる時間")).toBeTruthy();
+  });
   it("edits the shared configuration and updates the rally summary", () => {
     const onChange = vi.fn();
     render(<AdminExperience config={DEFAULT_ADMIN_CONFIG} onChange={onChange} />);
@@ -20,7 +80,7 @@ describe("organizer experience", () => {
     expect(onChange).toHaveBeenCalledWith(
       expect.objectContaining({ title: expect.objectContaining({ ja: "秋の街歩き" }) }),
     );
-    expect(screen.getByText(/このブラウザーのプレビュー設定です/)).toBeTruthy();
+    expect(screen.getByText(/設定は再読み込みで初期化/)).toBeTruthy();
   });
 
   it("supports keyboard navigation and adding spots and rewards", () => {
@@ -61,6 +121,7 @@ describe("organizer experience", () => {
 
   it("imports validated settings and rejects malformed JSON", () => {
     const onChange = vi.fn();
+    const confirm = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValue(true);
     render(<AdminExperience config={DEFAULT_ADMIN_CONFIG} onChange={onChange} />);
     fireEvent.click(screen.getByRole("tab", { name: "詳細設定" }));
     const importDetails = screen.getByText("JSONから設定を読み込む");
@@ -74,6 +135,9 @@ describe("organizer experience", () => {
     fireEvent.change(screen.getByLabelText("管理用設定JSON"), {
       target: { value: JSON.stringify(config) },
     });
+    fireEvent.click(screen.getByRole("button", { name: "この設定を読み込む" }));
+    expect(onChange).not.toHaveBeenCalled();
+    expect(confirm).toHaveBeenCalledOnce();
     fireEvent.click(screen.getByRole("button", { name: "この設定を読み込む" }));
     expect(onChange).toHaveBeenCalledWith(config);
   });
@@ -133,5 +197,6 @@ describe("organizer experience", () => {
     expect(screen.getByRole("tab", { name: "基本情報" }).getAttribute("aria-selected")).toBe(
       "true",
     );
+    expect(document.activeElement).toBe(screen.getByLabelText("達成するには"));
   });
 });

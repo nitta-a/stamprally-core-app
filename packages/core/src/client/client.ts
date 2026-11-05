@@ -10,7 +10,13 @@ import type {
   UserRallyState,
   Validator,
 } from "../domain/index.js";
-import { consumeReward, type RewardConsumeError, reconcileRewardStates } from "../engine/index.js";
+import {
+  consumeReward,
+  evaluateRallyAvailability,
+  evaluateSpotAvailability,
+  type RewardConsumeError,
+  reconcileRewardStates,
+} from "../engine/index.js";
 import type {
   OfflineOperationError,
   OfflineQueue,
@@ -59,6 +65,8 @@ export type ClientError =
         | "SPOT_NOT_FOUND"
         | "STAMP_ALREADY_ACQUIRED"
         | "PREREQUISITES_NOT_MET"
+        | "RALLY_UNAVAILABLE"
+        | "SPOT_UNAVAILABLE"
         | "INVALID_PROOF";
       readonly spotId: string;
       readonly message: string;
@@ -491,6 +499,22 @@ export class StampRallyClient {
       const spot = this.#config.spots.find((item) => item.id === spotId);
       if (spot === undefined)
         return this.#fail({ code: "SPOT_NOT_FOUND", spotId, message: "Spot was not found." });
+      const now = options.now ?? this.#now();
+      const remote = this.#options.syncAdapter?.checkIn;
+      let availabilityError: ClientError | undefined;
+      if (
+        this.#config.availability !== undefined &&
+        evaluateRallyAvailability(this.#config.availability, now).status !== "OPEN"
+      )
+        availabilityError = {
+          code: "RALLY_UNAVAILABLE",
+          spotId,
+          message: "The rally is not open.",
+        };
+      else if (evaluateSpotAvailability(spot.availability, now).status !== "OPEN")
+        availabilityError = { code: "SPOT_UNAVAILABLE", spotId, message: "The spot is not open." };
+      if (availabilityError !== undefined && (options.sync === false || remote === undefined))
+        return this.#fail(availabilityError);
       if (current.records.some((record) => record.stampId === spotId))
         return this.#fail({
           code: "STAMP_ALREADY_ACQUIRED",
@@ -556,7 +580,6 @@ export class StampRallyClient {
           );
         }
       }
-      const now = options.now ?? this.#now();
       const request: CheckInRequest = {
         rallyId: this.#config.id,
         userId: this.#userId,
@@ -569,12 +592,12 @@ export class StampRallyClient {
           ? { anonymousSessionId: this.#anonymousSessionId }
           : {}),
       };
-      const remote = this.#options.syncAdapter?.checkIn;
       if (options.sync !== false && remote !== undefined) {
         let result: CheckInResult;
         try {
           result = await remote(request);
         } catch (error) {
+          if (availabilityError !== undefined) return this.#fail(availabilityError);
           if (this.#offlineQueue === undefined) throw error;
           const record = { stampId: spotId, acquiredAt: now };
           const next = this.#reconcile({

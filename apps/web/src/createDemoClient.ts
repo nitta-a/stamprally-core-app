@@ -19,6 +19,8 @@ const ERROR_MESSAGES: Record<StampError["code"], string> = {
   SPOT_NOT_FOUND: "スポットが見つかりません。",
   STAMP_ALREADY_ACQUIRED: "このスタンプは取得済みです。",
   PREREQUISITES_NOT_MET: "先に必要なスポットのスタンプを集めてください。",
+  RALLY_UNAVAILABLE: "現在はラリーの開催期間外です。",
+  SPOT_UNAVAILABLE: "現在はスポットの受付時間外です。",
   INVALID_PROOF: "合言葉を確認して、もう一度お試しください。",
   CUSTOM_VALIDATION_FAILED: "このデモでは、この確認方法を利用できません。",
 };

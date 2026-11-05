@@ -1,8 +1,8 @@
 import {
-  formatDateTimeLocal,
+  CompletionConditionForm,
   GeneralSettingsForm,
   JsonConfigIO,
-  parseDateTimeLocal,
+  RallyAvailabilityForm,
   RewardItemForm,
   SpotItemForm,
   ThemeEditor,
@@ -24,6 +24,7 @@ export interface AdminExperienceProps {
   readonly config: AdminRallyConfig;
   readonly onChange: (config: AdminRallyConfig) => void;
   readonly locale?: DemoLocale;
+  readonly onLocaleChange?: (locale: DemoLocale) => void;
 }
 
 const sections = [
@@ -64,6 +65,16 @@ type SectionId = (typeof sections)[number]["id"];
 
 const editorDictionary = {
   en: {
+    rallyAvailability: "Rally period",
+    "availability.startsAt": "Starts",
+    "availability.endsAt": "Ends",
+    "availability.timezone": "Time zone",
+    completion: "Completion rule",
+    completionType: "Complete by",
+    "completion.allSpots": "Visiting every place",
+    "completion.stampCount": "Collecting a set number of stamps",
+    "completion.selectedSpots": "Visiting selected places",
+    "completion.requiredStamps": "Stamps required to complete",
     generalSettings: "General settings",
     title: "Rally title",
     inventoryLimit: "Global inventory limit",
@@ -77,6 +88,12 @@ const editorDictionary = {
     staffPasscodePlaceholder: "Used when a reward has no passcode",
     staffPasscodeHelp: "Place- and reward-specific settings take precedence.",
     spotName: "Place name",
+    spotMediaAndLocation: "Images and location (optional)",
+    spotAdvanced: "Hours and other settings (optional)",
+    rewardAdvanced: "Additional reward settings",
+    rewardStaffPasscodeHelp:
+      "Set a staff passcode in additional reward settings, or use the rally-wide staff passcode.",
+    digitalRewardHelp: "Add a digital content URL in additional reward settings if needed.",
     description: "Description",
     hint: "Hint",
     imageUrl: "Image URL",
@@ -114,7 +131,7 @@ const editorDictionary = {
     "rewardType.inPerson": "On-site reward",
     redemptionMethod: "Redemption method",
     "redemption.serverClaim": "Verify on server",
-    "redemption.manualSlide": "Slide to confirm",
+    "redemption.manualSlide": "Confirm redemption",
     "redemption.staffPasscode": "Staff passcode",
     "redemption.viewOnly": "Display on screen",
     unlockConditions: "Additional completion rules",
@@ -165,6 +182,16 @@ const editorDictionary = {
     "availability.editor.removeOpeningHours": "Remove opening-hour limits",
   },
   ja: {
+    rallyAvailability: "開催期間",
+    "availability.startsAt": "開催開始",
+    "availability.endsAt": "開催終了",
+    "availability.timezone": "タイムゾーン",
+    completion: "ラリーの達成条件",
+    completionType: "達成するには",
+    "completion.allSpots": "すべてのスポットを訪れる",
+    "completion.stampCount": "決まった数のスタンプを集める",
+    "completion.selectedSpots": "指定したスポットを訪れる",
+    "completion.requiredStamps": "達成に必要なスタンプ数",
     generalSettings: "ラリーの基本設定",
     title: "ラリーの名前",
     inventoryLimit: "特典の共通在庫数",
@@ -178,6 +205,12 @@ const editorDictionary = {
     staffPasscodePlaceholder: "特典ごとのコードがない場合に使用",
     staffPasscodeHelp: "スポット・特典ごとの設定が優先されます。",
     spotName: "スポット名",
+    spotMediaAndLocation: "画像・場所の設定（任意）",
+    spotAdvanced: "受付時間・その他の設定（任意）",
+    rewardAdvanced: "特典の詳細設定",
+    rewardStaffPasscodeHelp:
+      "詳細設定でスタッフコードを設定するか、ラリー共通のコードを利用してください。",
+    digitalRewardHelp: "必要に応じて詳細設定にデジタル特典のURLを入力してください。",
     description: "紹介文",
     hint: "見つけるヒント",
     imageUrl: "写真のURL",
@@ -215,7 +248,7 @@ const editorDictionary = {
     "rewardType.inPerson": "現地で受け取る特典",
     redemptionMethod: "受け取りの確認方法",
     "redemption.serverClaim": "サーバーで確認",
-    "redemption.manualSlide": "スライドして確認",
+    "redemption.manualSlide": "確認して引き換え",
     "redemption.staffPasscode": "スタッフのコードで確認",
     "redemption.viewOnly": "画面で表示",
     unlockConditions: "追加の達成条件",
@@ -372,19 +405,20 @@ function resolveIssueTarget(
 }
 
 export function AdminExperience(props: AdminExperienceProps): ReactElement {
-  const { config: externalConfig, onChange, locale = "ja" } = props;
+  const { config: externalConfig, onChange, locale = "ja", onLocaleChange } = props;
   const editor = useAdminRallyEditor(externalConfig, { onChange });
   const { config, update } = editor;
   const [activeSection, setActiveSection] = useState<SectionId>("general");
   const [focusedEntityId, setFocusedEntityId] = useState<string | null>(null);
+  const [focusedField, setFocusedField] = useState<string | null>(null);
+  const [focusedGeneralField, setFocusedGeneralField] = useState<string | null>(null);
+  const panelRef = useRef<HTMLElement>(null);
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const entityRefs = useRef<Record<string, HTMLDetailsElement | null>>({});
   const id = useId();
   const selectedSection = sections.find(({ id: sectionId }) => sectionId === activeSection);
   const issues = analyzeRallyExperience(config, { targetLocales: ["ja", "en"] });
   const actionableIssues = issues.filter(({ severity }) => severity !== "info");
-  const completion = config.completion?.condition ?? { type: "all_spots" };
-  const timezone = config.availability?.timezone ?? "Asia/Tokyo";
   const title = resolveLocalizedText(config.title, locale);
 
   useEffect(() => {
@@ -392,11 +426,32 @@ export function AdminExperience(props: AdminExperienceProps): ReactElement {
     const target = entityRefs.current[focusedEntityId];
     if (target !== undefined && target !== null) {
       target.open = true;
-      target.scrollIntoView?.({ behavior: "smooth", block: "nearest" });
-      target.querySelector<HTMLElement>("summary")?.focus();
+      target.scrollIntoView?.({ block: "nearest" });
+      const field =
+        focusedField === null
+          ? null
+          : target.querySelector<HTMLElement>(`[data-field="${focusedField}"]`);
+      if (field !== null) {
+        const details = field instanceof HTMLDetailsElement ? field : field.closest("details");
+        if (details !== null) details.open = true;
+        const control = field.querySelector<HTMLElement>("input, select, textarea, button");
+        if (control === null) target.querySelector<HTMLElement>("summary")?.focus();
+        else control.focus();
+      } else target.querySelector<HTMLElement>("summary")?.focus();
     }
     setFocusedEntityId(null);
-  }, [focusedEntityId]);
+    setFocusedField(null);
+  }, [focusedEntityId, focusedField]);
+
+  useEffect(() => {
+    if (activeSection !== "general" || focusedGeneralField === null) return;
+    panelRef.current
+      ?.querySelector<HTMLElement>(
+        `[data-field="${focusedGeneralField}"] input, [data-field="${focusedGeneralField}"] select`,
+      )
+      ?.focus();
+    setFocusedGeneralField(null);
+  }, [activeSection, focusedGeneralField]);
 
   function changeTab(event: KeyboardEvent<HTMLButtonElement>, index: number): void {
     let nextIndex = index;
@@ -435,10 +490,33 @@ export function AdminExperience(props: AdminExperienceProps): ReactElement {
   }
 
   function jumpToIssue(issue: ExperienceIssue): void {
+    if (issue.code === "missing_localization") {
+      const targetLocale = issue.path?.split(".").at(-1);
+      if ((targetLocale === "ja" || targetLocale === "en") && targetLocale !== locale)
+        onLocaleChange?.(targetLocale);
+    }
     const target = resolveIssueTarget(issue, config);
     setActiveSection(target.section);
     if (target.entityId !== undefined) {
+      const part = issue.path?.split(".")[2];
+      if (
+        part === "availability" ||
+        part === "location" ||
+        part === "validUntil" ||
+        part === "prerequisites" ||
+        part === "conditions" ||
+        part === "name" ||
+        part === "title"
+      )
+        setFocusedField(part);
       setFocusedEntityId(target.entityId);
+      return;
+    }
+    if (
+      target.section === "general" &&
+      (issue.path?.startsWith("completion") || issue.path?.startsWith("title"))
+    ) {
+      setFocusedGeneralField(issue.path.startsWith("completion") ? "completion" : "title");
       return;
     }
     const sectionIndex = sections.findIndex(({ id: sectionId }) => sectionId === target.section);
@@ -516,6 +594,7 @@ export function AdminExperience(props: AdminExperienceProps): ReactElement {
 
           <section
             className="organizer-panel"
+            ref={panelRef}
             id={`${id}-panel`}
             role="tabpanel"
             aria-labelledby={`${id}-tab-${activeSection}`}
@@ -547,12 +626,14 @@ export function AdminExperience(props: AdminExperienceProps): ReactElement {
 
             {activeSection === "general" && (
               <div className="organizer-form">
-                <GeneralSettingsForm
-                  config={config}
-                  onChange={editor.setConfig}
-                  locale={locale}
-                  dictionary={editorDictionary}
-                />
+                <div data-field="title">
+                  <GeneralSettingsForm
+                    config={config}
+                    onChange={editor.setConfig}
+                    locale={locale}
+                    dictionary={editorDictionary}
+                  />
+                </div>
                 <label>
                   {text(locale, "参加者への案内", "Participant guidance")}
                   <textarea
@@ -573,123 +654,29 @@ export function AdminExperience(props: AdminExperienceProps): ReactElement {
                     }}
                   />
                 </label>
-                <fieldset>
-                  <legend>{text(locale, "開催期間", "Rally period")}</legend>
-                  <p className="organizer-field-help">
-                    {text(
-                      locale,
-                      "未入力の場合は、開催期間を制限しません。",
-                      "Leave blank for no date limit.",
-                    )}
-                  </p>
-                  <div className="organizer-date-fields">
-                    {(["startsAt", "endsAt"] as const).map((key) => (
-                      <label key={key}>
-                        {key === "startsAt" && text(locale, "開催開始", "Starts")}
-                        {key === "endsAt" && text(locale, "開催終了", "Ends")}
-                        <input
-                          type="datetime-local"
-                          value={
-                            config.availability?.[key] === undefined
-                              ? ""
-                              : formatDateTimeLocal(config.availability[key], timezone)
-                          }
-                          onChange={(event) => {
-                            const availability = { ...config.availability, timezone };
-                            if (event.target.value === "") delete availability[key];
-                            else {
-                              const value = parseDateTimeLocal(event.target.value, timezone);
-                              if (value === undefined) return;
-                              availability[key] = value;
-                            }
-                            update({ availability });
-                          }}
-                        />
-                      </label>
-                    ))}
-                  </div>
-                  <label>
-                    {text(locale, "タイムゾーン", "Time zone")}
-                    <input
-                      value={timezone}
-                      onChange={(event) =>
-                        update({
-                          availability: { ...config.availability, timezone: event.target.value },
-                        })
-                      }
-                    />
-                  </label>
-                </fieldset>
-                <fieldset>
-                  <legend>{text(locale, "ラリーの達成条件", "Completion rule")}</legend>
-                  <label>
-                    {text(locale, "達成するには", "Complete by")}
-                    <select
-                      value={completion.type}
-                      onChange={(event) => {
-                        const type = event.target.value;
-                        if (type === "all_spots") update({ completion: { condition: { type } } });
-                        else if (type === "stamp_count")
-                          update({
-                            completion: { condition: { type, count: config.spots.length } },
-                          });
-                        else if (type === "stamps")
-                          update({ completion: { condition: { type, stampIds: [] } } });
-                      }}
-                    >
-                      <option value="all_spots">
-                        {text(locale, "すべてのスポットを訪れる", "Visiting every place")}
-                      </option>
-                      <option value="stamp_count">
-                        {text(
-                          locale,
-                          "決まった数のスタンプを集める",
-                          "Collecting a set number of stamps",
-                        )}
-                      </option>
-                      <option value="stamps">
-                        {text(locale, "指定したスポットを訪れる", "Visiting selected places")}
-                      </option>
-                    </select>
-                  </label>
-                  {completion.type === "stamp_count" && (
-                    <label>
-                      {text(locale, "達成に必要なスタンプ数", "Stamps required to complete")}
-                      <input
-                        type="number"
-                        min={1}
-                        value={completion.count}
-                        onChange={(event) =>
-                          update({
-                            completion: {
-                              condition: { type: "stamp_count", count: Number(event.target.value) },
-                            },
-                          })
-                        }
-                      />
-                    </label>
+                <RallyAvailabilityForm
+                  config={config}
+                  onChange={editor.setConfig}
+                  locale={locale}
+                  dictionary={editorDictionary}
+                  defaultTimezone="Asia/Tokyo"
+                  help={text(
+                    locale,
+                    "未入力の場合は、開催期間を制限しません。",
+                    "Leave blank for no date limit.",
                   )}
-                  {completion.type === "stamps" && (
-                    <div className="organizer-spot-selection">
-                      {config.spots.map((spot) => (
-                        <label key={spot.id}>
-                          <input
-                            type="checkbox"
-                            checked={completion.stampIds.includes(spot.id)}
-                            onChange={(event) => {
-                              const stampIds = completion.stampIds.filter(
-                                (spotId) => spotId !== spot.id,
-                              );
-                              if (event.target.checked) stampIds.push(spot.id);
-                              update({ completion: { condition: { type: "stamps", stampIds } } });
-                            }}
-                          />
-                          {resolveLocalizedText(spot.name, locale)}
-                        </label>
-                      ))}
-                    </div>
-                  )}
-                </fieldset>
+                  helpClassName="organizer-field-help"
+                  dateFieldsClassName="organizer-date-fields"
+                />
+                <CompletionConditionForm
+                  config={config}
+                  onChange={editor.setConfig}
+                  locale={locale}
+                  dictionary={editorDictionary}
+                  initialCount={config.spots.length}
+                  initialStampIds={[]}
+                  spotSelectionClassName="organizer-spot-selection"
+                />
               </div>
             )}
 
@@ -754,12 +741,24 @@ export function AdminExperience(props: AdminExperienceProps): ReactElement {
                         </button>
                       </div>
                       <SpotItemForm
+                        collapseAdvanced
                         spot={spot}
                         availableSpots={config.spots}
                         locale={locale}
                         dictionary={editorDictionary}
                         onChange={(next) => editor.updateSpot(spot.id, next)}
-                        onRemove={() => editor.removeSpot(spot.id)}
+                        onRemove={() => {
+                          if (
+                            window.confirm(
+                              text(
+                                locale,
+                                `「${resolveLocalizedText(spot.name, locale)}」を削除しますか？設定は元に戻せますが、参加者プレビューの進捗はリセットされます。`,
+                                `Remove ${resolveLocalizedText(spot.name, locale)}? You can undo the setting, but participant preview progress will reset.`,
+                              ),
+                            )
+                          )
+                            editor.removeSpot(spot.id);
+                        }}
                       />
                     </div>
                   </details>
@@ -828,11 +827,23 @@ export function AdminExperience(props: AdminExperienceProps): ReactElement {
                         </button>
                       </div>
                       <RewardItemForm
+                        collapseAdvanced
                         reward={reward}
                         locale={locale}
                         dictionary={editorDictionary}
                         onChange={(next) => editor.updateReward(reward.id, next)}
-                        onRemove={() => editor.removeReward(reward.id)}
+                        onRemove={() => {
+                          if (
+                            window.confirm(
+                              text(
+                                locale,
+                                `「${resolveLocalizedText(reward.title, locale)}」を削除しますか？設定は元に戻せますが、参加者プレビューの進捗はリセットされます。`,
+                                `Remove ${resolveLocalizedText(reward.title, locale)}? You can undo the setting, but participant preview progress will reset.`,
+                              ),
+                            )
+                          )
+                            editor.removeReward(reward.id);
+                        }}
                       />
                     </div>
                   </details>
@@ -871,7 +882,18 @@ export function AdminExperience(props: AdminExperienceProps): ReactElement {
                       config={config}
                       locale={locale}
                       dictionary={editorDictionary}
-                      onImport={editor.setConfig}
+                      onImport={(imported) => {
+                        if (
+                          window.confirm(
+                            text(
+                              locale,
+                              "設定をJSONの内容に置き換えますか？参加者プレビューの進捗はリセットされます。設定は「元に戻す」で復元できます。",
+                              "Replace settings with this JSON? Participant preview progress will reset. You can undo the settings change.",
+                            ),
+                          )
+                        )
+                          editor.setConfig(imported);
+                      }}
                     />
                   </details>
                 </section>
@@ -913,10 +935,41 @@ export function AdminExperience(props: AdminExperienceProps): ReactElement {
             <p className="organizer-local-note">
               {text(
                 locale,
-                "このブラウザーのプレビュー設定です。変更は参加者プレビューに反映されます。公開・配信は行いません。",
-                "These preview settings are stored in this browser and appear in the participant view. Nothing is published or sent.",
+                "変更は参加者プレビューに反映されます。設定は再読み込みで初期化されるため、必要に応じてJSONをダウンロードしてください。公開は行いません。",
+                "Changes appear in the participant preview. Settings reset on reload; download the JSON to keep them. Nothing is published.",
               )}
             </p>
+          </section>
+
+          <section
+            className="organizer-preflight-card"
+            aria-label={text(locale, "作成状況", "Setup progress")}
+          >
+            <h2>{text(locale, "作成状況", "Setup progress")}</h2>
+            <ul>
+              <li>
+                {title.trim() === "" ? "○" : "✓"}{" "}
+                {text(
+                  locale,
+                  "基本情報：ラリー名を入力（必須）",
+                  "Basics: enter a rally name (required)",
+                )}
+              </li>
+              <li>
+                {config.spots.length === 0 ? "○" : "✓"}{" "}
+                {text(locale, "スポットを登録（必須）", "Add places (required)")}
+              </li>
+              <li>
+                {text(
+                  locale,
+                  `特典 ${config.rewards.length} 件（任意）`,
+                  `${config.rewards.length} rewards (optional)`,
+                )}
+              </li>
+              <li>
+                {text(locale, "参加者プレビューで操作を確認", "Check the participant preview")}
+              </li>
+            </ul>
           </section>
 
           <section
@@ -950,14 +1003,21 @@ export function AdminExperience(props: AdminExperienceProps): ReactElement {
                   )}
                 </strong>
                 <ul>
-                  {actionableIssues.map((issue, index) => (
+                  {issues.map((issue, index) => (
                     <li key={`${issue.code}-${issue.path ?? index}`} data-severity={issue.severity}>
                       <button
                         type="button"
                         className="organizer-issue-jump"
                         onClick={() => jumpToIssue(issue)}
                       >
-                        <span>{issueLabel(issue, locale)}</span>
+                        <span>
+                          {issue.severity === "error"
+                            ? text(locale, "エラー：", "Error: ")
+                            : issue.severity === "warning"
+                              ? text(locale, "警告：", "Warning: ")
+                              : text(locale, "情報：", "Info: ")}
+                          <span>{issueLabel(issue, locale)}</span>
+                        </span>
                         <small>{text(locale, "設定を開く →", "Open setting →")}</small>
                       </button>
                     </li>
@@ -965,6 +1025,25 @@ export function AdminExperience(props: AdminExperienceProps): ReactElement {
                 </ul>
               </div>
             )}
+            {actionableIssues.length === 0 &&
+              issues.some(({ severity }) => severity === "info") && (
+                <ul>
+                  {issues
+                    .filter(({ severity }) => severity === "info")
+                    .map((issue, index) => (
+                      <li key={`${issue.code}-${issue.path ?? index}`}>
+                        <button
+                          type="button"
+                          className="organizer-issue-jump"
+                          onClick={() => jumpToIssue(issue)}
+                        >
+                          {text(locale, "情報：", "Info: ")}
+                          {issueLabel(issue, locale)}
+                        </button>
+                      </li>
+                    ))}
+                </ul>
+              )}
             <p className="organizer-field-help">
               {text(
                 locale,

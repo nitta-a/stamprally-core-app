@@ -1,4 +1,4 @@
-import type { Reward, RewardState } from "../domain/models.js";
+import type { PublicReward, RallyInventoryState, Reward, RewardState } from "../domain/models.js";
 
 export interface ClaimTicketOptions {
   readonly issuedAt?: string;
@@ -51,4 +51,20 @@ export function issueClaimTicketNumber(
   if (currentState.claimTicketNumber !== undefined) return currentState;
   const claimTicketNumber = createClaimTicketNumber(reward.id, options);
   return { ...currentState, claimTicketNumber };
+}
+/** Estimates display availability; the server remains authoritative for redemption. */
+export function getRewardAvailability(
+  reward: PublicReward,
+  state: RewardState | undefined,
+  inventory?: RallyInventoryState,
+): { readonly available: boolean; readonly remaining: number | undefined } {
+  const remaining =
+    inventory?.rewardRemaining?.[reward.id] ??
+    (reward.stockLimit === undefined
+      ? undefined
+      : Math.max(0, reward.stockLimit - (state?.redeemedCount ?? 0)));
+  return {
+    available: state?.status === "AVAILABLE" && remaining !== 0 && inventory?.sharedRemaining !== 0,
+    remaining,
+  };
 }

@@ -1,9 +1,10 @@
 import type { PublicRallyConfig, StampRallyClient, UserRallyState } from "@stamprally/core";
 import { calculateProgress, evaluateSpotStatus, resolveLocalizedText } from "@stamprally/core";
 import { useStampRally } from "@stamprally/react";
+import type { ConditionRendererProps } from "@stamprally/ui";
 import { CompletionPanel, RallyViewer } from "@stamprally/ui";
 import type { ReactElement } from "react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { DemoRewardCard } from "./DemoRewardCard.js";
 import { DemoPasscode, DemoSpotCard } from "./DemoSpotCard.js";
 import { DEMO_STOPS } from "./demoConfig.js";
@@ -15,14 +16,27 @@ import { revealLinkedSpot } from "./walkNavigation.js";
 interface ParticipantExperienceProps {
   client: StampRallyClient;
   locale?: DemoLocale;
+  demoCodes?: Readonly<Record<string, string>>;
 }
 
 export function ParticipantExperience(props: ParticipantExperienceProps): ReactElement {
-  const { client, locale = "ja" } = props;
+  const { client, locale = "ja", demoCodes } = props;
   const { config, state, error } = useStampRally(client);
   const [rewardId, setRewardId] = useState<string | null>(null);
+  const [resetError, setResetError] = useState(false);
   const rewardDialog = useRef<HTMLDialogElement>(null);
   const reward = config.rewards.find((item) => item.id === rewardId);
+  const passcodeRenderer = useMemo(
+    () =>
+      function PasscodeRenderer(conditionProps: ConditionRendererProps): ReactElement {
+        const demoCode = demoCodes?.[conditionProps.spot.id];
+        return (
+          <DemoPasscode {...conditionProps} {...(demoCode === undefined ? {} : { demoCode })} />
+        );
+      },
+    [demoCodes],
+  );
+  const progress = state === null ? undefined : calculateProgress(state, config);
 
   useEffect(() => {
     if (rewardId !== null) rewardDialog.current?.showModal();
@@ -118,11 +132,21 @@ export function ParticipantExperience(props: ParticipantExperienceProps): ReactE
         </p>
       )}
       <div className="walk-layout">
-        <div id="spots" className="walk-main">
+        <div className="walk-main">
+          {resetError && (
+            <p className="checkin-error" role="alert">
+              {text(
+                locale,
+                "進捗をリセットできませんでした。もう一度お試しください。",
+                "Could not reset progress. Please try again.",
+              )}
+            </p>
+          )}
           <RallyViewer
             config={config}
             client={client}
             locale={locale}
+            nextAction={{ availability: "exclude_closed" }}
             showSyncStatus={false}
             classNames={{
               root: "walk-viewer",
@@ -138,11 +162,22 @@ export function ParticipantExperience(props: ParticipantExperienceProps): ReactE
                 state={currentState}
                 locale={locale}
                 onResetProgress={() => {
-                  void client.reset();
+                  if (
+                    !window.confirm(
+                      text(
+                        locale,
+                        "進捗をリセットしますか？獲得したスタンプは消去されます。",
+                        "Reset progress? Your collected stamps will be deleted.",
+                      ),
+                    )
+                  )
+                    return;
+                  setResetError(false);
+                  void client.reset().catch(() => setResetError(true));
                 }}
               />
             )}
-            customConditionRenderers={{ passcode: DemoPasscode }}
+            customConditionRenderers={{ passcode: passcodeRenderer }}
             renderSpotCard={(spotProps) => <DemoSpotCard {...spotProps} />}
             renderRewardCard={(rewardProps) => {
               const anchorId =
@@ -151,12 +186,24 @@ export function ParticipantExperience(props: ParticipantExperienceProps): ReactE
                   : `reward-${rewardProps.reward.id}`;
               return <DemoRewardCard {...rewardProps} anchorId={anchorId} />;
             }}
-            renderNextAction={(nextProps) => <NextStop {...nextProps} />}
+            renderNextAction={(nextProps) => (
+              <div id="spots">
+                <NextStop
+                  {...nextProps}
+                  acquired={progress?.completionAcquired ?? 0}
+                  required={progress?.completionRequired ?? config.spots.length}
+                />
+              </div>
+            )}
             renderCompletion={(completionProps) => {
               const viewOnlyRewards = completionProps.rewards.filter(
                 ({ redemptionMethod }) => redemptionMethod === "view_only",
               );
-              return <CompletionPanel {...completionProps} rewards={viewOnlyRewards} />;
+              return (
+                <div id="spots">
+                  <CompletionPanel {...completionProps} rewards={viewOnlyRewards} />
+                </div>
+              );
             }}
             renderErrorFeedback={() => <></>}
             onViewReward={setRewardId}
@@ -200,7 +247,7 @@ export function ParticipantExperience(props: ParticipantExperienceProps): ReactE
           className="dialog-close"
           type="button"
           onClick={closeReward}
-          aria-label={text(locale, "記念カードを閉じる", "Close keepsake")}
+          aria-label={text(locale, "特典を閉じる", "Close reward")}
         >
           ×
         </button>
@@ -233,8 +280,8 @@ export function ParticipantExperience(props: ParticipantExperienceProps): ReactE
         <p className="souvenir-note">
           {text(
             locale,
-            "デモの達成記念です。何度でも開いて楽しめます。",
-            "A demo reward. You can open it again any time.",
+            "プレビュー用の表示です。実際の特典は配布されません。",
+            "This is a preview. No actual reward is distributed.",
           )}
         </p>
       </dialog>

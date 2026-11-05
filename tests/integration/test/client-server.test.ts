@@ -41,6 +41,45 @@ async function postJson(
 }
 
 describe("client ↔ HTTP ↔ server ↔ persistence", () => {
+  it("accepts a check-in when server time is open despite a slow client clock", async () => {
+    const config = { ...createAdminConfig(), availability: { startsAt: "2026-01-02T00:00:00Z" } };
+    const { publicConfig, persistence, network } = createTestBackend({
+      config,
+      serverOptions: { now: () => "2026-01-03T00:00:00Z" },
+    });
+    const { client, anonymousSessionId } = createTestDevice({ publicConfig, network });
+    const result = await client.checkIn("gate", SECRETS.gatePasscode, {
+      now: "2026-01-01T00:00:00Z",
+    });
+    expect(result.ok).toBe(true);
+    expect(stampIds(await persistence.getUserState(RALLY_ID, anonymousSessionId))).toEqual([
+      "gate",
+    ]);
+  });
+  it("does not queue a locally closed check-in when the server is unreachable", async () => {
+    const config = { ...createAdminConfig(), availability: { startsAt: "2026-01-02T00:00:00Z" } };
+    const { publicConfig, network } = createTestBackend({ config });
+    const { client } = createTestDevice({ publicConfig, network });
+    network.setOffline(true);
+    const result = await client.checkIn("gate", SECRETS.gatePasscode, {
+      now: "2026-01-01T00:00:00Z",
+    });
+    expect(result).toMatchObject({ ok: false, error: { code: "RALLY_UNAVAILABLE" } });
+    expect(client.pendingCount).toBe(0);
+  });
+  it("rejects a check-in when the server clock is outside the rally period", async () => {
+    const config = { ...createAdminConfig(), availability: { startsAt: "2026-01-02T00:00:00Z" } };
+    const { publicConfig, persistence, network } = createTestBackend({
+      config,
+      serverOptions: { now: () => "2026-01-01T00:00:00Z" },
+    });
+    const { client, anonymousSessionId } = createTestDevice({ publicConfig, network });
+    const result = await client.checkIn("gate", SECRETS.gatePasscode, {
+      now: "2026-01-03T00:00:00Z",
+    });
+    expect(result).toMatchObject({ ok: false, error: { code: "RALLY_UNAVAILABLE" } });
+    expect(stampIds(await persistence.getUserState(RALLY_ID, anonymousSessionId))).toEqual([]);
+  });
   it("completes an anonymous journey and persists every step on the server", async () => {
     const backend = createTestBackend();
     const { publicConfig, persistence, network } = backend;

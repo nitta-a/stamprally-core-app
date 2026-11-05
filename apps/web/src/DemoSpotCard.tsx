@@ -1,16 +1,11 @@
-import type { AvailabilityResult } from "@stamprally/core";
 import { resolveLocalizedText } from "@stamprally/core";
 import type { ConditionRendererProps, SpotCardProps } from "@stamprally/ui";
+import { formatAvailabilityDetail } from "@stamprally/ui";
 import type { ReactElement } from "react";
 import { useState } from "react";
 import { DEMO_STOPS } from "./demoConfig.js";
 import type { DemoLocale } from "./locale.js";
 import { text } from "./locale.js";
-
-interface DemoSpotCardProps extends SpotCardProps {}
-
-const WEEKDAYS_JA = ["日", "月", "火", "水", "木", "金", "土"] as const;
-const WEEKDAYS_EN = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
 
 function formatAcquiredTime(timestamp: string | undefined, locale: DemoLocale): string | null {
   if (timestamp === undefined || timestamp === "") return null;
@@ -23,43 +18,8 @@ function formatAcquiredTime(timestamp: string | undefined, locale: DemoLocale): 
   });
 }
 
-function formatAvailabilityDetail(
-  availability: AvailabilityResult | undefined,
-  locale: DemoLocale,
-): string | null {
-  if (availability === undefined) return null;
-  if (availability.status === "OPEN") {
-    if (availability.currentPeriod === undefined) return null;
-    const { opensAt, closesAt } = availability.currentPeriod;
-    return text(locale, `受付中 (${opensAt}〜${closesAt})`, `Open (${opensAt}–${closesAt})`);
-  }
-  if (availability.status === "CLOSED") {
-    const reasonPrefix =
-      availability.reason === "temporary_closure"
-        ? text(locale, "本日は休業日", "Closed today")
-        : text(locale, "受付時間外", "Outside opening hours");
-    if (availability.nextOpening === undefined) return reasonPrefix;
-    const { opensAt, isToday, dayOfWeek } = availability.nextOpening;
-    if (isToday) {
-      return text(
-        locale,
-        `${reasonPrefix} · 本日 ${opensAt} から受付`,
-        `${reasonPrefix} · Opens today at ${opensAt}`,
-      );
-    }
-    const dayLabel =
-      locale === "ja" ? `${WEEKDAYS_JA[dayOfWeek] ?? ""}曜` : (WEEKDAYS_EN[dayOfWeek] ?? "");
-    return text(
-      locale,
-      `${reasonPrefix} · 次回 ${dayLabel} ${opensAt} から`,
-      `${reasonPrefix} · Next open ${dayLabel} ${opensAt}`,
-    );
-  }
-  return null;
-}
-
-export function DemoSpotCard(props: DemoSpotCardProps): ReactElement {
-  const { spot, state, status, availability, locale, children } = props;
+export function DemoSpotCard(props: SpotCardProps): ReactElement {
+  const { spot, state, status, availability, locale, children, prerequisiteNames = [] } = props;
   const stop = DEMO_STOPS[spot.id];
   const language = locale === "ja" ? "ja" : "en";
   const name = resolveLocalizedText(spot.name, locale);
@@ -67,12 +27,15 @@ export function DemoSpotCard(props: DemoSpotCardProps): ReactElement {
   const locked = status === "LOCKED";
   let statusText = text(language, "スタンプ未獲得", "Not collected");
   if (claimed) statusText = text(language, "獲得済み", "Collected");
-  else if (locked) statusText = text(language, "案内所からスタート", "Start at the welcome center");
+  else if (locked) statusText = text(language, "前提スポットが必要", "Prerequisite required");
   else if (status === "VERIFYING") statusText = text(language, "確認中…", "Checking…");
   const record = state.records.find((item) => item.stampId === spot.id);
   const acquiredTime = formatAcquiredTime(record?.acquiredAt, language);
-  const availabilityDetail =
-    spot.availability === undefined ? null : formatAvailabilityDetail(availability, language);
+  const availabilityDetail = formatAvailabilityDetail(
+    availability,
+    language,
+    spot.availability?.timezone ?? "UTC",
+  );
 
   return (
     <article className="walk-spot" id={`spot-${spot.id}`} aria-label={name} tabIndex={-1}>
@@ -85,12 +48,7 @@ export function DemoSpotCard(props: DemoSpotCardProps): ReactElement {
       </div>
       <div className="walk-spot__body">
         <div className="spot-meta">
-          <span>
-            {stop === undefined
-              ? text(language, "立ち寄りスポット", "Place to visit")
-              : resolveLocalizedText(stop.category, locale)}
-          </span>
-          <span>{stop === undefined ? "" : resolveLocalizedText(stop.walk, locale)}</span>
+          <span>{text(language, "立ち寄りスポット", "Place to visit")}</span>
         </div>
         <h3>{name}</h3>
         <p className="spot-description">{resolveLocalizedText(spot.description ?? "", locale)}</p>
@@ -112,8 +70,8 @@ export function DemoSpotCard(props: DemoSpotCardProps): ReactElement {
           <p className="spot-lock-note">
             {text(
               language,
-              "まず案内所で最初のスタンプを押してください。",
-              "Collect your first stamp at the welcome center to unlock this place.",
+              `先に必要なスポット: ${prerequisiteNames.join("・")}`,
+              `Complete these places first: ${prerequisiteNames.join(", ")}`,
             )}
           </p>
         )}
@@ -139,13 +97,15 @@ export function DemoSpotCard(props: DemoSpotCardProps): ReactElement {
   );
 }
 
-interface DemoPasscodeProps extends ConditionRendererProps {}
+interface DemoPasscodeProps extends ConditionRendererProps {
+  demoCode?: string;
+}
 
 export function DemoPasscode(props: DemoPasscodeProps): ReactElement {
-  const { spot, locale, disabled, onSubmit } = props;
+  const { spot, locale, disabled, onSubmit, demoCode } = props;
   const language = locale === "ja" ? "ja" : "en";
   const [code, setCode] = useState("");
-  const [error, setError] = useState(false);
+  const [error, setError] = useState<"invalid" | "unavailable" | "failed" | null>(null);
   const name = resolveLocalizedText(spot.name, locale);
 
   return (
@@ -153,7 +113,7 @@ export function DemoPasscode(props: DemoPasscodeProps): ReactElement {
       className="spot-checkin"
       onSubmit={async (event) => {
         event.preventDefault();
-        setError(false);
+        setError(null);
         try {
           const result = await onSubmit(code.trim());
           if (
@@ -161,10 +121,21 @@ export function DemoPasscode(props: DemoPasscodeProps): ReactElement {
             result !== null &&
             "ok" in result &&
             result.ok === false
-          )
-            setError(true);
+          ) {
+            const code =
+              "error" in result &&
+              typeof result.error === "object" &&
+              result.error !== null &&
+              "code" in result.error
+                ? result.error.code
+                : undefined;
+            if (code === "INVALID_PROOF") setError("invalid");
+            else if (code === "RALLY_UNAVAILABLE" || code === "SPOT_UNAVAILABLE")
+              setError("unavailable");
+            else setError("failed");
+          }
         } catch {
-          setError(true);
+          setError("failed");
         }
       }}
     >
@@ -184,29 +155,41 @@ export function DemoPasscode(props: DemoPasscodeProps): ReactElement {
       <button className="primary-button" type="submit" disabled={disabled || code.trim() === ""}>
         {text(language, "スタンプを押す", "Collect stamp")} <span aria-hidden="true">↗</span>
       </button>
-      {error && (
+      {error !== null && (
         <p role="alert" className="checkin-error">
-          {text(
-            language,
-            "合言葉を確認して、もう一度お試しください。",
-            "That passcode did not work. Please try again.",
-          )}
+          {error === "invalid"
+            ? text(
+                language,
+                "合言葉を確認して、もう一度お試しください。",
+                "That passcode did not work. Please try again.",
+              )
+            : error === "unavailable"
+              ? text(
+                  language,
+                  "現在は受付時間外です。受付時間を確認してからお試しください。",
+                  "Check-in is currently closed. Check the opening hours and try again.",
+                )
+              : text(
+                  language,
+                  "スタンプを記録できませんでした。もう一度お試しください。",
+                  "Could not record the stamp. Please try again.",
+                )}
         </p>
       )}
-      <details className="demo-hint">
-        <summary>{text(language, "デモ用の合言葉を見る", "Show demo passcode")}</summary>
-        <p>
-          {resolveLocalizedText(
-            spot.hint ??
-              text(
-                language,
-                "主催者画面で合言葉を設定してください。",
-                "Set a passcode in organizer settings.",
-              ),
-            locale,
-          )}
-        </p>
-      </details>
+      {(demoCode !== undefined || spot.hint !== undefined) && (
+        <details className="demo-hint">
+          <summary>
+            {demoCode === undefined
+              ? text(language, "ヒントを見る", "Show hint")
+              : text(language, "デモ用の合言葉を見る", "Show demo passcode")}
+          </summary>
+          <p>
+            {demoCode === undefined
+              ? resolveLocalizedText(spot.hint ?? "", locale)
+              : text(language, `デモ用の合言葉: ${demoCode}`, `Demo passcode: ${demoCode}`)}
+          </p>
+        </details>
+      )}
     </form>
   );
 }

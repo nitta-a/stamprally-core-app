@@ -14,6 +14,7 @@ interface WalkGuideProps {
 
 export function WalkGuide(props: WalkGuideProps): ReactElement {
   const { config, locale } = props;
+  const hasPrerequisites = config.spots.some((spot) => (spot.prerequisites?.length ?? 0) > 0);
   return (
     <aside className="walk-guide" aria-label={text(locale, "街歩きガイド", "Walk guide")}>
       <section className="guide-card">
@@ -29,27 +30,27 @@ export function WalkGuide(props: WalkGuideProps): ReactElement {
         <p>
           {text(
             locale,
-            "最初は案内所へ。そのあとは、好きな順番で立ち寄れます。",
-            "Start at the welcome center, then visit the other places in any order.",
+            hasPrerequisites
+              ? "スポットの条件を確認して、自分のペースで巡りましょう。"
+              : "好きなスポットから始められます。",
+            hasPrerequisites
+              ? "Check each place's requirements and explore at your own pace."
+              : "Start at any place you like.",
           )}
         </p>
         <ol className="walking-route">
-          {config.spots.map((spot) => {
-            const stop = DEMO_STOPS[spot.id];
-            return (
-              <li key={spot.id}>
-                <a href={`#spot-${spot.id}`} onClick={revealLinkedSpot}>
-                  <span className="route-dot">{spot.orderIndex + 1}</span>
-                  <span>
-                    {resolveLocalizedText(spot.name, locale)}
-                    <small>
-                      {stop === undefined ? "" : resolveLocalizedText(stop.walk, locale)}
-                    </small>
-                  </span>
-                </a>
-              </li>
-            );
-          })}
+          {[...config.spots]
+            .sort((a, b) => a.orderIndex - b.orderIndex)
+            .map((spot) => {
+              return (
+                <li key={spot.id}>
+                  <a href={`#spot-${spot.id}`} onClick={revealLinkedSpot}>
+                    <span className="route-dot">{spot.orderIndex + 1}</span>
+                    <span>{resolveLocalizedText(spot.name, locale)}</span>
+                  </a>
+                </li>
+              );
+            })}
         </ol>
         <p className="guide-note">
           {text(
@@ -66,18 +67,16 @@ export function WalkGuide(props: WalkGuideProps): ReactElement {
           <li>
             <strong>{text(locale, "スポットへ立ち寄る", "Visit a place")}</strong>
             <span>
-              {text(locale, "まずは案内所からスタート。", "Start at the welcome center.")}
+              {text(locale, "取得できるスポットから始めましょう。", "Start at an available place.")}
             </span>
           </li>
           <li>
-            <strong>
-              {text(locale, "合言葉でスタンプを押す", "Enter the passcode to collect a stamp")}
-            </strong>
+            <strong>{text(locale, "スタンプを集める", "Collect a stamp")}</strong>
             <span>
               {text(
                 locale,
-                "「デモ用の合言葉を見る」で試せます。",
-                "Try it with the “Show demo passcode” button.",
+                "スポットに表示された方法で取得しましょう。",
+                "Use the check-in method shown at each place.",
               )}
             </span>
           </li>
@@ -86,8 +85,8 @@ export function WalkGuide(props: WalkGuideProps): ReactElement {
             <span>
               {text(
                 locale,
-                "スタンプを集めて記念カードを開こう。",
-                "Collect stamps and open your keepsake.",
+                "達成条件や特典の内容を確認しましょう。",
+                "Check the completion requirements and available rewards.",
               )}
             </span>
           </li>
@@ -97,26 +96,38 @@ export function WalkGuide(props: WalkGuideProps): ReactElement {
   );
 }
 
-interface NextStopProps extends NextActionPanelProps {}
+interface NextStopProps extends NextActionPanelProps {
+  acquired: number;
+  required: number;
+}
 
 export function NextStop(props: NextStopProps): ReactElement {
-  const { suggestions, locale } = props;
+  const { suggestions, locale, acquired, required } = props;
   const language = locale === "ja" ? "ja" : "en";
   const first = suggestions[0];
   if (first === undefined)
     return (
       <section className="next-stop">
-        <h2>{text(language, "立ち寄れるスポットがありません", "No places to visit right now")}</h2>
+        <h2>
+          {text(language, "今取得できるスポットはありません", "No places are open right now")}
+        </h2>
         <p>
           {text(
             language,
-            "主催者画面でスポットの設定を確認してください。",
-            "Check the place settings in organizer view.",
+            "各スポットの受付時間や条件を確認してください。",
+            "Check each place's opening hours and requirements.",
           )}
         </p>
       </section>
     );
   const stop = DEMO_STOPS[first.spot.id];
+  const methods = first.spot.conditions.map(({ type }) => {
+    if (type === "passcode") return text(language, "合言葉を入力", "Enter a passcode");
+    if (type === "qr") return text(language, "QRコードを読み取る", "Scan a QR code");
+    if (type === "nfc") return text(language, "NFCタグを読み取る", "Read an NFC tag");
+    if (type === "gps") return text(language, "位置情報を確認", "Verify your location");
+    return text(language, "スポットの取得方法を確認", "Check the place's instructions");
+  });
   return (
     <section
       className="next-stop"
@@ -126,16 +137,28 @@ export function NextStop(props: NextStopProps): ReactElement {
         {stop?.symbol ?? "✳"}
       </span>
       <div>
-        <span className="eyebrow">{text(language, "次の立ち寄り先", "Next place to visit")}</span>
+        <span className="eyebrow">
+          {acquired === 0
+            ? text(language, "まずはここから", "Start here")
+            : text(language, "次の立ち寄り先", "Next place to visit")}
+        </span>
         <h2>{resolveLocalizedText(first.spot.name, locale)}</h2>
         <p>
-          {stop === undefined
-            ? text(language, "好きな順番で巡れます", "Visit in any order")
-            : resolveLocalizedText(stop.walk, locale)}
+          {text(
+            language,
+            `達成まで ${acquired} / ${required} 個。`,
+            `Progress: ${acquired} / ${required} stamps. `,
+          )}{" "}
+          {methods.length === 0
+            ? text(language, "スポットでチェックインしましょう。", "Check in at the place.")
+            : `${methods.join(text(language, " または ", " or "))}${text(language, "してスタンプを獲得しましょう。", " to collect a stamp.")}`}
         </p>
       </div>
       <a className="text-button" href={`#spot-${first.spot.id}`}>
-        {text(language, "スポットを見る", "View place")} <span aria-hidden="true">↓</span>
+        {acquired === 0
+          ? text(language, "最初のスポットを見る", "View first place")
+          : text(language, "スポットを見る", "View place")}{" "}
+        <span aria-hidden="true">↓</span>
       </a>
     </section>
   );

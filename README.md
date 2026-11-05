@@ -21,6 +21,8 @@ Node.js 22 以上。React パッケージは React 18 / 19 に対応していま
 
 Requires Node.js 22 or later. React packages support React 18 / 19.
 
+設定の作成からチェックインまで試すには、[動く導入ガイド](docs/GETTING_STARTED.md) を参照してください。 / Follow the [runnable getting-started guide](docs/GETTING_STARTED.md) to create a configuration and check in.
+
 ```sh
 pnpm add @stamprally/core @stamprally/react @stamprally/ui
 ```

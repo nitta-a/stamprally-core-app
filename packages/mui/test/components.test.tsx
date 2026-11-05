@@ -1,14 +1,20 @@
 import type { PublicRallyConfig, StampRallyState } from "@stamprally/core";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   MuiAdminRallyEditor,
+  CompletionPanel as MuiCompletionPanel,
   MuiMetadataEditor,
   type MuiRallyAdapter,
   MuiRallyViewer,
+  MuiRewardCard,
+  MuiStaffRedemptionView,
 } from "../src/index.js";
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 const config: PublicRallyConfig = {
   id: "rally",
@@ -70,11 +76,195 @@ function adapter(overrides: Partial<MuiRallyAdapter> = {}): MuiRallyAdapter {
 }
 
 describe("MuiRallyViewer", () => {
+  it("prevents duplicate check-ins while an adapter is pending", async () => {
+    let finish: (() => void) | undefined;
+    const onCheckIn = vi.fn(
+      () =>
+        new Promise<{
+          ok: false;
+          error: { code: "INVALID_PROOF"; spotId: string; message: string };
+        }>((resolve) => {
+          finish = () =>
+            resolve({
+              ok: false,
+              error: { code: "INVALID_PROOF", spotId: "first", message: "Wrong" },
+            });
+        }),
+    );
+    const current = adapter({ onCheckIn });
+    render(<MuiRallyViewer adapter={current} />);
+    const button = screen.getByRole("button", { name: "Check in" });
+    fireEvent.click(button);
+    expect(onCheckIn).toHaveBeenCalledTimes(1);
+    fireEvent.click(button);
+    expect(onCheckIn).toHaveBeenCalledTimes(1);
+    finish?.();
+    await waitFor(() => expect(screen.getByRole("alert")).toBeTruthy());
+  });
+  it("does not offer a sold-out reward on completion", () => {
+    const progress = {
+      acquired: 1,
+      total: 1,
+      percentage: 100,
+      isCompleted: true,
+      completionRequired: 1,
+      completionAcquired: 1,
+      completionPercentage: 100,
+      nextAvailableSpots: [],
+    };
+    const reward = config.rewards[0];
+    if (reward === undefined) throw new Error("Expected reward.");
+    render(
+      <MuiCompletionPanel
+        locale="en"
+        progress={progress}
+        rewards={[reward]}
+        rewardStates={[{ rewardId: reward.id, status: "AVAILABLE" }]}
+        inventory={{ rewardRemaining: { [reward.id]: 0 } }}
+        onClaimReward={vi.fn()}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "Redeem" })).toBeNull();
+  });
+  it("requires confirmation before redeeming from completion", async () => {
+    const onClaimReward = vi.fn(async () => ({ ok: true }));
+    const progress = {
+      acquired: 1,
+      total: 1,
+      percentage: 100,
+      isCompleted: true,
+      completionRequired: 1,
+      completionAcquired: 1,
+      completionPercentage: 100,
+      nextAvailableSpots: [],
+    };
+    const reward = config.rewards[0];
+    if (reward === undefined) throw new Error("Expected reward.");
+    render(
+      <MuiCompletionPanel
+        locale="en"
+        progress={progress}
+        rewards={[reward]}
+        rewardStates={[{ rewardId: reward.id, status: "AVAILABLE" }]}
+        onClaimReward={onClaimReward}
+      />,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Redeem" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onClaimReward).not.toHaveBeenCalled();
+    fireEvent.click(await screen.findByRole("button", { name: "Redeem" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
+    await waitFor(() => expect(onClaimReward).toHaveBeenCalledOnce());
+  });
+  it("sends the staff passcode from reward card and completion dialogs", async () => {
+    const onClaim = vi.fn().mockResolvedValue({ ok: true });
+    const reward = {
+      id: "staff",
+      title: "Staff prize",
+      type: "in_person" as const,
+      redemptionMethod: "staff_passcode" as const,
+      requiredStampCount: 1,
+    };
+    const progress = {
+      acquired: 1,
+      total: 1,
+      percentage: 100,
+      isCompleted: true,
+      completionRequired: 1,
+      completionAcquired: 1,
+      completionPercentage: 100,
+      nextAvailableSpots: [],
+    };
+    const { unmount } = render(
+      <MuiRewardCard
+        reward={reward}
+        state={{ rewardId: reward.id, status: "AVAILABLE" }}
+        locale="en"
+        onClaim={onClaim}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Redeem" }));
+    const confirm = screen.getByRole("button", { name: "Confirm" });
+    expect(confirm).toHaveProperty("disabled", true);
+    fireEvent.change(screen.getByLabelText("Staff passcode"), { target: { value: " CODE " } });
+    fireEvent.click(confirm);
+    await waitFor(() => expect(onClaim).toHaveBeenCalledWith("staff", { staffPasscode: "CODE" }));
+    unmount();
+    render(
+      <MuiCompletionPanel
+        locale="en"
+        progress={progress}
+        rewards={[reward]}
+        rewardStates={[{ rewardId: reward.id, status: "AVAILABLE" }]}
+        onClaimReward={onClaim}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Redeem" }));
+    fireEvent.change(screen.getByLabelText("Staff passcode"), { target: { value: "NEXT" } });
+    fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
+    await waitFor(() =>
+      expect(onClaim).toHaveBeenLastCalledWith("staff", { staffPasscode: "NEXT" }),
+    );
+  });
+  it("requires confirmation before staff redeem a ticket", async () => {
+    vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValue(true);
+    const onRedeem = vi.fn(async () => ({ ok: true }));
+    render(<MuiStaffRedemptionView onRedeem={onRedeem} locale="en" />);
+    fireEvent.change(screen.getByLabelText("Ticket number or QR value"), {
+      target: { value: "T-1" },
+    });
+    fireEvent.change(screen.getByLabelText("Staff passcode"), { target: { value: "CODE" } });
+    fireEvent.click(screen.getByRole("button", { name: "Redeem ticket" }));
+    expect(onRedeem).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Redeem ticket" }));
+    await waitFor(() => expect(onRedeem).toHaveBeenCalledTimes(1));
+  });
+  it("accepts a configured passcode and reports a failed attempt", async () => {
+    const current = adapter({
+      config: {
+        ...config,
+        spots: [
+          { id: "first", orderIndex: 0, name: "First spot", conditions: [{ type: "passcode" }] },
+        ],
+      },
+      onCheckIn: vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: false,
+          error: { code: "INVALID_PROOF", message: "Wrong code" },
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          value: {
+            state: { ...state, records: [{ stampId: "first", acquiredAt: "" }] },
+            record: { stampId: "first", acquiredAt: "" },
+          },
+        }),
+    });
+    render(<MuiRallyViewer adapter={current} locale="ja" />);
+    const card = screen.getByRole("heading", { name: "First spot" }).closest("div.MuiCard-root");
+    if (!(card instanceof HTMLElement)) throw new Error("Expected spot card.");
+    fireEvent.change(within(card).getByRole("textbox", { name: "合言葉" }), {
+      target: { value: "WRONG" },
+    });
+    fireEvent.click(within(card).getByRole("button", { name: "チェックイン" }));
+    expect((await within(card).findByRole("alert")).textContent).toContain("入力内容を確認");
+    fireEvent.change(within(card).getByRole("textbox", { name: "合言葉" }), {
+      target: { value: "OPEN" },
+    });
+    fireEvent.click(within(card).getByRole("button", { name: "チェックイン" }));
+    await waitFor(() => expect(current.onCheckIn).toHaveBeenLastCalledWith("first", "OPEN"));
+    expect(await screen.findByText(/First spotのスタンプを獲得/)).toBeTruthy();
+  });
   it("resolves built-in Japanese labels and keeps reward viewing separate from claiming", () => {
     const current = adapter({
       config: {
         ...config,
         completion: { condition: { type: "stamp_count", count: 1 } },
+        rewards: config.rewards.map((reward) => ({
+          ...reward,
+          redemptionMethod: "view_only" as const,
+        })),
       },
       state: { ...state, records: [{ stampId: "first", acquiredAt: "" }] },
     });
@@ -82,7 +272,11 @@ describe("MuiRallyViewer", () => {
     render(<MuiRallyViewer adapter={current} locale="ja" onViewReward={onViewReward} />);
     expect(screen.getByRole("heading", { name: "スタンプラリー達成！" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "景品" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "特典を見る" }));
+    fireEvent.click(
+      within(screen.getByRole("region", { name: "スタンプラリー達成！" })).getByRole("button", {
+        name: "特典を見る",
+      }),
+    );
     expect(onViewReward).toHaveBeenCalledWith("reward");
     expect(current.onClaimReward).not.toHaveBeenCalled();
   });
@@ -115,7 +309,10 @@ describe("MuiRallyViewer", () => {
             orderIndex: 0,
             name: "Closed spot",
             conditions: [],
-            availability: { timezone: "UTC", weekly: [] },
+            availability: {
+              timezone: "UTC",
+              weekly: [{ dayOfWeek: 6, hours: [{ opensAt: "13:00", closesAt: "17:00" }] }],
+            },
           },
           {
             id: "target",
@@ -149,8 +346,16 @@ describe("MuiRallyViewer", () => {
       />,
     );
     expect(screen.getAllByText("営業中").length).toBeGreaterThan(0);
+    expect(
+      screen.getByText(
+        "スポットの次回営業時間: 2026-09-26 13:00（UTC）。開催期間もご確認ください。",
+      ),
+    ).toBeTruthy();
     expect(screen.getByText("0 / 1")).toBeTruthy();
     expect(screen.getByText("必要なスポット: Target spot")).toBeTruthy();
+    const buttons = screen.getAllByRole("button", { name: "チェックイン" });
+    expect(buttons[0]).toHaveProperty("disabled", true);
+    expect(buttons[1]).toHaveProperty("disabled", false);
   });
 
   it("updates completed mode from the local adapter result without subscribe", async () => {
@@ -238,14 +443,16 @@ describe("MuiRallyViewer", () => {
     expect(screen.getByTestId("custom-locked")).toBeTruthy();
   });
 
-  it("uses the adapter to verify and redeem through a dialog", () => {
+  it("uses the adapter to verify and redeem through a dialog", async () => {
     const current = adapter();
     render(<MuiRallyViewer adapter={current} />);
+    fireEvent.click(screen.getByRole("button", { name: "View spot" }));
+    expect(document.activeElement?.getAttribute("data-spot-id")).toBe("first");
     expect(screen.getByRole("button", { name: "Check in" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Locked" })).toHaveProperty("disabled", true);
     fireEvent.click(screen.getByRole("button", { name: "Redeem" }));
     fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
-    expect(current.onClaimReward).toHaveBeenCalledWith("reward");
+    await waitFor(() => expect(current.onClaimReward).toHaveBeenCalledWith("reward"));
   });
 });
 

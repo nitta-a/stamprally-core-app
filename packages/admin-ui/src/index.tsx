@@ -22,11 +22,16 @@ import {
   validateLocalizationCompleteness,
 } from "@stamprally/core";
 import { AvailabilityEditor } from "./AvailabilityEditor.js";
-import { formatDateTimeLocal, parseDateTimeLocal } from "./availabilityDateTime.js";
+import { CompletionConditionForm, RallyAvailabilityForm } from "./RallySettingsForms.js";
 
 export type { AvailabilityEditorProps } from "./AvailabilityEditor.js";
 export { AvailabilityEditor } from "./AvailabilityEditor.js";
 export { formatDateTimeLocal, parseDateTimeLocal } from "./availabilityDateTime.js";
+export type {
+  CompletionConditionFormProps,
+  RallyAvailabilityFormProps,
+} from "./RallySettingsForms.js";
+export { CompletionConditionForm, RallyAvailabilityForm } from "./RallySettingsForms.js";
 
 import {
   type Dispatch,
@@ -651,6 +656,7 @@ export interface SpotItemFormProps<
 > extends DictionaryProps<TLocale> {
   readonly spot: SpotItem<TLocale, TMeta>;
   readonly availableSpots?: ReadonlyArray<Pick<SpotItem<TLocale, TMeta>, "id" | "name">>;
+  readonly collapseAdvanced?: boolean;
   readonly onChange: (spot: SpotItem<TLocale, TMeta>) => void;
   readonly onRemove?: () => void;
 }
@@ -661,6 +667,7 @@ export function SpotItemForm<
 >({
   spot,
   availableSpots,
+  collapseAdvanced = false,
   onChange,
   onRemove,
   locale,
@@ -675,7 +682,7 @@ export function SpotItemForm<
   return (
     <fieldset>
       <legend>{resolveLocalizedText(spot.name, activeLocale)}</legend>
-      <label>
+      <label data-field="name">
         {field("spotName", "Spot name")}
         <input
           value={resolveLocalizedText(spot.name, activeLocale)}
@@ -697,68 +704,71 @@ export function SpotItemForm<
           />
         </label>
       ))}
-      {(["imageUrl", "iconUrl", "redirectUrlAfterClaim"] as const).map((key) => (
-        <label key={key}>
-          {field(key, key)}
-          <input
-            value={spot[key] ?? ""}
-            onChange={(event) => update({ [key]: event.target.value })}
-          />
-        </label>
-      ))}
-      <fieldset>
-        <legend>{field("location", "Location")}</legend>
-        {(["latitude", "longitude"] as const).map((key) => (
+      <details open={!collapseAdvanced}>
+        <summary>{field("spotMediaAndLocation", "Images and location (optional)")}</summary>
+        {(["imageUrl", "iconUrl", "redirectUrlAfterClaim"] as const).map((key) => (
           <label key={key}>
             {field(key, key)}
             <input
-              type="number"
-              min={key === "latitude" ? -90 : -180}
-              max={key === "latitude" ? 90 : 180}
-              step="any"
-              value={spot.location?.[key] ?? ""}
-              onChange={(event) => {
-                if (event.target.value === "") {
-                  if (spot.location === undefined) return;
-                  const { location: _removed, ...withoutLocation } = spot;
-                  onChange(withoutLocation);
-                  return;
-                }
+              value={spot[key] ?? ""}
+              onChange={(event) => update({ [key]: event.target.value })}
+            />
+          </label>
+        ))}
+        <fieldset data-field="location">
+          <legend>{field("location", "Location")}</legend>
+          {(["latitude", "longitude"] as const).map((key) => (
+            <label key={key}>
+              {field(key, key)}
+              <input
+                type="number"
+                min={key === "latitude" ? -90 : -180}
+                max={key === "latitude" ? 90 : 180}
+                step="any"
+                value={spot.location?.[key] ?? ""}
+                onChange={(event) => {
+                  if (event.target.value === "") {
+                    if (spot.location === undefined) return;
+                    const { location: _removed, ...withoutLocation } = spot;
+                    onChange(withoutLocation);
+                    return;
+                  }
+                  onChange({
+                    ...spot,
+                    location: {
+                      latitude: spot.location?.latitude ?? 0,
+                      longitude: spot.location?.longitude ?? 0,
+                      [key]: Number(event.target.value),
+                    },
+                  });
+                }}
+              />
+            </label>
+          ))}
+          <label>
+            {field("address", "Address")}
+            <input
+              value={resolveLocalizedText(spot.location?.address ?? "", activeLocale)}
+              onChange={(event) =>
                 onChange({
                   ...spot,
                   location: {
                     latitude: spot.location?.latitude ?? 0,
                     longitude: spot.location?.longitude ?? 0,
-                    [key]: Number(event.target.value),
+                    address: updateLocalizedField(
+                      spot.location?.address ?? "",
+                      activeLocale,
+                      event.target.value,
+                    ),
                   },
-                });
-              }}
+                })
+              }
             />
           </label>
-        ))}
-        <label>
-          {field("address", "Address")}
-          <input
-            value={resolveLocalizedText(spot.location?.address ?? "", activeLocale)}
-            onChange={(event) =>
-              onChange({
-                ...spot,
-                location: {
-                  latitude: spot.location?.latitude ?? 0,
-                  longitude: spot.location?.longitude ?? 0,
-                  address: updateLocalizedField(
-                    spot.location?.address ?? "",
-                    activeLocale,
-                    event.target.value,
-                  ),
-                },
-              })
-            }
-          />
-        </label>
-      </fieldset>
+        </fieldset>
+      </details>
       {otherSpots !== undefined ? (
-        <fieldset>
+        <fieldset data-field="prerequisites">
           <legend>{field("prerequisites", "Prerequisite spots")}</legend>
           {otherSpots.length === 0 ? (
             <p>{field("noPrerequisiteSpots", "Add other places to set prerequisites.")}</p>
@@ -787,7 +797,7 @@ export function SpotItemForm<
           )}
         </fieldset>
       ) : (
-        <label>
+        <label data-field="prerequisites">
           {field("prerequisites", "Prerequisite spots")}
           <input
             value={spot.prerequisites?.join(", ") ?? ""}
@@ -802,57 +812,65 @@ export function SpotItemForm<
           />
         </label>
       )}
-      <AvailabilityEditor
-        locale={activeLocale}
-        {...(dictionary === undefined ? {} : { dictionary })}
-        {...(spot.availability === undefined ? {} : { value: spot.availability })}
-        onChange={(availability) => {
-          if (availability === undefined) {
-            const { availability: _availability, ...rest } = spot;
-            onChange(rest);
-          } else update({ availability });
-        }}
-      />
-      <ExternalReferencesEditor
-        references={spot.externalReferences ?? []}
-        onChange={(externalReferences) => update({ externalReferences })}
-        label={field("externalReferences", "External references")}
-      />
-      <MetadataSection
-        name={`spot-${spot.id}`}
-        values={spot.metadata ?? {}}
-        onChange={(metadata) => update({ metadata: metadata as TMeta })}
-        label={field("metadata", "Metadata")}
-      />
-      {spot.conditions.map((item, index) => (
-        <ConditionEditor
-          key={`${spot.id}-condition-${JSON.stringify(item)}`}
-          condition={item}
+      <details open={!collapseAdvanced} data-field="availability">
+        <summary>{field("spotAdvanced", "Hours and other settings (optional)")}</summary>
+        <AvailabilityEditor
           locale={activeLocale}
           {...(dictionary === undefined ? {} : { dictionary })}
-          onChange={(next) =>
-            update({
-              conditions: spot.conditions.map((current, itemIndex) =>
-                itemIndex === index ? next : current,
-              ),
-            })
-          }
-          {...(spot.conditions.length <= 1
-            ? {}
-            : {
-                onRemove: () =>
-                  update({
-                    conditions: spot.conditions.filter((_, itemIndex) => itemIndex !== index),
-                  }),
-              })}
+          {...(spot.availability === undefined ? {} : { value: spot.availability })}
+          onChange={(availability) => {
+            if (availability === undefined) {
+              const { availability: _availability, ...rest } = spot;
+              onChange(rest);
+            } else update({ availability });
+          }}
         />
-      ))}
-      <button
-        type="button"
-        onClick={() => update({ conditions: [...spot.conditions, condition()] })}
-      >
-        {field("addCondition", "Add condition")}
-      </button>
+        <ExternalReferencesEditor
+          references={spot.externalReferences ?? []}
+          onChange={(externalReferences) => update({ externalReferences })}
+          label={field("externalReferences", "External references")}
+        />
+        <MetadataSection
+          name={`spot-${spot.id}`}
+          values={spot.metadata ?? {}}
+          onChange={(metadata) => update({ metadata: metadata as TMeta })}
+          label={field("metadata", "Metadata")}
+        />
+      </details>
+      <div data-field="conditions">
+        {spot.conditions.map((item, index) => (
+          <ConditionEditor
+            key={
+              // biome-ignore lint/suspicious/noArrayIndexKey: Conditions have no stable ID and editors have no local state.
+              `${spot.id}-condition-${index}`
+            }
+            condition={item}
+            locale={activeLocale}
+            {...(dictionary === undefined ? {} : { dictionary })}
+            onChange={(next) =>
+              update({
+                conditions: spot.conditions.map((current, itemIndex) =>
+                  itemIndex === index ? next : current,
+                ),
+              })
+            }
+            {...(spot.conditions.length <= 1
+              ? {}
+              : {
+                  onRemove: () =>
+                    update({
+                      conditions: spot.conditions.filter((_, itemIndex) => itemIndex !== index),
+                    }),
+                })}
+          />
+        ))}
+        <button
+          type="button"
+          onClick={() => update({ conditions: [...spot.conditions, condition()] })}
+        >
+          {field("addCondition", "Add condition")}
+        </button>
+      </div>
       {onRemove !== undefined && (
         <button type="button" onClick={onRemove}>
           {field("removeSpot", "Remove spot")}
@@ -867,6 +885,7 @@ export interface RewardItemFormProps<TLocale extends string = SupportedLocale>
   readonly reward: Reward<TLocale>;
   readonly onChange: (reward: Reward<TLocale>) => void;
   readonly onRemove: () => void;
+  readonly collapseAdvanced?: boolean;
 }
 
 function newUnlockCondition(type: RewardUnlockCondition["type"]): RewardUnlockCondition {
@@ -935,7 +954,10 @@ export function RewardUnlockConditionEditor({
         <>
           {unlock.conditions.map((child, index) => (
             <RewardUnlockConditionEditor
-              key={`${unlock.type}-${JSON.stringify(child)}`}
+              key={
+                // biome-ignore lint/suspicious/noArrayIndexKey: Conditions have no stable ID and editors have no local state.
+                `${unlock.type}-${index}`
+              }
               condition={child}
               onChange={(next) =>
                 onChange({
@@ -981,12 +1003,13 @@ export function RewardItemForm<TLocale extends string = SupportedLocale>({
   dictionary,
   onChange,
   onRemove,
+  collapseAdvanced = false,
 }: RewardItemFormProps<TLocale> & { readonly locale: TLocale }): ReactElement {
   const field = (key: string, fallback: string): string => text(dictionary, locale, key, fallback);
   return (
     <fieldset>
       <legend>{resolveLocalizedText(reward.title, locale)}</legend>
-      <label>
+      <label data-field="title">
         {field("rewardTitle", "Reward title")}
         <input
           value={resolveLocalizedText(reward.title, locale)}
@@ -1047,92 +1070,117 @@ export function RewardItemForm<TLocale extends string = SupportedLocale>({
           }
         >
           <option value="server_claim">{field("redemption.serverClaim", "Server claim")}</option>
-          <option value="manual_slide">{field("redemption.manualSlide", "Manual slide")}</option>
+          <option value="manual_slide">
+            {field("redemption.manualSlide", "Confirm redemption")}
+          </option>
           <option value="staff_passcode">
             {field("redemption.staffPasscode", "Staff passcode")}
           </option>
           <option value="view_only">{field("redemption.viewOnly", "View only")}</option>
         </select>
       </label>
-      <fieldset>
-        <legend>{field("unlockConditions", "Unlock conditions")}</legend>
-        {(reward.conditions ?? []).map((unlock, index) => (
-          <RewardUnlockConditionEditor
-            key={`${reward.id}-unlock-${JSON.stringify(unlock)}`}
-            condition={unlock}
-            onChange={(next) =>
+      {reward.redemptionMethod === "staff_passcode" && (
+        <p>
+          {field(
+            "rewardStaffPasscodeHelp",
+            "Set a staff passcode in additional reward settings, or use the rally-wide staff passcode.",
+          )}
+        </p>
+      )}
+      {reward.type === "digital" && (
+        <p>
+          {field(
+            "digitalRewardHelp",
+            "Add a digital content URL in additional reward settings if needed.",
+          )}
+        </p>
+      )}
+      <details open={!collapseAdvanced} data-field="reward-settings">
+        <summary>{field("rewardAdvanced", "Additional reward settings")}</summary>
+        <fieldset>
+          <legend>{field("unlockConditions", "Unlock conditions")}</legend>
+          {(reward.conditions ?? []).map((unlock, index) => (
+            <RewardUnlockConditionEditor
+              key={
+                // biome-ignore lint/suspicious/noArrayIndexKey: Conditions have no stable ID and editors have no local state.
+                `${reward.id}-unlock-${index}`
+              }
+              condition={unlock}
+              onChange={(next) =>
+                onChange({
+                  ...reward,
+                  conditions: (reward.conditions ?? []).map((current, conditionIndex) =>
+                    conditionIndex === index ? next : current,
+                  ),
+                })
+              }
+              onRemove={() =>
+                onChange({
+                  ...reward,
+                  conditions: (reward.conditions ?? []).filter(
+                    (_, conditionIndex) => conditionIndex !== index,
+                  ),
+                })
+              }
+            />
+          ))}
+          <button
+            type="button"
+            onClick={() =>
               onChange({
                 ...reward,
-                conditions: (reward.conditions ?? []).map((current, conditionIndex) =>
-                  conditionIndex === index ? next : current,
-                ),
+                conditions: [...(reward.conditions ?? []), newUnlockCondition("stamp_count")],
               })
             }
-            onRemove={() =>
-              onChange({
-                ...reward,
-                conditions: (reward.conditions ?? []).filter(
-                  (_, conditionIndex) => conditionIndex !== index,
-                ),
-              })
-            }
-          />
+          >
+            {field("addUnlockCondition", "Add unlock condition")}
+          </button>
+        </fieldset>
+        {(["stockLimit", "userClaimLimit"] as const).map((key) => (
+          <label key={key}>
+            {field(key, key)}
+            <input
+              type="number"
+              min={0}
+              value={reward[key] ?? ""}
+              onChange={(event) => {
+                if (event.target.value === "") {
+                  const { [key]: _removed, ...withoutLimit } = reward;
+                  onChange(withoutLimit);
+                } else onChange({ ...reward, [key]: Number(event.target.value) });
+              }}
+            />
+          </label>
         ))}
-        <button
-          type="button"
-          onClick={() =>
-            onChange({
-              ...reward,
-              conditions: [...(reward.conditions ?? []), newUnlockCondition("stamp_count")],
-            })
-          }
-        >
-          {field("addUnlockCondition", "Add unlock condition")}
-        </button>
-      </fieldset>
-      {(["stockLimit", "userClaimLimit"] as const).map((key) => (
-        <label key={key}>
-          {field(key, key)}
+        <label>
+          {field("digitalContentUrl", "Digital content URL")}
           <input
-            type="number"
-            min={0}
-            value={reward[key] ?? ""}
+            value={reward.digitalContentUrl ?? ""}
+            onChange={(event) => onChange({ ...reward, digitalContentUrl: event.target.value })}
+          />
+        </label>
+        <label>
+          {field("staffPasscode", "Staff passcode")}
+          <input
+            value={reward.staffPasscode ?? ""}
+            onChange={(event) => onChange({ ...reward, staffPasscode: event.target.value })}
+          />
+        </label>
+        <label data-field="validUntil">
+          {field("validUntil", "Valid until")}
+          <input
+            type="datetime-local"
+            value={reward.validUntil?.slice(0, 16) ?? ""}
             onChange={(event) => {
               if (event.target.value === "") {
-                const { [key]: _removed, ...withoutLimit } = reward;
-                onChange(withoutLimit);
-              } else onChange({ ...reward, [key]: Number(event.target.value) });
+                const { validUntil: _removed, ...withoutDate } = reward;
+                onChange(withoutDate);
+              } else
+                onChange({ ...reward, validUntil: new Date(event.target.value).toISOString() });
             }}
           />
         </label>
-      ))}
-      <label>
-        {field("digitalContentUrl", "Digital content URL")}
-        <input
-          value={reward.digitalContentUrl ?? ""}
-          onChange={(event) => onChange({ ...reward, digitalContentUrl: event.target.value })}
-        />
-      </label>
-      <label>
-        {field("staffPasscode", "Staff passcode")}
-        <input
-          value={reward.staffPasscode ?? ""}
-          onChange={(event) => onChange({ ...reward, staffPasscode: event.target.value })}
-        />
-      </label>
-      <label>
-        {field("validUntil", "Valid until")}
-        <input
-          type="datetime-local"
-          value={reward.validUntil?.slice(0, 16) ?? ""}
-          onChange={(event) => {
-            if (event.target.value === "") {
-              const { validUntil: _removed, ...withoutDate } = reward;
-              onChange(withoutDate);
-            } else onChange({ ...reward, validUntil: new Date(event.target.value).toISOString() });
-          }}
-        />
-      </label>
+      </details>
       <button type="button" onClick={onRemove}>
         {field("removeReward", "Remove reward")}
       </button>
@@ -1566,51 +1614,12 @@ export function AdminRallyEditor<
           }
         />
       </label>
-      <fieldset>
-        <legend>{field("rallyAvailability", "Rally availability")}</legend>
-        {(["startsAt", "endsAt"] as const).map((key) => (
-          <label key={key}>
-            {field(`availability.${key}`, key)}
-            <input
-              type="datetime-local"
-              value={
-                config.availability?.[key] === undefined
-                  ? ""
-                  : formatDateTimeLocal(
-                      config.availability[key],
-                      config.availability.timezone ?? "UTC",
-                    )
-              }
-              onChange={(event) => {
-                const availability = { ...config.availability };
-                if (event.target.value === "") delete availability[key];
-                else {
-                  const parsed = parseDateTimeLocal(
-                    event.target.value,
-                    availability.timezone ?? "UTC",
-                  );
-                  if (parsed === undefined) return;
-                  availability[key] = parsed;
-                }
-                update({ availability });
-              }}
-            />
-          </label>
-        ))}
-        <label>
-          {field("availability.timezone", "Timezone")}
-          <input
-            value={config.availability?.timezone ?? ""}
-            placeholder="Asia/Tokyo"
-            onChange={(event) => {
-              const availability = { ...config.availability };
-              if (event.target.value === "") delete availability.timezone;
-              else availability.timezone = event.target.value;
-              update({ availability });
-            }}
-          />
-        </label>
-      </fieldset>
+      <RallyAvailabilityForm
+        config={config}
+        onChange={onChange}
+        locale={activeLocale}
+        {...(dictionary === undefined ? {} : { dictionary })}
+      />
       <ThemeEditor
         theme={config.theme ?? DEFAULT_SHEET_THEME}
         locale={activeLocale}
@@ -1632,73 +1641,12 @@ export function AdminRallyEditor<
         onPublicMetadataChange={(metadata) => update({ publicMetadata: metadata as TMeta })}
         onServerMetadataChange={(metadata) => update({ serverMetadata: metadata })}
       />
-      <fieldset>
-        <legend>{field("completion", "Completion condition")}</legend>
-        <label>
-          {field("completionType", "Condition")}
-          <select
-            value={config.completion?.condition.type ?? "all_spots"}
-            onChange={(event) => {
-              const type = event.target.value;
-              if (type === "stamp_count") update({ completion: { condition: { type, count: 1 } } });
-              else if (type === "stamps")
-                update({
-                  completion: {
-                    condition: {
-                      type,
-                      stampIds: config.spots[0] === undefined ? [] : [config.spots[0].id],
-                    },
-                  },
-                });
-              else update({ completion: { condition: { type: "all_spots" } } });
-            }}
-          >
-            <option value="all_spots">{field("completion.allSpots", "All spots")}</option>
-            <option value="stamp_count">{field("completion.stampCount", "Stamp count")}</option>
-            <option value="stamps">{field("completion.selectedSpots", "Selected spots")}</option>
-          </select>
-        </label>
-        {config.completion?.condition.type === "stamp_count" && (
-          <label>
-            {field("completion.requiredStamps", "Required stamps")}
-            <input
-              type="number"
-              min={1}
-              value={config.completion.condition.count}
-              onChange={(event) =>
-                update({
-                  completion: {
-                    condition: { type: "stamp_count", count: Number(event.target.value) },
-                  },
-                })
-              }
-            />
-          </label>
-        )}
-        {config.completion?.condition.type === "stamps" && (
-          <div>
-            {config.spots.map((spot) => (
-              <label key={spot.id}>
-                <input
-                  type="checkbox"
-                  checked={
-                    config.completion?.condition.type === "stamps" &&
-                    config.completion.condition.stampIds.includes(spot.id)
-                  }
-                  onChange={(event) => {
-                    if (config.completion?.condition.type !== "stamps") return;
-                    const stampIds = event.target.checked
-                      ? [...config.completion.condition.stampIds, spot.id]
-                      : config.completion.condition.stampIds.filter((id) => id !== spot.id);
-                    update({ completion: { condition: { type: "stamps", stampIds } } });
-                  }}
-                />
-                {resolveLocalizedText(spot.name, activeLocale)}
-              </label>
-            ))}
-          </div>
-        )}
-      </fieldset>
+      <CompletionConditionForm
+        config={config}
+        onChange={onChange}
+        locale={activeLocale}
+        {...(dictionary === undefined ? {} : { dictionary })}
+      />
       <button
         type="button"
         onClick={() => updateSpots([...config.spots, newSpot<TLocale, TMeta>(config.spots.length)])}

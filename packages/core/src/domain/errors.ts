@@ -19,6 +19,8 @@ export type StampError =
   | { readonly code: "SPOT_NOT_FOUND"; readonly spotId: string }
   | { readonly code: "STAMP_ALREADY_ACQUIRED"; readonly spotId: string }
   | { readonly code: "PREREQUISITES_NOT_MET"; readonly spotId: string }
+  | { readonly code: "RALLY_UNAVAILABLE"; readonly spotId: string }
+  | { readonly code: "SPOT_UNAVAILABLE"; readonly spotId: string }
   | { readonly code: "INVALID_PROOF"; readonly spotId: string }
   | {
       readonly code: "CUSTOM_VALIDATION_FAILED";

@@ -31,6 +31,26 @@ describe("demo app", () => {
     vi.stubGlobal("scrollTo", vi.fn());
   });
 
+  it("does not present the old demo passcode after the organizer changes it", async () => {
+    render(<App />);
+    const initialCard = screen.getByRole("article", { name: WELCOME });
+    fireEvent.click(within(initialCard).getByText("デモ用の合言葉を見る"));
+    expect(within(initialCard).getByText("デモ用の合言葉: OPEN")).toBeTruthy();
+    fireEvent.click(screen.getByRole("link", { name: "主催者の設定" }));
+    fireEvent.click(screen.getByRole("tab", { name: "スポット" }));
+    const summary = screen.getByText(WELCOME, { selector: "strong" });
+    const details = summary.closest("details");
+    if (details === null) throw new Error("Expected spot details.");
+    fireEvent.click(summary);
+    fireEvent.change(within(details).getByDisplayValue("OPEN"), { target: { value: "NEW-CODE" } });
+    fireEvent.click(screen.getByRole("link", { name: "参加者として体験" }));
+    const updatedCard = await screen.findByRole("article", { name: WELCOME });
+    expect(within(updatedCard).queryByText("デモ用の合言葉を見る")).toBeNull();
+    expect(within(updatedCard).queryByText(/デモ用の合言葉: OPEN/)).toBeNull();
+    expect(updatedCard.textContent).not.toContain("NEW-CODE");
+    await collectStamp(WELCOME, "NEW-CODE");
+  });
+
   it("starts with a Japanese participant experience and an accessible stamp book", () => {
     render(<App />);
     expect(
@@ -125,12 +145,17 @@ describe("demo app", () => {
     expect(screen.getByRole("article", { name: BOOKSHOP })).toBeTruthy();
     fireEvent.click(screen.getByRole("link", { name: /こもれび案内所\s*獲得済み/ }));
     expect(screen.getByRole("article", { name: WELCOME }).closest("details")?.open).toBe(true);
-    const openCard = screen.getByRole("button", { name: "記念カードを見る" });
+    const rewardCard = screen
+      .getByRole("heading", { name: "街歩きの記念カード" })
+      .closest("article");
+    if (rewardCard === null) throw new Error("Expected reward card.");
+    expect(within(rewardCard).getByText("スタンプ 3 / 3 個")).toBeTruthy();
+    const openCard = within(rewardCard).getByRole("button", { name: "特典を見る" });
     expect(openCard.hasAttribute("disabled")).toBe(false);
     fireEvent.click(openCard);
     const dialog = await screen.findByRole("dialog", { name: "街歩きの記念カード" });
     expect(dialog.hasAttribute("open")).toBe(true);
-    fireEvent.click(within(dialog).getByRole("button", { name: "記念カードを閉じる" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "特典を閉じる" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(openCard.hasAttribute("disabled")).toBe(false);
     fireEvent.click(openCard);
@@ -154,6 +179,7 @@ describe("demo app", () => {
   });
 
   it("supports secondary check-in conditions and non-view_only reward claims in participant preview", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
     const client = createDemoClient({
       ...DEFAULT_ADMIN_CONFIG,
       staffPasscode: "STAFF-777",
@@ -248,7 +274,14 @@ describe("demo app", () => {
       screen.getByRole("link", { name: /こもれび案内所\s*獲得済み \(\d{2}:\d{2}\)/ }),
     ).toBeTruthy();
     const resetButton = screen.getByRole("button", { name: "進捗をリセット" });
+    const confirm = vi
+      .spyOn(window, "confirm")
+      .mockReturnValueOnce(false)
+      .mockReturnValueOnce(true);
     fireEvent.click(resetButton);
+    expect(completionPercentage()).toBeGreaterThan(0);
+    fireEvent.click(resetButton);
+    expect(confirm).toHaveBeenCalledTimes(2);
 
     await waitFor(() => expect(completionPercentage()).toBe(0));
     expect(screen.getByRole("textbox", { name: `${WELCOME}の合言葉` })).toBeTruthy();

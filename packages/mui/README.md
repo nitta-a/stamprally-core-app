@@ -1,5 +1,7 @@
 # @stamprally/mui
 
+Staff-passcode rewards accept the code in the reward and completion dialogs and pass it through claim options. Custom reward cards can use `getRewardAvailability` from `@stamprally/core` for the same inventory checks.
+
 Material UI participant views and authoring components. Supports React 18 / 19 and MUI 5 / 6; MUI and Emotion are peer dependencies.
 
 ## Install

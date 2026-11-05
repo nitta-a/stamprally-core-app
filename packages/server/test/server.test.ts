@@ -27,6 +27,44 @@ const config: AdminRallyConfig = {
   ],
 };
 describe("StampRallyServer", () => {
+  it("checks availability using server time, not the request time", async () => {
+    const timed: AdminRallyConfig = {
+      ...config,
+      availability: { startsAt: "2026-01-02T00:00:00Z" },
+    };
+    const server = new StampRallyServer(timed, new InMemoryServerPersistenceAdapter(), {
+      now: () => "2026-01-01T00:00:00Z",
+    });
+    const result = await server.checkIn(
+      {
+        rallyId: "rally",
+        spotId: "s1",
+        context: { type: "passcode", code: "OPEN" },
+        idempotencyKey: "closed",
+        now: "2026-01-03T00:00:00Z",
+      },
+      "user",
+    );
+    expect(result).toMatchObject({ ok: false, code: "RALLY_UNAVAILABLE" });
+    const closed: AdminRallyConfig = {
+      ...config,
+      spots: config.spots.map((spot) => ({
+        ...spot,
+        availability: { timezone: "UTC", weekly: [] },
+      })),
+    };
+    const closedServer = new StampRallyServer(closed, new InMemoryServerPersistenceAdapter());
+    const closedResult = await closedServer.checkIn(
+      {
+        rallyId: "rally",
+        spotId: "s1",
+        context: { type: "passcode", code: "OPEN" },
+        idempotencyKey: "closed-spot",
+      },
+      "user",
+    );
+    expect(closedResult).toMatchObject({ ok: false, code: "SPOT_UNAVAILABLE" });
+  });
   it("applies a trusted auth context over a caller-supplied userId", async () => {
     const persistence = new InMemoryServerPersistenceAdapter();
     const server = new StampRallyServer(config, persistence);

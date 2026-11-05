@@ -133,7 +133,7 @@
 }
 
 .organizer-workspace button:not([role="tab"]) {
-  min-height: 42px;
+  min-height: 44px;
   padding: 10px 14px;
   border: 1px solid #dce2d8;
   border-radius: 8px;
@@ -143,6 +143,12 @@
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
+}
+
+@media (max-width: 380px) {
+  .organizer-tabs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .organizer-workspace button.organizer-primary-button {
@@ -183,6 +189,11 @@
   color: #425747;
   font-size: 12px;
   font-weight: 600;
+}
+
+.organizer-form [data-field="conditions"] {
+  display: grid;
+  gap: 18px;
 }
 
 .organizer-form input:not([type="checkbox"]),
@@ -559,12 +570,26 @@
 }
 
 @media (max-width: 600px) {
+  .organizer-form label,
+  .organizer-field-help,
+  .organizer-issue-jump,
+  .organizer-issue-jump small,
+  .organizer-edit-label,
+  .organizer-preview-badge {
+    font-size: 14px;
+  }
+  .organizer-form input:not([type="checkbox"]),
+  .organizer-form select,
+  .organizer-form textarea {
+    font-size: 16px;
+  }
   .organizer-workspace {
     padding: 28px 16px 48px;
   }
 
   .organizer-heading {
     align-items: flex-start;
+    flex-direction: column;
     gap: 14px;
   }
 
@@ -575,7 +600,7 @@
 
   .organizer-preview-badge {
     padding: 6px 9px;
-    font-size: 10px;
+    font-size: 14px;
   }
 
   .organizer-tab-number {
@@ -617,6 +642,6 @@
   }
 
   .organizer-edit-label {
-    font-size: 10px;
+    font-size: 14px;
   }
 }

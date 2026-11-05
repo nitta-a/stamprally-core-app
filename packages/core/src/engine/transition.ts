@@ -11,6 +11,7 @@ import type {
   StampRecord,
   VerificationContext,
 } from "../domain/index.js";
+import { evaluateRallyAvailability, evaluateSpotAvailability } from "./availability.js";
 import { evaluateConditionDetailed } from "./evaluate.js";
 import { createUniqueClaimTicketNumber } from "./rewards.js";
 
@@ -172,6 +173,16 @@ export function processStamp(
   if (spot === undefined) return { ok: false, error: { code: "SPOT_NOT_FOUND", spotId } };
   if (state.records.some((record) => record.stampId === spotId))
     return { ok: false, error: { code: "STAMP_ALREADY_ACQUIRED", spotId } };
+  if (
+    config.availability !== undefined &&
+    evaluateRallyAvailability(config.availability, now).status !== "OPEN"
+  )
+    return { ok: false, error: { code: "RALLY_UNAVAILABLE", spotId } };
+  if (
+    spot.availability !== undefined &&
+    evaluateSpotAvailability(spot.availability, now).status !== "OPEN"
+  )
+    return { ok: false, error: { code: "SPOT_UNAVAILABLE", spotId } };
   const acquired = new Set(state.records.map((record) => record.stampId));
   if (spot.prerequisites?.some((id) => !acquired.has(id)))
     return { ok: false, error: { code: "PREREQUISITES_NOT_MET", spotId } };

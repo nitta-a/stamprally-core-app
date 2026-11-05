@@ -22,7 +22,6 @@ html {
 }
 body {
   margin: 0;
-  min-width: 320px;
 }
 button,
 input,
@@ -393,8 +392,8 @@ textarea {
   text-align: right;
 }
 .stamp-book__reset {
-  min-height: 30px;
-  padding: 5px 10px;
+  min-height: 44px;
+  padding: 8px 12px;
   border: 1px solid #cbd6c4;
   border-radius: 6px;
   color: var(--forest);
@@ -542,6 +541,8 @@ textarea {
 }
 .walk-viewer > section[aria-label="スポット"],
 .walk-viewer > section[aria-label="もっと楽しむ"],
+.walk-viewer > section[aria-label="Spots"],
+.walk-viewer > section[aria-label="More to explore"],
 .walk-viewer > details > section {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -680,6 +681,18 @@ textarea {
   color: var(--muted);
   font-size: 10px;
   line-height: 1.8;
+}
+.walk-viewer__condition video {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+.walk-viewer__condition video[hidden] {
+  display: none;
+}
+.walk-viewer__condition .sry-action,
+.walk-viewer__condition summary {
+  min-height: 44px;
 }
 .spot-checkin {
   display: grid;
@@ -1125,6 +1138,7 @@ textarea {
     scroll-padding-top: 130px;
   }
   .site-header {
+    position: static;
     flex-wrap: wrap;
     justify-content: center;
     gap: 10px;
@@ -1142,7 +1156,7 @@ textarea {
     margin-left: auto;
   }
   .language-toggle {
-    min-height: 38px;
+    min-height: 44px;
     padding: 7px 10px;
   }
   .view-navigation a {
@@ -1212,12 +1226,13 @@ textarea {
     font-size: 30px;
   }
   .stamp-book__slots {
-    gap: 4px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
   }
   .stamp-book__slot a {
     gap: 7px;
     padding: 0;
-    font-size: 9px;
+    font-size: 12px;
     line-height: 1.6;
   }
   .stamp-circle {
@@ -1226,7 +1241,7 @@ textarea {
     font-size: 27px;
   }
   .stamp-book__slot small {
-    font-size: 8px;
+    font-size: 12px;
   }
   .walk-viewer .sry-progress__primary {
     right: 16px;
@@ -1244,6 +1259,8 @@ textarea {
   }
   .walk-viewer > section[aria-label="スポット"],
   .walk-viewer > section[aria-label="もっと楽しむ"],
+  .walk-viewer > section[aria-label="Spots"],
+  .walk-viewer > section[aria-label="More to explore"],
   .walk-viewer > details > section {
     grid-template-columns: minmax(0, 1fr);
     gap: 16px;
@@ -1276,6 +1293,7 @@ textarea {
   .spot-checkin label {
     font-size: 12px;
   }
+  .walk-viewer__condition input,
   .spot-checkin input {
     min-height: 48px;
     font-size: 16px;
@@ -1344,7 +1362,7 @@ textarea {
     right: 0;
     z-index: 20;
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
     padding: 6px 12px calc(6px + env(safe-area-inset-bottom));
     border-top: 1px solid var(--line);
     background: #fffef9f5;
@@ -1381,17 +1399,64 @@ textarea {
   }
   .view-navigation a {
     flex: 1;
+    min-width: 0;
+    white-space: normal;
     text-align: center;
   }
   .brand {
     margin: 0 auto;
   }
   .stamp-circle {
-    width: 51px;
-    height: 51px;
+    width: min(51px, 100%);
+    height: auto;
+    aspect-ratio: 1;
   }
-  .stamp-book__slot a {
-    font-size: 8px;
+}
+
+@media (max-width: 540px) {
+  .hero-description,
+  .stamp-book__description,
+  .next-stop p,
+  .spot-description,
+  .spot-lock-note,
+  .spot-collected,
+  .spot-checkin label,
+  .checkin-error,
+  .guide-card p,
+  .howto-list span,
+  .site-footer p,
+  .site-footer small {
+    font-size: 14px;
+    line-height: 1.6;
+  }
+  .eyebrow,
+  .stamp-book__status > p > span,
+  .stamp-book__reset,
+  .stamp-book__slot a,
+  .stamp-book__slot small,
+  .stamp-book__progress-label,
+  .walk-viewer .sry-progress__primary,
+  .walk-viewer .sry-progress__secondary,
+  .next-stop .eyebrow,
+  .spot-meta,
+  .spot-state,
+  .spot-availability,
+  .demo-hint,
+  .mobile-walk-nav a {
+    font-size: 12px;
+  }
+  .spot-checkin input,
+  .walk-viewer__condition input {
+    font-size: 16px;
+  }
+  .language-toggle,
+  .view-navigation a,
+  .demo-hint summary,
+  .next-stop .text-button {
+    min-height: 44px;
+  }
+  .language-toggle {
+    min-width: 44px;
   }
 }
 

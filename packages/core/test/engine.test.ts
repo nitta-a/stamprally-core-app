@@ -93,6 +93,25 @@ describe("stamp and reward transitions", () => {
     ],
   };
 
+  it("rejects domain transitions outside configured rally and spot hours without changing state", () => {
+    const upcoming = { ...config, availability: { startsAt: "2026-01-02T00:00:00Z" } };
+    const context = { type: "custom" as const, value: null };
+    expect(
+      processStamp(baseState, upcoming, "first", context, "2026-01-01T00:00:00Z"),
+    ).toMatchObject({ ok: false, error: { code: "RALLY_UNAVAILABLE" } });
+    const closed = {
+      ...config,
+      spots: config.spots.map((spot) => ({
+        ...spot,
+        availability: { timezone: "UTC", weekly: [] },
+      })),
+    };
+    expect(processStamp(baseState, closed, "first", context, "2026-01-01T00:00:00Z")).toMatchObject(
+      { ok: false, error: { code: "SPOT_UNAVAILABLE" } },
+    );
+    expect(baseState.records).toEqual([]);
+  });
+
   it("returns typed errors and leaves the input state unchanged", () => {
     expect(
       processStamp(baseState, config, "missing", { type: "custom", value: null }, "now"),

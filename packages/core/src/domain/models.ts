@@ -258,6 +258,7 @@ export function toPublicConfig<TLocale extends string, TMeta extends Record<stri
       ({ digitalContentUrl: _content, staffPasscode: _passcode, ...reward }) => reward,
     ),
     ...(config.completion === undefined ? {} : { completion: config.completion }),
+    ...(config.availability === undefined ? {} : { availability: config.availability }),
     ...(config.publicMetadata !== undefined
       ? { metadata: config.publicMetadata }
       : config.metadata === undefined

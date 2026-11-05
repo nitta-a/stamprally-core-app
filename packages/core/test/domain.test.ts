@@ -30,6 +30,7 @@ describe("public configuration transformation", () => {
       id: "rally",
       version: "1",
       title: "Rally",
+      availability: { startsAt: "2026-01-02T00:00:00Z", endsAt: "2026-01-03T00:00:00Z" },
       metadata: { old: true },
       publicMetadata: { visible: true },
       spots: [
@@ -53,10 +54,12 @@ describe("public configuration transformation", () => {
       ],
     };
     const publicConfig = toPublicConfig(config);
+    expect(publicConfig.availability).toEqual(config.availability);
     expect(publicConfig.metadata).toEqual({ visible: true });
     expect(publicConfig.spots[0]?.conditions).toEqual([{ type: "passcode" }]);
     expect(validatePublicConfigSafety(publicConfig).safe).toBe(false);
     const sanitized = sanitizeAdminConfig(config);
+    expect(sanitized.availability).toEqual(config.availability);
     expect(sanitized.spots[0]?.metadata).toEqual({ nested: {} });
     expect(sanitized.rewards[0]).not.toHaveProperty("digitalContentUrl");
     expect(validatePublicConfigSafety(sanitized)).toEqual({ safe: true, leakedKeys: [] });

@@ -1,10 +1,76 @@
 import { act, cleanup, fireEvent, render, renderHook, screen } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AdminRallyEditor, JsonConfigIO, SpotItemForm, useAdminRallyEditor } from "../src/index.js";
+import {
+  AdminRallyEditor,
+  CompletionConditionForm,
+  JsonConfigIO,
+  RallyAvailabilityForm,
+  SpotItemForm,
+  useAdminRallyEditor,
+} from "../src/index.js";
 
 afterEach(() => cleanup());
 
 describe("AdminRallyEditor", () => {
+  it("edits rally times and completion defaults through reusable forms", () => {
+    const config = {
+      id: "r",
+      version: "1",
+      title: "Rally",
+      spots: [{ id: "a", orderIndex: 0, name: "A", conditions: [] }],
+      rewards: [],
+    };
+    const onChange = vi.fn();
+    render(
+      <>
+        <RallyAvailabilityForm
+          config={config}
+          onChange={onChange}
+          locale="en"
+          defaultTimezone="Asia/Tokyo"
+        />
+        <CompletionConditionForm
+          config={config}
+          onChange={onChange}
+          locale="en"
+          initialCount={3}
+          initialStampIds={[]}
+        />
+      </>,
+    );
+    fireEvent.change(screen.getByLabelText("startsAt"), { target: { value: "2026-10-01T09:30" } });
+    expect(onChange.mock.lastCall?.[0].availability).toEqual({
+      startsAt: "2026-10-01T00:30:00.000Z",
+      timezone: "Asia/Tokyo",
+    });
+    fireEvent.change(screen.getByLabelText("Condition"), { target: { value: "stamp_count" } });
+    expect(onChange.mock.lastCall?.[0].completion.condition).toEqual({
+      type: "stamp_count",
+      count: 3,
+    });
+    fireEvent.change(screen.getByLabelText("Condition"), { target: { value: "stamps" } });
+    expect(onChange.mock.lastCall?.[0].completion.condition).toEqual({
+      type: "stamps",
+      stampIds: [],
+    });
+  });
+  it("keeps focus in the passcode field while editing a condition", () => {
+    function Fixture() {
+      const [spot, setSpot] = useState<SpotItem>({
+        id: "s",
+        orderIndex: 0,
+        name: "Spot",
+        conditions: [{ type: "passcode", code: "" }],
+      });
+      return <SpotItemForm spot={spot} onChange={setSpot} />;
+    }
+    render(<Fixture />);
+    const input = screen.getByLabelText("Passcode");
+    input.focus();
+    fireEvent.change(input, { target: { value: "OPEN" } });
+    expect(document.activeElement).toBe(input);
+  });
   it("shows preflight findings and edits structured spot hours", () => {
     const onChange = vi.fn();
     render(
@@ -161,3 +227,5 @@ describe("AdminRallyEditor", () => {
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ prerequisites: ["s1"] }));
   });
 });
+
+import type { SpotItem } from "@stamprally/core";

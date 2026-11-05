@@ -39,6 +39,26 @@ const config = toPublicConfig({
 } satisfies AdminRallyConfig);
 
 describe("StampRallyClient", () => {
+  it("rejects check-ins outside rally and spot hours", async () => {
+    const timed = { ...config, availability: { startsAt: "2026-01-02T00:00:00Z" } };
+    const client = new StampRallyClient(timed, { storage: new InMemoryStorage(), userId: "user" });
+    expect(await client.checkIn("passcode", "OPEN", { now: "2026-01-01T00:00:00Z" })).toMatchObject(
+      { error: { code: "RALLY_UNAVAILABLE" } },
+    );
+    const spotClient = new StampRallyClient(
+      {
+        ...config,
+        spots: config.spots.map((spot) => ({
+          ...spot,
+          availability: { timezone: "UTC", weekly: [] },
+        })),
+      },
+      { storage: new InMemoryStorage(), userId: "user" },
+    );
+    expect(
+      await spotClient.checkIn("passcode", "OPEN", { now: "2026-01-01T00:00:00Z" }),
+    ).toMatchObject({ error: { code: "SPOT_UNAVAILABLE" } });
+  });
   it("runs named custom validators and includes the current state in context", async () => {
     const validator = vi.fn(
       async (context: { proofData: unknown; spotId: string; userState: unknown }) => {

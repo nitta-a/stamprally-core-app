@@ -18,6 +18,7 @@ export type { ClaimTicketOptions } from "./rewards.js";
 export {
   createClaimTicketNumber,
   createUniqueClaimTicketNumber,
+  getRewardAvailability,
   issueClaimTicketNumber,
 } from "./rewards.js";
 export type {
